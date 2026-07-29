@@ -2,7 +2,11 @@
 
 **Status**: 🟡 Planned — 2026-07-29. This is the **prerequisite project** for [09-play-store-launch](./09-play-store-launch.md); the store submission is its tail end, not its substance.
 **Scope**: turn the existing portal SPA into a signed Android app that a coach can install and log into. Everything up to "we have a working, signed AAB on a real phone."
-**Out of scope**: store listing assets, Data safety form, review, rollout — those are doc 09 phases 4–5.
+**Out of scope**: store listing assets, Data safety form, review, rollout — those are doc 09 phases 3–4. **Also out of scope: zero-touch first-run auth** (D-014 / `bd-2357`) — see below.
+
+> **Scope note added 2026-07-29 (operator).** The goal is that a teacher installs the app and it "just works" with nothing to configure. That is **not part of this wrap**: the portal is login-gated and passwords are issued through a one-time WhatsApp setup link, so a fresh install necessarily lands on a login screen today. Wrap first; design the first-run flow after. This doc therefore targets **"installs, runs, and can log in"** — not "installs and is already logged in."
+>
+> Why it can't be a config tweak: a coach's route to credentials is WhatsApp registration → `/portal/setup/{token}` (7-day expiry) → set password → log in with phone + password. Nothing in the Capacitor layer can conjure a session. The enabler when we do tackle it is that the WhatsApp `/portal` command is **re-requestable and idempotent** — activated users get a login link, unactivated get a fresh setup link — so a deep-link-to-session exchange is the most likely design. Recorded, not built.
 **Tracking**: `bd-2343` (shell), `bd-2344`–`bd-2348` (blockers), `bd-2351` (signing hygiene), + `bd-2353`–`bd-2356` (below)
 
 ---
@@ -142,8 +146,8 @@ Deliverable: a signed AAB that installs on a physical device and reaches the por
 
 Emulator is for iteration; sign-off is on a physical Android phone.
 
-1. Login succeeds against production portal API.
-2. **Session survives force-close and reopen** (the 2.3 gate).
+1. Login succeeds against the production portal API — **using credentials set up beforehand via the WhatsApp link**. Manual login at this stage is expected, not a failure (D-014).
+2. **Session survives force-close and reopen** (the 2.3 gate) — this is the test that the cookie fix actually works, and it is also the groundwork for zero-touch later: a session that persists correctly is what makes "already logged in on reopen" possible at all.
 3. Dashboard, lesson plans, curriculum, training, coaching all load real data.
 4. Back button navigates, exits only from root.
 5. WhatsApp link opens the app/browser, not a dead WebView.
@@ -165,6 +169,7 @@ Exit criterion for 09a → 09: **all seven green on real hardware.** Only then i
 | Build pipeline change breaks the coach portal deploy | Option A — don't touch the live deploy path during this project |
 | `android/` trips CI secret-scan / hygiene guards | Checked before commit (`bd-2355`) |
 | Keystore leaks into this repo | Gitignore + env-sourced secrets; fail loudly (`bd-2351`) |
+| Wrap ships, then zero-touch auth forces a rethink of the session design | The cookie work in 2.3 is the foundation either way — a persistent session is a prerequisite for any auto-login design, so this work is not wasted. Keep the auth path in 2.3 option (b)-friendly if it's cheap to do so (`bd-2357`) |
 | JDK/AGP mismatch burns a day | Phase 0 pins JDK 17 up front |
 
 ## Effort

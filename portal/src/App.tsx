@@ -3,6 +3,7 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { isPortalTarget } from "@/lib/runtime";
 import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import Index from "./pages/Index";
@@ -27,7 +28,9 @@ const queryClient = new QueryClient();
 
 const App = () => {
   const { i18n } = useTranslation();
-  const isPortalSubdomain = window.location.hostname.startsWith('portal.');
+  // In the Android app the WebView host is `localhost`, so a hostname check
+  // alone would render the marketing splash instead of the portal.
+  const isPortalSubdomain = isPortalTarget();
 
   useEffect(() => {
     // Update the lang attribute on the HTML element

@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">NIETE</string>
+    <string name="title_activity_main">NIETE</string>
+    <string name="package_name">pk.edu.niete</string>
+    <string name="custom_url_scheme">pk.edu.niete</string>
+</resources>

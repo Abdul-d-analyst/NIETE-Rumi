@@ -13,6 +13,8 @@
 | D-010 | **Replace the existing `pk.edu.niete` Play Store listing** — do not create a new one | Package name and signing key are FIXED, not chosen. See "The two immovable constraints" below. |
 | D-011 | **Android only** for v1. iOS explicitly considered and deferred | No Apple Developer account. Keep the Capacitor iOS path un-poisoned so adding it later is config, not rework (`bd-2352`). |
 | D-012 | **Thin wrapper first** — online-only. Offline caching is a later release | No Dexie, no service worker, no push in v1. Ship distribution, then decide offline from real usage. |
+| D-013 | **Clean break — existing user data is expendable** (operator, 2026-07-29) | No data migration, no account mapping from the old NIETE app. Whoever wants the new app registers via WhatsApp like any new teacher. Removes the blocking active-installs gate. |
+| D-014 | **Zero-touch first run is a GOAL, deferred** (operator, 2026-07-29) | "Install and it works" is desired but **out of scope for the wrap**. Wrap first, decide the first-run auth flow after. Tracked as `bd-2357`. |
 
 ### D-010 is the load-bearing decision
 
@@ -42,7 +44,9 @@ This is a **content swap on an existing listing**, delivered as a normal version
 
 - Same package, higher `versionCode` ⇒ existing NIETE users get it as an **app update**, not a new install.
 - The old app's UI is entirely replaced by the Rumi portal WebView.
-- **This is a user-visible product change for whoever already has the old app installed.** That population needs to be checked in Play Console (Statistics → active installs) before shipping. If it is non-trivial, the release should be staged (see phase 5) rather than pushed at 100%.
+- It is a user-visible product change for whoever has the old app — but per **D-013 that is accepted**: no migration, no account mapping, and losing their old data is fine. They register via WhatsApp like any new teacher.
+
+Because of D-013 the active-installs count is **no longer a blocking gate**. It is still worth a glance for comms purposes (a heads-up notice costs little), but it does not hold up the release.
 
 ---
 
@@ -141,10 +145,10 @@ No code. Get these facts from Play Console before writing a build:
 
 1. Confirm the listing's package is `pk.edu.niete` and we have release access to it.
 2. Record whether **Play App Signing** is on, and the expected signing-cert SHA-256. Compare to the fingerprint above.
-3. Read current **active installs** for the old app — this sizes the "existing users get a totally different app" risk.
-4. Note the highest `versionCode` Play has ever accepted (may exceed the repo's `1126`).
+3. Note the highest `versionCode` Play has ever accepted (may exceed the repo's `1126`).
+4. *(Informational only, per D-013)* glance at active installs — for comms, not as a gate.
 
-**Stop and reassess if**: the fingerprint doesn't match, or the active-install count is large enough that replacing the app in place needs NIETE's sign-off first.
+**Stop and reassess if**: the fingerprint doesn't match, or we don't hold release access. (The active-install concern is retired by D-013.)
 
 ### Phases 2–3 — Capacitor wrapping → **see [09a-capacitor-wrapping.md](./09a-capacitor-wrapping.md)**
 
@@ -183,7 +187,8 @@ Upload to **internal testing** → verify login/session on real devices → **cl
 |---|---|---|
 | Signing-key mismatch | Upload permanently rejected for that listing | Phase 1 verifies the fingerprint before any build |
 | Session cookie dies in WebView | Login loop; app is unusable while looking "shipped" | Prove on a physical device in phase 2, before store upload |
-| Existing NIETE users get a different app | Confusing forced change to a live audience | Size installs in phase 1; staged rollout; NIETE sign-off if population is material |
+| ~~Existing NIETE users get a different app~~ | **Retired by D-013** — data loss accepted, clean break, no migration | Optional courtesy notice only |
+| Fresh install lands on a password login | Contradicts the "install and it works" goal — the app is login-gated and credentials come from a WhatsApp one-time link, so a new user has no password to type | **Deliberately deferred (D-014, `bd-2357`)** — wrap first, then design the first-run flow. Not a wrap blocker |
 | Committed signing key | Anyone with repo access can sign as NIETE | `bd-2351`; do not propagate the pattern into this repo |
 | Data safety form inaccurate | Rejection or a compliance issue on teacher PII | Fill from the actual API surface, not from memory |
 | Review latency | ~days, and first submissions often bounce | Start phase 4 paperwork during phase 2 |
