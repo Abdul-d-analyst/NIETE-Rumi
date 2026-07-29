@@ -26,7 +26,7 @@
 
 const mewaka = require('../coaching/frameworks/mewaka-framework');
 const hots = require('../coaching/frameworks/hots-framework');
-const fico = require('../coaching/frameworks/fico-framework'); // FEAT-102 — ICT/NIETE canonical FICO (26 ind, sections B/C/D/F, 1-4, max 104)
+const fico = require('../coaching/frameworks/fico-framework'); // FEAT-102 — ICT/NIETE canonical FICO V3 (37 ind, sections B/C/D/F, 1-4, max 148)
 
 const OBSERVE_FRAMEWORK_KEYS = ['mewaka', 'hots', 'fico'];
 
