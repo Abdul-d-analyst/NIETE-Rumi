@@ -25,6 +25,7 @@ const supabase = require('../shared/config/supabase');
 const { logToFile } = require('../shared/utils/logger');
 const WhatsAppService = require('../shared/services/whatsapp.service');
 const CoachingJobQueueService = require('../shared/services/coaching/coaching-job-queue.service');
+const { runSonioxCleanup } = require('../shared/services/soniox-cleanup.service');
 
 // Coaching thresholds (in milliseconds)
 const COACHING_REMINDER_THRESHOLD_MS = 2 * 60 * 60 * 1000;  // 2 hours
@@ -48,6 +49,16 @@ async function main() {
     // Process coaching sessions
     const coachingResults = await processStaleCoachingSessions();
     console.log('📊 Coaching results:', coachingResults);
+
+    // bd-2378: purge old Soniox transcriptions + files so the account never
+    // fills up (~2000) and starts failing every transcription. Best-effort —
+    // never fails the cron.
+    try {
+      const sonioxResults = await runSonioxCleanup();
+      console.log('🧹 Soniox cleanup:', sonioxResults);
+    } catch (cleanupErr) {
+      console.error('⚠️ Soniox cleanup failed (non-fatal):', cleanupErr.message);
+    }
 
     // Future: Process reading assessments
     // const readingResults = await processStaleReadingAssessments();
