@@ -159,7 +159,49 @@ export const portal = {
   }> => {
     const response = await api.get(`/video/${id}`);
     return response.data;
-  }
+  },
+
+  // Assessment Generator (browser surface for the UG_EG-backed engine).
+  // generate → { jobId }; then poll getAssessmentStatus until completed/failed.
+  generateAssessment: async (
+    spec: AssessmentSpec
+  ): Promise<{ success: boolean; jobId?: string; error?: string }> => {
+    const response = await api.post('/assessment/generate', spec);
+    return response.data;
+  },
+
+  getAssessmentStatus: async (
+    jobId: string,
+    format: 'pdf' | 'docx' = 'pdf'
+  ): Promise<AssessmentStatus> => {
+    const response = await api.get(`/assessment/status/${jobId}`, { params: { format } });
+    return response.data;
+  },
+};
+
+// ── Assessment Generator types ────────────────────────────────────────────
+export type AssessmentQuestionType = {
+  id: string;
+  count: number;
+  category?: 'objective' | 'subjective';
+};
+
+export type AssessmentSpec = {
+  generationType: 'exam' | 'class_assessment';
+  grade: number;
+  subject: string;
+  pageRanges: string;
+  contentSource: 'seen' | 'unseen';
+  questionTypes: AssessmentQuestionType[];
+  format?: 'pdf' | 'docx';
+};
+
+export type AssessmentStatus = {
+  success: boolean;
+  status: 'pending' | 'processing' | 'completed' | 'failed';
+  downloadUrl?: string;
+  filename?: string;
+  error?: string;
 };
 
 export default api;
