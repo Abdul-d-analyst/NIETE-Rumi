@@ -124,9 +124,9 @@ Doc 07 flags it and it is a real incident from `taleemabad-core`: **Capacitor's 
 The reference keystore is **committed to git with plaintext passwords in `build.gradle`**:
 
 ```gradle
-storeFile file('./keystore/niete-app.jks')
-storePassword 'nieteapp'   // in the repo
-keyPassword  'nieteapp'    // in the repo
+storeFile file('./keystore/<app>.jks')   // key committed to the repo
+storePassword '<redacted — a short plaintext literal>'
+keyPassword  '<redacted — same literal>'
 ```
 
 `niete-app.jks` is git-tracked and not ignored. That key controls the identity of a published government-facing app until **2049**; anyone with repo access can sign an app that Play and devices will accept as NIETE.
