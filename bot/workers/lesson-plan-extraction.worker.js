@@ -11,6 +11,8 @@ const { downloadFromR2, uploadLessonPlanBuffer, buildR2PublicUrl } = require('..
 const { AWSTextractService } = require('../shared/services/aws-textract.service');
 const { OPENAI_API_KEY } = require('../shared/utils/constants');
 const WhatsAppService = require('../shared/services/whatsapp.service');
+const { isLikelyLessonPlan } = require('../shared/services/coaching/lesson-plan-classifier');
+const { getCoachingMessage } = require('../shared/config/coaching-messages');
 
 class LessonPlanExtractionWorker {
   static openai = null;
@@ -121,6 +123,32 @@ class LessonPlanExtractionWorker {
           detectedType,
           textLength: extractedText?.length || 0
         });
+      }
+
+      // bd-2372: guard against a non-lesson-plan document (a leave letter, a
+      // notice) being silently accepted as a plan. If the parsed content shows
+      // no lesson-plan signal, tell the teacher quickly and don't attach it —
+      // the classroom-audio analysis still proceeds without an LP.
+      if (isLikelyLessonPlan(structuredData) === false) {
+        await supabase
+          .from('coaching_sessions')
+          .update({
+            lesson_plan_excerpt: excerpt,
+            lesson_plan_structured: null,
+            lesson_plan_word_count: wordCount,
+            has_lesson_plan: false,
+            lesson_plan_extraction_status: 'not_lesson_plan',
+            lesson_plan_extraction_error: null,
+            lesson_plan_format: normalizedFormat
+          })
+          .eq('id', coachingSessionId);
+        await this.notifyNotLessonPlan(coachingSessionId);
+        logToFile('🚫 Uploaded document is not a lesson plan — skipped attaching', {
+          coachingSessionId,
+          subject: structuredData?.subject || null,
+          wordCount
+        });
+        return;
       }
 
       const updatePayload = {
@@ -267,7 +295,9 @@ class LessonPlanExtractionWorker {
 
       const prompt = `Extract structured lesson plan information from the following text. Return ONLY valid JSON.
 
-LESSON PLAN TEXT:
+First decide whether this document is actually a LESSON PLAN (teaching objectives, activities, materials, assessment for a class) versus something else the teacher sent by mistake (a leave/application letter, a notice, a memo, a blank form, an unrelated document). Set "is_lesson_plan" accordingly. If it is not a lesson plan, still return the JSON but leave the lesson-plan arrays empty.
+
+DOCUMENT TEXT:
 ${truncated}
 
 Return JSON with these fields:
@@ -349,6 +379,7 @@ Return JSON with these fields:
   "grade_level": "",
   "subject": "",
   "topic": "",
+  "is_lesson_plan": true/false,
   "objectives_found": true/false,
   "prior_knowledge_found": true/false,
   "materials_found": true/false,
@@ -429,6 +460,40 @@ Return JSON with these fields:
     }
 
     return 'pdf';
+  }
+
+  static async notifyNotLessonPlan(coachingSessionId) {
+    try {
+      const { data, error } = await supabase
+        .from('coaching_sessions')
+        .select('id, users:users(phone_number, preferred_language)')
+        .eq('id', coachingSessionId)
+        .single();
+
+      if (error || !data?.users?.phone_number) {
+        logToFile('⚠️ Unable to notify teacher that the document is not a lesson plan', {
+          coachingSessionId,
+          error: error?.message
+        });
+        return;
+      }
+
+      const lang = data.users.preferred_language || 'en';
+      const message = getCoachingMessage('lessonPlan_notLessonPlan', lang);
+
+      if (process.env.OFFLINE_REPLAY === 'true') {
+        logToFile('ℹ️ Skipping not-a-lesson-plan notification (offline replay)', { coachingSessionId });
+        return;
+      }
+
+      await WhatsAppService.sendMessage(data.users.phone_number, message);
+      logToFile('📣 Notified teacher that the document is not a lesson plan', { coachingSessionId });
+    } catch (notifyError) {
+      logToFile('⚠️ Failed to send not-a-lesson-plan notification', {
+        coachingSessionId,
+        error: notifyError.message
+      });
+    }
   }
 
   static async notifyFormatIssue(coachingSessionId) {
