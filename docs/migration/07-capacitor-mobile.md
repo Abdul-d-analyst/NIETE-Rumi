@@ -1,6 +1,14 @@
-# 07 — Capacitor Mobile App (Deferred)
+# 07 — Capacitor Mobile App (Superseded)
 
-**Status**: 🟢 Deferred — foundation exists. **Not scheduled.**
+> **⚠️ SUPERSEDED 2026-07-29** — the operator asked for the Play Store deployment, which is the "when someone asks for it" trigger below. The active plan of record is **[09-play-store-launch.md](./09-play-store-launch.md)**.
+>
+> Two things in this doc are now known to be **wrong** and are corrected in doc 09:
+> - The app ID is **not** a free choice (`com.rumi.<region>`). We are **replacing the existing `pk.edu.niete` listing**, so the package name and signing key are inherited and immovable.
+> - iOS is not an open question for v1 — it is deferred (D-011).
+>
+> Keep this doc for the "why deferred" rationale and the Taleemabad reference pointers only.
+
+**Status**: 🔴 Superseded by [09](./09-play-store-launch.md) — foundation exists.
 **Depends on**: [00-scope-and-decisions](./00-scope-and-decisions.md) D-001 phase 2
 **Foundation (verified 2026-07-11)**: the web portal is live at [`https://portal-production-6a508.up.railway.app`](https://portal-production-6a508.up.railway.app) — Vite/React SPA served from `dashboard/portal-frontend/dist/` alongside the `/api/portal/*` Express API. That is the artifact Capacitor would eventually wrap. See [DEPLOYMENT.md § Portal deploy](./DEPLOYMENT.md) for the topology.
 **Decision (2026-07-11, operator)**: web-portal-only for now. Capacitor packaging is on the "when someone asks for it" list — not the "scheduled" list. The doc below stays as a plan-of-record for that eventual request.
