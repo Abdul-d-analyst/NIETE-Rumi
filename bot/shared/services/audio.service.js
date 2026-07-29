@@ -16,6 +16,7 @@ const {
 } = require('../utils/constants');
 const { logToFile } = require('../utils/logger');
 const OpenAI = require('openai');
+const { planWhisperChunks, WHISPER_UPLOAD_CAP_BYTES } = require('./whisper-chunk-planner');
 
 // Set ffmpeg and ffprobe paths
 ffmpeg.setFfmpegPath(ffmpegPath);
@@ -379,7 +380,103 @@ class AudioService {
    * @returns {Promise<Object>} Transcription result with text and language
    * @private
    */
+  /**
+   * bd-2377: Whisper is the LAST resort in the cascade and caps uploads at 25MB.
+   * A long classroom recording (≫25MB) that reaches it — as happened in the
+   * 2026-07-23 Soniox outage — used to throw "Audio file too large" and fail the
+   * whole session. When the file is over the cap we split it into sub-cap chunks,
+   * transcribe each, and stitch the text back together so the fallback can catch
+   * a long recording. Under the cap, behaviour is unchanged (single upload).
+   */
   static async _transcribeWithWhisper(audioPath) {
+    let sizeBytes = 0;
+    try { sizeBytes = fs.statSync(audioPath).size; } catch (_e) { /* stat may fail — treat as single */ }
+
+    if (sizeBytes <= WHISPER_UPLOAD_CAP_BYTES) {
+      return this._whisperSingleFile(audioPath);
+    }
+
+    const durationSec = await this._ffprobeDurationSeconds(audioPath);
+    const plan = planWhisperChunks(sizeBytes, durationSec);
+    if (plan.length === 1) {
+      // Duration unknown → can't split; try the single upload (may 413, but the
+      // caller already treats that as a hard failure — no worse than before).
+      return this._whisperSingleFile(audioPath);
+    }
+
+    logToFile('🎙️ Whisper: audio over 25MB cap — chunking for the fallback', {
+      sizeMB: (sizeBytes / (1024 * 1024)).toFixed(1),
+      durationSec,
+      chunks: plan.length,
+    });
+
+    const texts = [];
+    let detectedLanguage = null;
+    const tmpChunks = [];
+    try {
+      for (let i = 0; i < plan.length; i++) {
+        const { startSec, durationSec: dur } = plan[i];
+        const chunkPath = path.join(TEMP_DIR, `whisper_chunk_${Date.now()}_${i}.mp3`);
+        tmpChunks.push(chunkPath);
+        await this._extractAudioSegment(audioPath, startSec, dur, chunkPath);
+        const res = await this._whisperSingleFile(chunkPath);
+        if (res && res.text) texts.push(String(res.text).trim());
+        if (!detectedLanguage && res && res.language) detectedLanguage = res.language;
+      }
+    } finally {
+      for (const c of tmpChunks) {
+        try { if (fs.existsSync(c)) fs.unlinkSync(c); } catch (_e) { /* best-effort cleanup */ }
+      }
+    }
+
+    const combined = texts.filter(Boolean).join(' ').trim();
+    if (!combined) {
+      throw new Error('Whisper: chunked transcription produced no text');
+    }
+    logToFile('✅ Whisper chunked transcription complete', {
+      chunks: plan.length,
+      textLength: combined.length,
+      detectedLanguage: detectedLanguage || 'unknown',
+    });
+    return {
+      text: combined,
+      language: detectedLanguage || 'en',
+      tokens: [],
+      source: 'whisper-chunked',
+      metadata: { model: 'whisper-1', chunks: plan.length },
+    };
+  }
+
+  /** ffprobe the audio duration in seconds; 0 if it can't be determined. */
+  static _ffprobeDurationSeconds(audioPath) {
+    return new Promise((resolve) => {
+      try {
+        ffmpeg.ffprobe(audioPath, (err, metadata) => {
+          const dur = metadata && metadata.format && metadata.format.duration;
+          resolve(err || !dur ? 0 : Math.ceil(dur));
+        });
+      } catch (_e) {
+        resolve(0);
+      }
+    });
+  }
+
+  /** Cut [startSec, startSec+durationSec) out of audioPath into outPath (mp3). */
+  static _extractAudioSegment(audioPath, startSec, durationSec, outPath) {
+    return new Promise((resolve, reject) => {
+      ffmpeg(audioPath)
+        .setStartTime(startSec)
+        .setDuration(durationSec)
+        .audioCodec('libmp3lame')
+        .format('mp3')
+        .output(outPath)
+        .on('end', () => resolve(outPath))
+        .on('error', (err) => reject(err))
+        .run();
+    });
+  }
+
+  static async _whisperSingleFile(audioPath) {
     try {
       logToFile('🎙️ Starting OpenAI Whisper transcription...', { audioPath });
 
