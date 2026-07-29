@@ -86,7 +86,11 @@ function ltrTrend(points, peak, w = 700, h = 110) {
 function buildHeroReportHtml(vm) {
   const lang = vm.language || 'en';
   const RTL = lang === 'ur' || lang === 'ar';
-  const C = CHROME[lang] || CHROME.en;
+  // The fixed CHROME (celebration eyebrow, section labels, "one thing to try next
+  // class") always renders in English, even for ur/ar/sw reports. Only the
+  // LLM-generated BODY (affirmation, moment, strength copy) stays in `lang`, and
+  // layout stays RTL for ur/ar. The card heading is chrome, so it is English too.
+  const C = CHROME.en;
   const headFam = RTL ? (lang === 'ar' ? `'NaskhArabic',serif` : `'NastaliqUrdu',serif`) : `'Fraunces',serif`;
   const bodyFam = RTL ? (lang === 'ar' ? `'NaskhArabic',serif` : `'NastaliqUrdu',serif`) : `'Lexend',sans-serif`;
   const dir = RTL ? 'rtl' : 'ltr';
