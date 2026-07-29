@@ -235,7 +235,21 @@ if (!sessionStore) {
 }
 
 // SECURITY: Session configuration with enhanced security
-// UPDATED: sameSite changed to 'lax' since frontend and backend are now on same domain
+//
+// sameSite history: originally 'none' (frontend and backend on separate
+// domains), then 'lax' once the SPA was served from the same domain.
+//
+// The Capacitor mobile app reopens the cross-origin case: its WebView origin is
+// `https://localhost` while the API stays on the portal host, so a 'lax' cookie
+// is never stored or returned and login silently fails on the request after
+// /login. 'none' is required for the app to hold a session at all.
+//
+// Kept behind SESSION_COOKIE_SAMESITE so it can be flipped back without a code
+// change. 'none' mandates Secure (already set) and is only sent over HTTPS.
+// Note this applies to ALL portal sessions, web included — CSRF exposure is
+// bounded by the explicit CORS allowlist above (no wildcard origin) plus
+// httpOnly, but it is a real widening versus 'lax'.
+const _sessionSameSite = process.env.SESSION_COOKIE_SAMESITE || 'none';
 app.use(session({
   store: sessionStore, // Redis store if available, otherwise MemoryStore
   secret: process.env.SESSION_SECRET || 'your-secret-key-change-in-production',
@@ -246,8 +260,7 @@ app.use(session({
     secure: true, // HTTPS only
     httpOnly: true, // Prevents client-side JS from accessing cookie
     maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-    sameSite: 'lax', // CHANGED: 'lax' works for same-domain setup (was 'none' for cross-origin)
-    // NOTE: Now serving frontend from same domain, no CORS needed for cookies
+    sameSite: _sessionSameSite, // 'none' so the Capacitor app can hold a session; see note above
   }
 }));
 
@@ -337,7 +350,14 @@ const portalCorsOptions = {
     'http://localhost:5173', // Vite dev server default port
     'http://localhost:3000',
     'http://127.0.0.1:5173',
-    'http://127.0.0.1:3000'
+    'http://127.0.0.1:3000',
+    // Capacitor Android/iOS app origins. The native WebView serves the bundle
+    // from a local scheme with NO port, so these are distinct from the Vite dev
+    // entries above. Without them the app's preflight gets no
+    // Access-Control-Allow-Origin and every API call is blocked before it is
+    // sent — which presents as "correct password won't log in".
+    'https://localhost', // Capacitor Android (androidScheme: 'https')
+    'capacitor://localhost' // Capacitor iOS default scheme
   ],
   methods: ['GET', 'POST'],
   allowedHeaders: ['Content-Type'],
