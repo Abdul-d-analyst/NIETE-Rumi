@@ -146,29 +146,23 @@ No code. Get these facts from Play Console before writing a build:
 
 **Stop and reassess if**: the fingerprint doesn't match, or the active-install count is large enough that replacing the app in place needs NIETE's sign-off first.
 
-### Phase 2 — Fix the portal for native (the real work, ~1–1.5 days) — `bd-2344`–`bd-2348`
+### Phases 2–3 — Capacitor wrapping → **see [09a-capacitor-wrapping.md](./09a-capacitor-wrapping.md)**
 
-TDD per Rule 6: each of the four blockers gets a failing test first — they are all deterministic, testable units (host-gate resolution, base-URL resolution, back-button routing).
+The engineering work — toolchain, the four code blockers, the Capacitor shell, and physical-device verification — is a project in its own right and has its own plan of record. **Do not plan it from this doc**; 09a is authoritative.
 
-1. Explicit app-target flag replacing the hostname sniff (`bd-2344`).
-2. Absolute, env-driven API base URL (`bd-2346`).
-3. Cookie/session strategy implemented and **proven on a physical Android device** (`bd-2345`).
-4. Back button, external links, production logging (`bd-2347`, `bd-2348`).
+Summary only:
 
-All four are guarded so **web behaviour is unchanged** — the same `portal/` build still serves the website.
+| 09a phase | Work | Effort |
+|---|---|---|
+| 0 | Toolchain — Android SDK, JDK 17 (not the local JDK 25), portal deps (`bd-2353`) | 1–2h, blocking |
+| 1 | Build-pipeline decision — app builds from `portal/`, never the committed `dist/` (`bd-2354`) | 30 min |
+| 2 | The four blockers (`bd-2344`–`bd-2348`), each guarded so web behaviour is unchanged | 1–1.5 days |
+| 3 | Capacitor shell with the inherited app identity + env-sourced signing (`bd-2343`, `bd-2351`, `bd-2355`) | 0.5 day |
+| 4 | Physical-device verification — 7 checks (`bd-2356`) | 0.5 day |
 
-### Phase 3 — Add Capacitor (~0.5 day) — `bd-2343`
+**~2.5–3 days.** Phase 4 below (listing, policy, Data safety) can run in parallel from 09a phase 2 onward, since Google review is calendar time.
 
-```
-cd portal
-npm i -D @capacitor/cli && npm i @capacitor/core @capacitor/android
-npx cap init NIETE pk.edu.niete --web-dir=dist   # appId MUST be pk.edu.niete
-npx cap add android
-```
-
-Then: `appName: 'NIETE'`, `loggingBehavior: 'production'`, `androidScheme: 'https'`, `hostname: 'localhost'` (mirror the reference), `versionCode` starting above the Play-observed max, minSdk 24 / targetSdk 35, and a `build-aab.sh` modelled on the existing one **minus** the committed-secret pattern (`bd-2351`).
-
-Deliverable: a signed AAB that installs on a real device and reaches the portal login screen.
+**Gate into the store work**: all seven device checks green on real hardware. Store paperwork before that is premature.
 
 ### Phase 4 — Store listing + compliance (~0.5 day + review time) — `bd-2349`, `bd-2350`
 
