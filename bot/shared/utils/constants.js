@@ -102,6 +102,11 @@ const UPLIFT_BALOCHI_VOICE_ID = process.env.UPLIFT_VOICE_ID_BAL || 'v_bl1de2f7';
 const ELEVENLABS_VOICE_ID = process.env.ELEVENLABS_VOICE_ID || 'cgSgspJ2msm6clMCkdW9'; // Jessica voice (English)
 const ELEVENLABS_SPANISH_VOICE_ID = process.env.ELEVENLABS_VOICE_ID_ES || 'vYui54mlc1I9tFZBBz4i'; // Cony Iglesias (Spanish)
 const ELEVENLABS_ARABIC_VOICE_ID = process.env.ELEVENLABS_VOICE_ID_AR || '4wf10lgibMnboGJGCLrP'; // Farah (Arabic)
+// bd-2375 (FEAT-106 #4b): Urdu coaching voice is Sara — "Warm Storyteller, Urdu &
+// Hindi" on eleven_v3. This is the canonical Urdu voice locked by the LP-voicenotes
+// V20 work (Jessica + Roman-Urdu was wrong; Sara + Nastaliq is right). Replaces the
+// Uplift "Info/Education" voice that mangled code-switched English tokens.
+const ELEVENLABS_URDU_VOICE_ID = process.env.ELEVENLABS_VOICE_ID_UR || '9cI5mhBtM4WtQ9Fo6jWQ'; // Sara (Urdu)
 
 // Voice Model Routing Configuration
 // Tier 1: Full support (coaching + reading assessment)
@@ -109,7 +114,7 @@ const ELEVENLABS_ARABIC_VOICE_ID = process.env.ELEVENLABS_VOICE_ID_AR || '4wf10l
 const VOICE_MODELS = {
   // Tier 1: Full support
   en: { provider: 'elevenlabs', voiceId: ELEVENLABS_VOICE_ID, supportsEmotionTags: true, tier: 1 },
-  ur: { provider: 'uplift', voiceId: UPLIFT_VOICE_ID, supportsEmotionTags: false, tier: 1 },
+  ur: { provider: 'elevenlabs', voiceId: ELEVENLABS_URDU_VOICE_ID, supportsEmotionTags: false, tier: 1 }, // Sara / eleven_v3 (was Uplift v_8eelc901 — bd-2375)
 
   // Tier 2: Coaching only
   es: { provider: 'elevenlabs', voiceId: ELEVENLABS_SPANISH_VOICE_ID, supportsEmotionTags: true, tier: 2 },
