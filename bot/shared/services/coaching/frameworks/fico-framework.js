@@ -520,7 +520,12 @@ function focusAreaLangDirective(language) {
 // ─── Analysis prompt builder ─────────────────────────────────────────
 
 function buildIndicatorJsonRow(ind) {
-  return `        { "id": "${ind.id}", "name": "${ind.name.replace(/"/g, '\\"')}", "score": <1-4>, "evidence": "Detailed description + Quote: \\\"...\\\"", "timestamp": "exact time" }`;
+  // bd-2369: `evidence_summary` is the ≤500-char gist the human observer sees on
+  // the editable Flow form (Meta caps a TextArea at 600). `evidence` stays FULL
+  // and flows to the teacher's report unchanged. One LLM pass emits both — no
+  // extra call. Keep them consistent: the summary is a faithful compression of
+  // the same moment, never a different judgement.
+  return `        { "id": "${ind.id}", "name": "${ind.name.replace(/"/g, '\\"')}", "score": <1-4>, "evidence": "Detailed description + Quote: \\\"...\\\"", "evidence_summary": "<= 500 chars: the move + its effect on students + one short quote — the gist a reviewer needs to sanity-check the score", "timestamp": "exact time" }`;
 }
 
 function buildAnalysisPrompt(transcript, metadata, lessonPlanStructured, photoAnalysis) {
@@ -597,7 +602,12 @@ EVIDENCE RULES:
 - For EACH indicator, describe what the teacher DID (not what they didn't do)
 - Include English translation of dialogue: Quote: "..."
 - Even for score 1, provide detailed evidence of what was observed
-- For non-applicable Section F rows (subject mismatch), score 1 with evidence noting the mismatch`;
+- For non-applicable Section F rows (subject mismatch), score 1 with evidence noting the mismatch
+- For EACH indicator ALSO write "evidence_summary": a self-contained ≤500-character
+  compression of that indicator's "evidence" — the move, its effect on students, and one
+  short quote. It is the ONLY note the human observer reads on the review form, so it must
+  stand alone and justify the score. Do NOT write "see full note" or truncate mid-sentence;
+  compress. It must never contradict the full "evidence".`;
 }
 
 // ─── Score computation ───────────────────────────────────────────────
