@@ -11,6 +11,8 @@ const {
   UPLIFT_VOICE_ID,
   SONIOX_V3_TIMEOUT,
   SONIOX_V2_TIMEOUT,
+  SONIOX_PRIMARY_MODEL,
+  SONIOX_BACKUP_MODEL,
   TEMP_DIR,
   OPENAI_API_KEY
 } = require('../utils/constants');
@@ -82,12 +84,63 @@ class AudioService {
   /**
    * Attempt transcription with a specific Soniox model version
    * @param {string} fileId - Soniox file ID
-   * @param {string} modelVersion - Model version (stt-async-v3 or stt-async-v2)
+   * @param {string} modelVersion - Soniox async model id (primary or backup, e.g. stt-async-v5 / stt-async-v4)
    * @param {number} timeoutSeconds - Timeout in seconds
    * @param {boolean} enableDiarization - Whether to enable speaker diarization (for classroom audio)
    * @returns {Promise<string>} Transcription text
    * @private
    */
+  /**
+   * Build the Soniox transcription request body. The PRIMARY model gets the
+   * advanced features (language identification, educational context, optional
+   * diarization); the BACKUP model stays basic for speed/robustness.
+   * bd-2377: the "advanced" gate keys off the configured primary model, not a
+   * hardcoded 'stt-async-v3' (which Soniox retired 2026-02-28).
+   * @private
+   */
+  static _buildSonioxRequestBody({ fileId, modelVersion, isPrimary, enableDiarization = false, language = null }) {
+    // Use a specific language hint if provided (reading assessment); otherwise
+    // all supported languages (coaching multi-language audio). Soniox expects
+    // ISO 639-1 codes (e.g. 'pa'), NOT locale codes ('pa-PK') — strip the suffix.
+    const normalizedLanguage = language ? language.split('-')[0] : null;
+    const languageHints = normalizedLanguage ? [normalizedLanguage] : ['en', 'ur', 'es', 'ar', 'pa', 'ta'];
+
+    const requestBody = {
+      file_id: fileId,
+      model: modelVersion,
+      language_hints: languageHints,
+    };
+
+    if (isPrimary) {
+      requestBody.enable_language_identification = true;
+      requestBody.enable_speaker_diarization = !!enableDiarization;
+      if (enableDiarization) {
+        requestBody.speaker_diarization_config = {
+          min_speakers: 2, // At least teacher + students
+          max_speakers: 5  // Teacher + up to 4 student voices
+        };
+      }
+      requestBody.include_words = true; // detailed word-level data (timestamps, language)
+      requestBody.context = {
+        general: [
+          { key: 'domain', value: 'Education' },
+          { key: 'setting', value: 'Classroom observation with 1 teacher and approximately 30 children' },
+          { key: 'participants', value: 'One teacher conducting a lesson with a class of about 30 students' },
+          { key: 'topic', value: 'Classroom teaching, lesson delivery, student learning activities' },
+          { key: 'organization', value: 'Education' }
+        ],
+        text: 'This is a classroom observation recording of a teacher in Pakistan teaching a lesson to approximately 30 students. The recording captures the teacher delivering instruction, asking questions, explaining concepts, and interacting with students. Students may be heard responding to questions, participating in activities, or asking questions. The lesson may cover subjects like science, math, Urdu, English, social studies, or other academic topics taught in Pakistani schools. The teacher may give instructions, provide examples, conduct assessments, and manage classroom activities.',
+        terms: [
+          'school', 'classroom', 'students', 'teacher', 'ustaad', 'taleem',
+          'lesson', 'activity', 'exercise', 'homework', 'question', 'answer',
+          'board', 'copy', 'notebook', 'group work', 'assessment', 'learning objective'
+        ]
+      };
+    }
+
+    return requestBody;
+  }
+
   static async _attemptTranscription(fileId, modelVersion, timeoutSeconds, enableDiarization = false, language = null) {
     let transcriptionId = null;
 
@@ -97,91 +150,19 @@ class AudioService {
         language: language || 'auto-detect'
       });
 
-      // Build request body based on model version
-      // Use specific language hint if provided (reading assessment)
-      // Otherwise use all supported languages (coaching multi-language audio)
-      // Note: Only include languages Soniox supports (pa, ta are supported; sd, bal, ps are NOT)
-      // IMPORTANT: Soniox expects ISO 639-1 codes (e.g., 'pa'), NOT locale codes (e.g., 'pa-PK')
-      // Strip region suffix before sending to Soniox
-      const normalizedLanguage = language ? language.split('-')[0] : null;
-      const languageHints = normalizedLanguage ? [normalizedLanguage] : ['en', 'ur', 'es', 'ar', 'pa', 'ta'];
-
-      const requestBody = {
-        file_id: fileId,
-        model: modelVersion,
-        language_hints: languageHints,
-      };
-
-      logToFile('Language hints configured', {
-        originalLanguage: language,
-        normalizedForSoniox: normalizedLanguage,
-        hints: languageHints,
-        specificLanguage: language !== null,
-        mode: language ? 'single-language (reading)' : 'multi-language (coaching)'
+      const isPrimary = modelVersion === SONIOX_PRIMARY_MODEL;
+      const requestBody = this._buildSonioxRequestBody({
+        fileId, modelVersion, isPrimary, enableDiarization, language,
       });
 
-      // Add advanced features for V3
-      if (modelVersion === 'stt-async-v3') {
-        requestBody.enable_language_identification = true;
-
-        // Only enable speaker diarization for classroom audio (15+ minute recordings)
-        if (enableDiarization) {
-          requestBody.enable_speaker_diarization = true; // Enable speaker separation
-          requestBody.speaker_diarization_config = {
-            min_speakers: 2, // At least teacher + students
-            max_speakers: 5  // Teacher + up to 4 student voices
-          };
-          logToFile('Speaker diarization enabled for classroom audio', {
-            modelVersion,
-            enableDiarization: true
-          });
-        } else {
-          requestBody.enable_speaker_diarization = false;
-          logToFile('Regular transcription without diarization', {
-            modelVersion,
-            enableDiarization: false
-          });
-        }
-
-        requestBody.include_words = true; // ← Request detailed word-level data with timestamps, language
-        requestBody.context = {
-          general: [
-            { key: 'domain', value: 'Education' },
-            { key: 'setting', value: 'Classroom observation with 1 teacher and approximately 30 children' },
-            { key: 'participants', value: 'One teacher conducting a lesson with a class of about 30 students' },
-            { key: 'topic', value: 'Classroom teaching, lesson delivery, student learning activities' },
-            { key: 'organization', value: 'Education' }
-          ],
-          text: 'This is a classroom observation recording of a teacher in Pakistan teaching a lesson to approximately 30 students. The recording captures the teacher delivering instruction, asking questions, explaining concepts, and interacting with students. Students may be heard responding to questions, participating in activities, or asking questions. The lesson may cover subjects like science, math, Urdu, English, social studies, or other academic topics taught in Pakistani schools. The teacher may give instructions, provide examples, conduct assessments, and manage classroom activities.',
-          terms: [
-            'school',
-            'classroom',
-            'students',
-            'teacher',
-            'ustaad',
-            'taleem',
-            'lesson',
-            'activity',
-            'exercise',
-            'homework',
-            'question',
-            'answer',
-            'board',
-            'copy',
-            'notebook',
-            'group work',
-            'assessment',
-            'learning objective'
-          ]
-        };
-
-        logToFile('Using V3 with advanced features', {
-          languageIdentification: true,
-          educationalContext: true
-        });
-      } else {
-        logToFile('Using V2 with basic features (no language ID or context)');
-      }
+      logToFile(isPrimary
+        ? 'Using PRIMARY Soniox model with advanced features (language ID + educational context)'
+        : 'Using BACKUP Soniox model with basic features', {
+        model: modelVersion,
+        hints: requestBody.language_hints,
+        diarization: !!requestBody.enable_speaker_diarization,
+        mode: language ? 'single-language (reading)' : 'multi-language (coaching)',
+      });
 
       // Create transcription job
       const createResponse = await axios.post(
@@ -608,22 +589,22 @@ class AudioService {
       let soniox2Error = null;
 
       try {
-        logToFile('Attempting transcription with stt-async-v3 (3 minute timeout)...', {
+        logToFile(`Attempting transcription with ${SONIOX_PRIMARY_MODEL} (primary, 3 minute timeout)...`, {
           enableDiarization,
           language: language || 'auto-detect'
         });
-        transcriptionResult = await this._attemptTranscription(fileId, 'stt-async-v3', SONIOX_V3_TIMEOUT, enableDiarization, language);
+        transcriptionResult = await this._attemptTranscription(fileId, SONIOX_PRIMARY_MODEL, SONIOX_V3_TIMEOUT, enableDiarization, language);
       } catch (v3Error) {
         soniox3Error = v3Error;
-        logToFile('⚠️ V3 transcription failed, trying v2 fallback (2 minute timeout)...', {
-          v3Error: v3Error.message,
+        logToFile(`⚠️ ${SONIOX_PRIMARY_MODEL} failed, trying ${SONIOX_BACKUP_MODEL} backup (2 minute timeout)...`, {
+          primaryError: v3Error.message,
           enableDiarization
         });
 
         try {
-          logToFile('Attempting transcription with stt-async-v2...');
-          transcriptionResult = await this._attemptTranscription(fileId, 'stt-async-v2', SONIOX_V2_TIMEOUT, false, language); // V2 doesn't support diarization
-          logToFile('✅ V2 fallback succeeded!');
+          logToFile(`Attempting transcription with ${SONIOX_BACKUP_MODEL} (backup)...`);
+          transcriptionResult = await this._attemptTranscription(fileId, SONIOX_BACKUP_MODEL, SONIOX_V2_TIMEOUT, false, language); // backup runs basic (no diarization)
+          logToFile('✅ Backup Soniox model succeeded!');
         } catch (v2Error) {
           soniox2Error = v2Error;
           logToFile('❌ Both Soniox v3 and v2 failed', {
