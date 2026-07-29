@@ -22,7 +22,11 @@ const { getUserLanguage } = require('../../utils/language-cache');
 const { TEMP_DIR } = require('../../utils/constants');
 const { NUM_REFLECTIVE_QUESTIONS } = require('../../config/coaching-debrief.config');
 const { getCoachingMessage } = require('../../config/coaching-messages');
+const { generateAcknowledgement } = require('./reflective-acknowledgement');
 const path = require('path');
+
+// Language name for the acknowledgement prompt (bd-2374).
+const ACK_LANG_NAME = { en: 'English', ur: 'Urdu', ar: 'Arabic', sw: 'Kiswahili' };
 
 class ReflectiveConversationService {
   /**
@@ -309,6 +313,28 @@ class ReflectiveConversationService {
 
         if (sessionData) {
           const languageCode = await getUserLanguage(sessionData.user_id);
+
+          // bd-2374: reflect her answer back before the close, so the flow
+          // acknowledges what SHE said instead of jumping to a generic thanks.
+          // Best-effort — null on any failure and we fall through to the
+          // generic thanks exactly as before.
+          try {
+            const currentQuestion = (questions[questionIndex] && questions[questionIndex].question) || '';
+            const ackLine = await generateAcknowledgement(response, currentQuestion, languageCode, {
+              langName: ACK_LANG_NAME[String(languageCode || 'en').slice(0, 2)] || 'English',
+              generator: async (prompt) => {
+                const r = await GPT5MiniService.openai.chat.completions.create({
+                  model: 'gpt-5-mini-2025-08-07',
+                  messages: [{ role: 'user', content: prompt }],
+                });
+                return r.choices?.[0]?.message?.content || '';
+              },
+            });
+            if (ackLine) await WhatsAppService.sendMessage(from, ackLine);
+          } catch (ackError) {
+            logToFile('⚠️  Reflective acknowledgement failed (non-fatal)', { error: ackError.message });
+          }
+
           // The voice path strips the trailing emoji (TTS reads ":pray:" otherwise);
           // the text path keeps it.
           const localised = getCoachingMessage('reflectionsThanks', languageCode);
