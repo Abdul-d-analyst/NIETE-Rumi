@@ -46,6 +46,16 @@ const {
 const REDIS_PREFIX = 'reg_flow:';
 const REDIS_TTL = 3600; // 1 hour
 
+// bd-2404 — valid role ids the registration Flow can submit. Mirrors
+// ROLES_DROPDOWN and maps 1:1 to users.role; the /observe LEADER_ROLES gate
+// accepts coach/principal/aeo. Any unknown/empty value → null (the downstream
+// handler then leaves users.role untouched, defaulting to teacher).
+const VALID_ROLE_IDS = new Set(ROLES_DROPDOWN.map(r => r.id)); // teacher, coach, principal, aeo
+function normalizeRole(raw) {
+  const v = String(raw || '').toLowerCase().trim();
+  return VALID_ROLE_IDS.has(v) ? v : null;
+}
+
 /**
  * Build the "Your portal is ready at <host>" line for the SUCCESS screen.
  * Returns just the welcome line if PORTAL_URL is unset, so cloners running
@@ -214,7 +224,13 @@ async function handleProfessionalInfoSubmit(userId, screenData, flowToken) {
     organization,
     school_name: (screenData.school_name || '').trim() || null,
     grade: screenData.grade || '',
-    subjects: screenData.subjects || []
+    subjects: screenData.subjects || [],
+    // bd-2404: the PROFESSIONAL_INFO screen serves a `roles` dropdown
+    // (Teacher/Coach/Principal/AEO). The selection MUST be carried into the
+    // completion payload — without it the coach's role is dropped and
+    // /observe is denied (they fall into the teacher DC flow). Validate
+    // against the known ids so only a real role id round-trips.
+    role: normalizeRole(screenData.role)
   };
 
   // If org is "other", navigate to ORG_DETAILS for custom org name
@@ -249,7 +265,8 @@ async function handleProfessionalInfoSubmit(userId, screenData, flowToken) {
           organization_other: null,
           school_name: allData.school_name || null,
           grade: allData.grade || '',
-          subjects: allData.subjects || []
+          subjects: allData.subjects || [],
+          role: allData.role || null // bd-2404
         }
       },
       welcome_message: `Welcome, ${allData.full_name || 'Teacher'}! Your registration is complete.`,
@@ -293,7 +310,8 @@ async function handleOrgDetailsSubmit(userId, screenData, flowToken) {
           organization_other: organizationOther,
           school_name: stored.school_name || null,
           grade: stored.grade || '',
-          subjects: stored.subjects || []
+          subjects: stored.subjects || [],
+          role: stored.role || null // bd-2404
         }
       },
       welcome_message: `Welcome, ${stored.full_name || 'Teacher'}! Your registration is complete.`,
