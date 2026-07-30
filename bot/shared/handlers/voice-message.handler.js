@@ -909,7 +909,7 @@ async function handleVoiceMessage(message, from, user = null) {
     }
 
     // Check for explicit language switch command in voice transcription
-    const { detectLanguageOverride } = require('../utils/language-detector');
+    const { detectLanguageOverride, isMarketLanguage } = require('../utils/language-detector');
 
     // Get current language preference using user ID
     const currentUserLanguage = user ? await getUserLanguage(user.id) : 'en';
@@ -933,8 +933,14 @@ async function handleVoiceMessage(message, from, user = null) {
       });
     }
 
-    // Check if user said a language switch command
-    const overrideLanguage = detectLanguageOverride(transcription);
+    // Check if user said a language switch command. bd-2413 (row 11): only a
+    // MARKET language (en/ur) may flip the conversation; an off-market request
+    // (e.g. Punjabi) is ignored so Rumi stays on en/ur.
+    const rawVoiceOverride = detectLanguageOverride(transcription);
+    const overrideLanguage = isMarketLanguage(rawVoiceOverride) ? rawVoiceOverride : null;
+    if (rawVoiceOverride && !overrideLanguage) {
+      logToFile('🌐 Off-market voice language override ignored (keeping en/ur)', { requested: rawVoiceOverride, userId: user?.id });
+    }
     if (overrideLanguage && overrideLanguage !== currentUserLanguage) {
       // Update user's language preference using user ID
       if (user) {

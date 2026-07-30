@@ -384,9 +384,21 @@ function formatDistribution(distribution) {
     .join(', ');
 }
 
+// bd-2413 (FEAT-106 row 11): NIETE serves English + Urdu only. A request to
+// switch to any other language (e.g. Punjabi) must NOT flip the conversation —
+// the teacher stays on en/ur. Used to gate detectLanguageOverride at the
+// handler call sites before setUserLanguage locks the preference.
+const MARKET_LANGUAGES = new Set(['en', 'ur']);
+function isMarketLanguage(lang) {
+  const base = String(lang || '').split('-')[0];
+  return MARKET_LANGUAGES.has(base);
+}
+
 module.exports = {
   calculateDominantLanguage,
   detectLanguageOverride,
+  isMarketLanguage,
+  MARKET_LANGUAGES,
   shouldUpdateLanguage,
   analyzeLanguage,
   getLanguageDisplayName,

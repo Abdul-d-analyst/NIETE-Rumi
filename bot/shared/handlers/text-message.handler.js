@@ -29,7 +29,7 @@ const { getClient } = require('../services/llm-client');
 
 const openai = getClient();
 // Import REAL language detection utilities for command detection
-const { detectLanguageOverride } = require('../utils/language-detector');
+const { detectLanguageOverride, isMarketLanguage } = require('../utils/language-detector');
 const { getUserLanguage, setUserLanguage } = require('../utils/language-cache');
 // Import language detection for content generation
 const { detectRequestedLanguage, parseSubjectAndGrade } = require('../utils/language-detection');
@@ -305,8 +305,18 @@ async function handleTextMessage(message, from, messageBody, user = null) {
   const currentLanguage = user ? await getUserLanguage(user.id) : 'en';
   logToFile('Current user language preference', { language: currentLanguage, userId: user?.id });
 
-  // Check for explicit language switch command FIRST
-  const overrideLanguage = detectLanguageOverride(messageBody);
+  // Check for explicit language switch command FIRST.
+  // bd-2413 (row 11): only honour a switch to a MARKET language (en/ur). A
+  // request for Punjabi (or any off-market language) is ignored — Rumi stays on
+  // the teacher's current en/ur, rather than locking the whole conversation to
+  // an unsupported language.
+  const rawOverride = detectLanguageOverride(messageBody);
+  const overrideLanguage = isMarketLanguage(rawOverride) ? rawOverride : null;
+  if (rawOverride && !overrideLanguage) {
+    logToFile('🌐 Off-market language override ignored (keeping en/ur)', {
+      requested: rawOverride, userId: user?.id,
+    });
+  }
   let responseLanguage = currentLanguage;
   let languageSwitched = false;
 
