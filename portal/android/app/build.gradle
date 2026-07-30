@@ -23,8 +23,8 @@ android {
         applicationId "pk.edu.niete"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1201
-        versionName "1201"
+        versionCode 1202
+        versionName "1202"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         // Default launcher label; the debug build type overrides it.
         manifestPlaceholders = [appLabel: "NIETE"]
