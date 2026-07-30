@@ -73,14 +73,19 @@ adb logcat | grep -iE "capacitor|chromium"     # watch for WebView errors
 | 1 | App opens | The **portal login screen** — not the public marketing page |
 | 2 | Login | Succeeds with a phone number + password set up beforehand via the WhatsApp link |
 | 3 | Data loads | Dashboard, lesson plans, curriculum, training, coaching show real data |
-| 4 | Session persists | Force-close, reopen — **still logged in** |
+| 4 | Session persists | ❌ **Known broken** — force-close returns you to login. Deferred; tracked as a known bug. Don't re-report it. |
 | 5 | Back button | Navigates back; exits only from the dashboard root |
 | 6 | WhatsApp links | Open WhatsApp / the browser, not a dead WebView |
 | 7 | Stability | No crash or freeze during normal navigation |
 
-**#1 and #3 prove the two fixes that are already in.** #2/#4 exercise session
-cookies in the WebView — the known risk, and the one that can pass in an
-emulator but fail on real hardware. #5/#6 are not implemented yet.
+**Status as of 2026-07-29** (Realme RMX2061, real hardware): #1, #2, #3 and #7
+pass. #4 **fails** — session does not survive force-close; deferred to a later
+release. #5 and #6 are not implemented yet.
+
+Login (#2) only works because the portal server allows the app's origin through
+CORS and issues the session cookie with `SameSite=None`. If login starts failing
+with "correct" credentials, check that first — the symptom is a CORS error in
+`adb logcat`, not an auth error.
 
 > First run is **not** zero-touch yet: the portal is login-gated and passwords
 > are issued through a one-time WhatsApp setup link, so a fresh install lands on

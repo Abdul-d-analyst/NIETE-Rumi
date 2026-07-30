@@ -147,7 +147,7 @@ Deliverable: a signed AAB that installs on a physical device and reaches the por
 Emulator is for iteration; sign-off is on a physical Android phone.
 
 1. Login succeeds against the production portal API — **using credentials set up beforehand via the WhatsApp link**. Manual login at this stage is expected, not a failure (D-014).
-2. **Session survives force-close and reopen** (the 2.3 gate) — this is the test that the cookie fix actually works, and it is also the groundwork for zero-touch later: a session that persists correctly is what makes "already logged in on reopen" possible at all.
+2. **Session survives force-close and reopen** (the 2.3 gate). ❌ **FAILED 2026-07-29** — the app returns to the login screen after every force-close. **Deferred to a later release by the operator**; tracked as `bd-2358`. See "Known: session does not survive force-close" below before picking it up.
 3. Dashboard, lesson plans, curriculum, training, coaching all load real data.
 4. Back button navigates, exits only from root.
 5. WhatsApp link opens the app/browser, not a dead WebView.
@@ -159,6 +159,40 @@ Ideally test on a second, older/low-end device — the coach audience is not on 
 Exit criterion for 09a → 09: **all seven green on real hardware.** Only then is store paperwork worth doing.
 
 ---
+
+## Known: session does not survive force-close (`bd-2358`)
+
+**Observed 2026-07-29**, Realme RMX2061, after the CORS + `SameSite=None` fix went live: login
+works, the portal loads real data, but force-closing and reopening the app returns the user to the
+login screen every time. **Deferred to a later release by the operator** — not a launch blocker by
+that decision.
+
+What this does and doesn't tell us:
+
+- The cookie **is** being accepted and sent during a session — otherwise login itself would fail and
+  the dashboard would not load. So CORS + `SameSite=None` are correct as far as they go.
+- What fails is **persistence across process death**. The session cookie is not surviving the
+  WebView being torn down.
+
+Most likely causes, cheapest first — check in this order:
+
+1. **The cookie is a session cookie, not a persistent one.** `express-session` sets `maxAge`
+   (7 days here), so it should be persistent. But if `rolling`/`saveUninitialized` interact badly, or
+   the store evicts, the browser may treat it as session-scoped. Verify by inspecting the actual
+   `Set-Cookie` for an `Expires`/`Max-Age` attribute in Chrome DevTools (`chrome://inspect`).
+2. **Android WebView clears cookies on process death** unless flushed. `CookieManager.flush()` is
+   the native fix; the `@capacitor/app` `pause` hook is the usual place to call it. This is the most
+   common cause of exactly this symptom.
+3. **Redis session store eviction** — if the portal's Redis drops the session server-side, the cookie
+   is still sent but no longer resolves. Distinguishable from 1 and 2: the request would carry a
+   cookie and still 401.
+
+The cheap diagnostic that separates all three: open `chrome://inspect`, force-close, reopen, and look
+at whether the request after restart **carries** the cookie. Cookie absent → 1 or 2. Cookie present
+but 401 → 3.
+
+Note this is also the load-bearing dependency for zero-touch first run (`bd-2357`): "already logged
+in on reopen" is impossible until this is fixed, so the two should probably be picked up together.
 
 ## Risks specific to this phase
 
