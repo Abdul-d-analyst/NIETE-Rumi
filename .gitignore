@@ -89,3 +89,17 @@ supabase/.temp/
 **/supabase/.temp/
 dashboard/supabase/.temp/
 .env.provisioner
+
+# Capacitor Android build artifacts + local build config (bd-2343/bd-2351).
+# The generated android/ project is committed, but never build output,
+# local SDK paths, or signing material.
+portal/android/build/
+portal/android/app/build/
+portal/android/.gradle/
+portal/android/local.properties
+portal/android/keystore.properties
+portal/android/app/src/main/assets/public/
+portal/.env.app
+portal/.android-env.sh
+*.jks
+*.keystore

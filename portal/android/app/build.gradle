@@ -1,0 +1,72 @@
+apply plugin: 'com.android.application'
+
+android {
+    namespace = "pk.edu.niete"
+    compileSdk = rootProject.ext.compileSdkVersion
+    defaultConfig {
+        applicationId "pk.edu.niete"
+        minSdkVersion rootProject.ext.minSdkVersion
+        targetSdkVersion rootProject.ext.targetSdkVersion
+        versionCode 1200
+        versionName "1200"
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        // Default launcher label; the debug build type overrides it.
+        manifestPlaceholders = [appLabel: "NIETE"]
+        aaptOptions {
+             // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
+             // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
+            ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
+        }
+    }
+    buildTypes {
+        debug {
+            // Debug builds install as `pk.edu.niete.debug` so they sit alongside
+            // the production NIETE app instead of colliding with it. Without this,
+            // installing a debug build fails with INSTALL_FAILED_UPDATE_INCOMPATIBLE
+            // (different signing key), and the only way through is uninstalling
+            // the real app.
+            //
+            // Release builds are UNAFFECTED — they keep `pk.edu.niete`, which is
+            // required to update the existing Play listing.
+            applicationIdSuffix ".debug"
+            // Distinct launcher label so the two apps are told apart on the
+            // home screen. Uses manifestPlaceholders rather than resValue
+            // because app_name already exists in res/values/strings.xml and
+            // redefining it there is a duplicate-resource build failure.
+            manifestPlaceholders = [appLabel: "NIETE Debug"]
+        }
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+        }
+    }
+}
+
+repositories {
+    flatDir{
+        dirs '../capacitor-cordova-android-plugins/src/main/libs', 'libs'
+    }
+}
+
+dependencies {
+    implementation fileTree(include: ['*.jar'], dir: 'libs')
+    implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
+    implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
+    implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
+    implementation project(':capacitor-android')
+    testImplementation "junit:junit:$junitVersion"
+    androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
+    androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
+    implementation project(':capacitor-cordova-android-plugins')
+}
+
+apply from: 'capacitor.build.gradle'
+
+try {
+    def servicesJSON = file('google-services.json')
+    if (servicesJSON.text) {
+        apply plugin: 'com.google.gms.google-services'
+    }
+} catch(Exception e) {
+    logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
+}
