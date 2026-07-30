@@ -31,6 +31,7 @@ const router = express.Router();
 const supabase = require('../config/supabase');
 const { S3Client, GetObjectCommand } = require('@aws-sdk/client-s3');
 const { generatePresignedUrl, generatePresignedUrls, isValidR2Url } = require('../services/r2.service');
+const { fetchAllPaged } = require('../lib/fetch-all-paged');
 
 // Configure R2 S3 client for private PDF access. Lazy — resolved on first
 // use, not at module load, so mounting these routes never depends on R2 env
@@ -897,11 +898,17 @@ router.get('/lesson-plans', requirePortalAuth, async (req, res) => {
  */
 router.get('/curriculum/grades', requirePortalAuth, async (req, res) => {
   try {
-    const { data, error } = await supabase
+    // The grades picker reads the WHOLE enabled corpus (2000+ rows across
+    // grades 0-12). A single un-paged select silently truncates at
+    // PostgREST's hard 1000-row cap and — with no ORDER BY — drops whole
+    // grades non-deterministically (this is exactly why grades 6-12 stayed
+    // missing from the picker even after the Oxbridge rows were loaded).
+    // Page through the full result set so every grade is seen.
+    const data = await fetchAllPaged(() => supabase
       .from('curriculum_lp_ast')
       .select('grade, grade_label')
-      .eq('is_enabled', true);
-    if (error) throw error;
+      .eq('is_enabled', true)
+      .order('grade', { ascending: true }));
 
     // Distinct grades with a count, ordered ascending.
     const byGrade = new Map();
