@@ -341,7 +341,9 @@ const STRINGS = {
       'Your lesson report 🌱 Prepared from {fo}\'s visit — with notes from your conversation together.',
     companion_from_label: 'From',
     companion_commitment_label: 'Your commitment',
-    companion_closing: 'We are proud of your work. Tuko pamoja. 💛',
+    // bd-2405: was 'We are proud of your work. Tuko pamoja. 💛' — the Swahili
+    // "Tuko pamoja" leaked into the English set and reached NIETE teachers.
+    companion_closing: 'We are proud of your work. We are with you. 💛',
   },
 };
 

@@ -29,6 +29,49 @@ const BTN = {
 };
 const TEMPLATE_PAYLOAD_PREFIX = 'observe_report_';
 
+// bd-2405 — the teacher's report copy must follow the TEACHER's language,
+// scoped to the market's offered languages (Rule 20: language is market-scoped
+// data). The old code hardcoded observeStrings('sw') (a Tanzania-era D6
+// assumption), so NIETE (fico) teachers received a full Kiswahili report.
+// mewaka=Tanzania stays sw; fico=NIETE and hots=PK never resolve to sw.
+const MARKET_LANGS = {
+  mewaka: { offer: ['sw', 'en'], fallback: 'sw' },
+  fico:   { offer: ['ur', 'en'], fallback: 'en' },
+  hots:   { offer: ['ur', 'en'], fallback: 'ur' },
+};
+function marketLangConfig() {
+  const { getObservePack } = require('./observe-framework');
+  return MARKET_LANGS[getObservePack().key] || { offer: ['en'], fallback: 'en' };
+}
+/** Clamp any language to the current market's offered set (else null). */
+function clampToMarket(lang) {
+  const { offer } = marketLangConfig();
+  return offer.includes(lang) ? lang : null;
+}
+/**
+ * Resolve the teacher-report language: the teacher's own locked preference
+ * (looked up read-only by phone) → the coach's language → the market fallback,
+ * each clamped to the market's offered languages. Never Swahili outside TZ.
+ * @param {{teacher_phone?:string}} delivery
+ * @param {string} coachLang
+ * @returns {Promise<'ur'|'en'|'sw'>}
+ */
+async function resolveTeacherLang(delivery, coachLang) {
+  const { fallback } = marketLangConfig();
+  if (delivery && delivery.teacher_phone) {
+    try {
+      const { data } = await supabase
+        .from('users')
+        .select('preferred_language')
+        .eq('phone_number', delivery.teacher_phone)
+        .maybeSingle();
+      const t = clampToMarket(data && data.preferred_language);
+      if (t) return t;
+    } catch (_) { /* fall through to coach/market default */ }
+  }
+  return clampToMarket(coachLang) || fallback;
+}
+
 // ── Pure helpers ───────────────────────────────────────────────────────
 
 /**
@@ -483,10 +526,15 @@ async function processTeacherReport(sessionId, payload = {}) {
     ? payload.from
     : (session.users && session.users.phone_number);
   const foName = (session.users && session.users.first_name) || 'Afisa';
-  const lang = (session.users && session.users.preferred_language) === 'sw' ? 'sw' : 'en';
+  // bd-2405: the coach's UI language, clamped to the market (never a stray sw
+  // on NIETE/PK). observeLang handles ur/sw/en; clamp guards data anomalies.
+  const lang = clampToMarket(observeLang(session.users)) || marketLangConfig().fallback;
   const S = observeStrings(lang);
-  const teacherS = observeStrings('sw');   // the teacher-facing copy is Swahili (D6)
   const delivery = (session.analysis_data && session.analysis_data.teacher_delivery) || {};
+  // bd-2405: teacher copy follows the TEACHER's market language, not a
+  // hardcoded 'sw'. (TZ still resolves to sw via the market config.)
+  const teacherLang = await resolveTeacherLang(delivery, lang);
+  const teacherS = observeStrings(teacherLang);
 
   if (delivery.status === 'sent') {
     logToFile('🔭 observe send: already sent — no-op', { sessionId });
@@ -507,7 +555,7 @@ async function processTeacherReport(sessionId, payload = {}) {
     const { png, caption } = await generateHeroReport(session, v2, {
       teacherName: delivery.teacher_name,
       commitmentAction: (notes && notes.commitment_sw) || '',
-      language: observeLang(session.users),   // FEAT-093 bd-53 — locked language drives the report
+      language: teacherLang,   // bd-2405 — the teacher's market language drives the report
     });
     const companionText = notes ? buildCompanionText(notes, { foName }, teacherS) : null;
     const teacherCaption = teacherS.report_caption_teacher.replace('{fo}', foName);
@@ -619,4 +667,6 @@ module.exports = {
   handleSendConfirm,
   handleSendCancel,
   processTeacherReport,
+  resolveTeacherLang,
+  clampToMarket,
 };
