@@ -41,8 +41,12 @@ const KIE_API_KEY = process.env.KIE_API_KEY;
 // Pic-to-LP uses a dedicated Kie.ai key for rate-limit isolation; falls back
 // to the shared KIE_API_KEY when a feature-specific key isn't set.
 const KIE_API_KEY_PIC_LP = process.env.KIE_API_KEY_PIC_LP || process.env.KIE_API_KEY;
-// R2 object key for the Rumi brand mark used as the header logo in generated LPs.
-const RUMI_LOGO_R2_KEY = process.env.RUMI_LOGO_R2_KEY || 'brand/rumi-white-smile-v1.png';
+// R2 object key for the NIETE brand mark used as the header logo in generated LPs.
+// Defaults to the padded NIETE "N" mark (brand/niete-mark-ondark-v1.png, uploaded
+// to this deployment's R2 bucket) so the fork is correct-by-default without a
+// Railway env var; still overridable via RUMI_LOGO_R2_KEY. The padded variant
+// carries ~21% transparent margin so the mark never crops in the LP header bar.
+const RUMI_LOGO_R2_KEY = process.env.RUMI_LOGO_R2_KEY || 'brand/niete-mark-ondark-v1.png';
 // WhatsApp Flow ID for the pic-to-LP confirmation form (empty → text fallback).
 const PIC_LP_FLOW_ID = process.env.PIC_LP_FLOW_ID || '';
 // WhatsApp Flow ID for the Quiz Manager form (empty → text fallback / direct path).
