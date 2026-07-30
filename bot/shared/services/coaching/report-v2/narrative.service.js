@@ -136,6 +136,8 @@ Use the TRANSCRIPT as source of truth. Find what is UNIQUELY hers — a signatur
 
 NEVER emit rubric IDs, snake_case tokens, or programmatic identifiers as prose. If the analysis mentions an indicator like "step_by_step" or "guided_practice", write it out naturally ("step by step", "guided practice"). If it mentions "1.2 Fidelity to LP Steps", say "lesson-plan fidelity", not "1.2". The teacher never sees the raw rubric shape.
 
+PLAIN LANGUAGE — avoid coach-jargon the teacher wouldn't use herself: "scaffolding", "extension", "differentiation", "formative assessment", "higher-order thinking", "metacognition", "gradual release". Especially in "horizon_note", describe the concrete move in plain words (e.g. "break the task into small steps", "a harder task for early finishers") rather than the jargon label.
+
 ${langRules(language)}
 
 Return STRICT JSON:

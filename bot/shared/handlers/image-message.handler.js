@@ -99,6 +99,23 @@ async function handleImageMessage(message, from, user = null) {
           .single();
 
         if (photoSession && (photoSession.conversation_state?.current_state === 'COLLECTING_PHOTOS' || photoSession.conversation_state?.current_state === 'AWAITING_PHOTO')) {
+          // bd-2371: de-dup at-least-once webhook redelivery for the classroom
+          // photo branch too — a redelivered copy must not append the same photo
+          // twice or re-fire the "photo N received" ack.
+          const photoImageId = message.image?.id;
+          const photoKey = `image:${user.id}:${photoImageId}`;
+          const photoClaimed = await redisService.setNX(
+            photoKey,
+            JSON.stringify({ status: 'classroom_photo_handled', startedAt: Date.now() }),
+            IDEMPOTENCY_TTL_SECONDS,
+          );
+          if (!photoClaimed) {
+            logToFile('🔁 Duplicate classroom-photo webhook — skipping', {
+              coachingSessionId: photoSession.id, userId: user.id, imageId: photoImageId,
+            });
+            typingController.stop();
+            return;
+          }
           logToFile('📸 Phase 3: Classroom photo received for coaching session', {
             coachingSessionId: photoSession.id,
             userId: user.id
@@ -213,6 +230,23 @@ async function handleImageMessage(message, from, user = null) {
 
         if (lpSession) {
           const imageId = message.image?.id;
+          // bd-2371: de-dup at-least-once webhook redelivery. Claim the image
+          // key BEFORE processing so a redelivered copy is a silent no-op —
+          // otherwise the teacher gets duplicate "got your plan" acks and the
+          // analysis is double-queued (Sana Nawaz, ICT, 3× duplicate acks).
+          const lpImageKey = `image:${user.id}:${imageId}`;
+          const lpClaimed = await redisService.setNX(
+            lpImageKey,
+            JSON.stringify({ status: 'lp_image_handled', startedAt: Date.now() }),
+            IDEMPOTENCY_TTL_SECONDS,
+          );
+          if (!lpClaimed) {
+            logToFile('🔁 Duplicate lesson-plan image webhook — skipping', {
+              coachingSessionId: lpSession.id, userId: user.id, imageId,
+            });
+            typingController.stop();
+            return;
+          }
           logToFile('📄 Lesson plan received as image for coaching session', {
             coachingSessionId: lpSession.id, userId: user.id, imageId,
           });

@@ -81,6 +81,13 @@ const TEST_ENTRY_IDS = ['0', 0, null, undefined];
 // Timeout Constants
 const SONIOX_V3_TIMEOUT = 180; // 3 minutes
 const SONIOX_V2_TIMEOUT = 120; // 2 minutes
+
+// Soniox async model cascade (bd-2377, FEAT-106 #1). stt-async-v3 was RETIRED by
+// Soniox on 2026-02-28 — the code's old primary was a dead model. The current
+// recommended async model is stt-async-v5 (released 2026-06-11); stt-async-v4
+// aliases to v5. Env-overridable so a future model rename is a config fix.
+const SONIOX_PRIMARY_MODEL = process.env.SONIOX_PRIMARY_MODEL || 'stt-async-v5';
+const SONIOX_BACKUP_MODEL = process.env.SONIOX_BACKUP_MODEL || 'stt-async-v4';
 const GAMMA_MAX_ATTEMPTS = 60; // Maximum polling attempts for Gamma
 const GAMMA_POLL_INTERVAL = 5000; // 5 seconds between polls
 const KIE_MAX_ATTEMPTS = 60;    // Maximum polling attempts for Kie.ai (8s × 60 = 8 min ceiling)
@@ -102,6 +109,11 @@ const UPLIFT_BALOCHI_VOICE_ID = process.env.UPLIFT_VOICE_ID_BAL || 'v_bl1de2f7';
 const ELEVENLABS_VOICE_ID = process.env.ELEVENLABS_VOICE_ID || 'cgSgspJ2msm6clMCkdW9'; // Jessica voice (English)
 const ELEVENLABS_SPANISH_VOICE_ID = process.env.ELEVENLABS_VOICE_ID_ES || 'vYui54mlc1I9tFZBBz4i'; // Cony Iglesias (Spanish)
 const ELEVENLABS_ARABIC_VOICE_ID = process.env.ELEVENLABS_VOICE_ID_AR || '4wf10lgibMnboGJGCLrP'; // Farah (Arabic)
+// bd-2375 (FEAT-106 #4b): Urdu coaching voice is Sara — "Warm Storyteller, Urdu &
+// Hindi" on eleven_v3. This is the canonical Urdu voice locked by the LP-voicenotes
+// V20 work (Jessica + Roman-Urdu was wrong; Sara + Nastaliq is right). Replaces the
+// Uplift "Info/Education" voice that mangled code-switched English tokens.
+const ELEVENLABS_URDU_VOICE_ID = process.env.ELEVENLABS_VOICE_ID_UR || '9cI5mhBtM4WtQ9Fo6jWQ'; // Sara (Urdu)
 
 // Voice Model Routing Configuration
 // Tier 1: Full support (coaching + reading assessment)
@@ -109,7 +121,7 @@ const ELEVENLABS_ARABIC_VOICE_ID = process.env.ELEVENLABS_VOICE_ID_AR || '4wf10l
 const VOICE_MODELS = {
   // Tier 1: Full support
   en: { provider: 'elevenlabs', voiceId: ELEVENLABS_VOICE_ID, supportsEmotionTags: true, tier: 1 },
-  ur: { provider: 'uplift', voiceId: UPLIFT_VOICE_ID, supportsEmotionTags: false, tier: 1 },
+  ur: { provider: 'elevenlabs', voiceId: ELEVENLABS_URDU_VOICE_ID, supportsEmotionTags: false, tier: 1 }, // Sara / eleven_v3 (was Uplift v_8eelc901 — bd-2375)
 
   // Tier 2: Coaching only
   es: { provider: 'elevenlabs', voiceId: ELEVENLABS_SPANISH_VOICE_ID, supportsEmotionTags: true, tier: 2 },
@@ -182,6 +194,8 @@ module.exports = {
   // Timeouts
   SONIOX_V3_TIMEOUT,
   SONIOX_V2_TIMEOUT,
+  SONIOX_PRIMARY_MODEL,
+  SONIOX_BACKUP_MODEL,
   GAMMA_MAX_ATTEMPTS,
   GAMMA_POLL_INTERVAL,
   KIE_MAX_ATTEMPTS,

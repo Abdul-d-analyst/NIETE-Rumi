@@ -53,6 +53,16 @@ const scaleOptions = () => {
   return pack.scaleOptions || SCALE_OPTIONS_BY_LANG[pack.lang] || SCALE_OPTIONS_BY_LANG.sw;
 };
 
+// bd-2369: the clamp MUST follow the active pack's scale, not a hardcoded 0-3.
+// MEWAKA/HOTS are 0-3; FICO is 1-4. The old `Math.min(3, …)` silently turned
+// every FICO "4 · Highly Effective" — machine-scored OR observer-picked — into
+// a 3, corrupting the officer's rating on save. Derive bounds from the option
+// ids so mewaka/hots stay byte-identical (min 0, max 3) and FICO gets 1-4.
+const scaleBounds = () => {
+  const ids = scaleOptions().map(o => Number(o.id)).filter(Number.isFinite);
+  return { min: Math.min(...ids), max: Math.max(...ids) };
+};
+
 // bd-59: HOTS indicator ids are NUMBERS (7); mewaka's are strings ("C3.7").
 // String() first, or every non-mewaka pack crashes on .replace.
 const fid = (id) => String(id).replace(/\./g, '_');
@@ -81,14 +91,18 @@ function buildScreenPrefill(analysis, domainKey) {
   const byId = {};
   (stored.indicators || []).forEach(ind => { byId[ind.id] = ind; });
 
+  const { min: SMIN, max: SMAX } = scaleBounds();
   const data = { scale: scaleOptions() };
   spec.indicators.forEach(specInd => {
     const f = fid(specInd.id);
     const ind = byId[specInd.id] || {};
     const score = Number.isFinite(Number(ind.score)) && ind.score !== null && ind.score !== undefined
-      ? Math.max(0, Math.min(3, Number(ind.score))) : 0;
+      ? Math.max(SMIN, Math.min(SMAX, Number(ind.score))) : SMIN;
     data[`s_${f}`] = String(score);
-    data[`e_${f}`] = String(ind.evidence_sw || ind.evidence || '').slice(0, PREFILL_TEXT_CAP);
+    // bd-2369: the form shows the ≤500-char evidence_summary (the whole gist,
+    // fits Meta's 600-char TextArea); the FULL evidence stays in analysis_data
+    // and flows to the teacher's report. evidence_sw keeps MEWAKA/TZ unchanged.
+    data[`e_${f}`] = String(ind.evidence_summary || ind.evidence_sw || ind.evidence || '').slice(0, PREFILL_TEXT_CAP);
     data[`i_${f}`] = String(ind.improvement_sw || ind.improvement || '').slice(0, PREFILL_TEXT_CAP);
   });
   return data;
@@ -154,6 +168,7 @@ async function applyObserverEdits(sessionId, edits) {
 
   let rescored = 0;
   let textChanged = 0;
+  const { min: SMIN, max: SMAX } = scaleBounds(); // bd-2369: 1-4 for FICO, 0-3 for mewaka/hots
   const v1ById = {};
   Object.values((v1 || {}).domains || {}).forEach(d =>
     (d.indicators || []).forEach(ind => { v1ById[ind.id] = ind; }));
@@ -163,7 +178,7 @@ async function applyObserverEdits(sessionId, edits) {
       const f = fid(ind.id);
       const orig = v1ById[ind.id] || {};
       if (edits[`r_${f}`] !== undefined && edits[`r_${f}`] !== null && edits[`r_${f}`] !== '') {
-        const newScore = Math.max(0, Math.min(3, parseInt(edits[`r_${f}`], 10) || 0));
+        const newScore = Math.max(SMIN, Math.min(SMAX, parseInt(edits[`r_${f}`], 10) || SMIN));
         if (newScore !== Number(orig.score)) rescored += 1;
         ind.score = newScore;
       }

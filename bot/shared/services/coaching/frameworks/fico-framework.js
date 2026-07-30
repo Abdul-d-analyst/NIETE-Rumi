@@ -29,7 +29,7 @@ const DOMAINS = {
   lesson_plan_fidelity: {
     key: 'B',
     displayName: 'Lesson Plan Fidelity',
-    indicatorCount: 7,
+    indicatorCount: 10,
     indicators: [
       {
         id: 'B1',
@@ -40,7 +40,6 @@ const DOMAINS = {
           3: 'Clear objective stated, referred to during lesson, linked to classroom activities.',
           4: 'Objective co-constructed with students, revisited at close. Students can articulate what they are learning and why.',
         },
-        aiDetectionMethod: "Scan the first 5 minutes for goal-setting phrases ('today we will,' 'by the end,' 'you will learn'); count logical connectors through the lesson (first, next, because, therefore, so, then); identify comprehension-check questions; and compare precise vs. vague vocabulary use.",
       },
       {
         id: 'B2',
@@ -51,7 +50,6 @@ const DOMAINS = {
           3: 'Clear I Do → We Do → You Do sequence. Logical flow with transitions.',
           4: 'Logical flow with smooth transitions, recap, and closure activity. Students can follow the arc.',
         },
-        aiDetectionMethod: "Identify temporal phase markers (beginning/middle/end) and transition phrases ('now that we've..., let's move to...'); track the teacher-talk ratio across the lesson to see whether it shifts from high support to low support, signalling the move through modelling, joint practice, and independent work.",
       },
       {
         id: 'B3',
@@ -62,7 +60,6 @@ const DOMAINS = {
           3: 'Most activities directly support the learning objective.',
           4: 'All activities purposefully scaffolded toward objective mastery. No wasted time.',
         },
-        aiDetectionMethod: 'Compare the words used in activities and questions against the stated objective; classify the type of thinking each task requires and check it matches.',
       },
       {
         id: 'B4',
@@ -73,18 +70,16 @@ const DOMAINS = {
           3: 'Teacher connects new content to previously taught material.',
           4: 'Students actively recall and link prior knowledge; teacher builds on it.',
         },
-        aiDetectionMethod: "Search for recall prompts ('remember,' 'last time,' 'what do you know about') near the start of the lesson, and check whether the teacher's next moves build on the answers.",
       },
       {
         id: 'B5',
         name: 'Meaningful & Real-World Connections',
         levels: {
           1: 'Content presented in isolation, no real-world link.',
-          2: "Teacher mentions a connection but doesn't develop it.",
-          3: "Content connected to students' lives or local context.",
+          2: 'Teacher mentions a connection but doesn\'t develop it.',
+          3: 'Content connected to students\' lives or local context.',
           4: 'Students generate their own connections; examples from their community.',
         },
-        aiDetectionMethod: "Search for connection phrases ('like when,' 'for example,' 'imagine,' 'remember in [subject] when...') and check whether the connection is explained or just mentioned in passing.",
       },
       {
         id: 'B6',
@@ -95,10 +90,39 @@ const DOMAINS = {
           3: 'Tasks differentiated for at least 2 ability groups.',
           4: 'Multiple pathways offered; struggling students supported, advanced students stretched.',
         },
-        aiDetectionMethod: "Listen for scaffolding language ('let's break this into smaller steps'), extension language ('those who finish can try...'), and alternate explanations ('let me explain it another way').",
       },
       {
         id: 'B7',
+        name: 'Use of Taleemabad Lesson Plan',
+        levels: {
+          1: 'Taleemabad lesson plan not used at all.',
+          2: 'Plan open but teacher deviates significantly.',
+          3: 'Plan followed with minor contextual adaptations.',
+          4: 'Plan followed faithfully AND adapted intelligently to class needs.',
+        },
+      },
+      {
+        id: 'B8',
+        name: 'Use of Prescribed Resources',
+        levels: {
+          1: 'No Taleemabad resources (video, worksheet, manipulatives) used.',
+          2: 'Some resources used but not as intended.',
+          3: 'Key resources used as prescribed in lesson plan.',
+          4: 'All resources used effectively; teacher adds complementary materials.',
+        },
+      },
+      {
+        id: 'B9',
+        name: 'Time on Task / Time on Learning',
+        levels: {
+          1: 'Less than 50% of class time spent on learning activities.',
+          2: '50–69% on task (significant management/transition time lost).',
+          3: '70–85% on task with efficient transitions.',
+          4: 'More than 85% on task; routines are automatic, transitions seamless.',
+        },
+      },
+      {
+        id: 'B10',
         name: 'Lesson Closure & Consolidation',
         levels: {
           1: 'Lesson ends abruptly with no summary.',
@@ -106,50 +130,56 @@ const DOMAINS = {
           3: 'Structured closure: recap key points, check understanding.',
           4: 'Students summarize learning, connect to next lesson, self-assess.',
         },
-        aiDetectionMethod: "Listen for closing/summary language ('to conclude,' 'let's review,' 'in summary') and whether students are asked to restate what they learned.",
       },
     ],
   },
   high_leverage_practices: {
     key: 'C',
     displayName: 'High-Leverage Practices',
-    indicatorCount: 4,
+    indicatorCount: 12,
     indicators: [
       {
         id: 'C1',
-        name: "Quality Questioning (Bloom's Aligned)",
+        name: 'Quality Questioning (Bloom\'s Aligned)',
         levels: {
           1: 'Only yes/no or recall questions asked. Close-ended, requiring one-word answers.',
-          2: "Mix of recall and some open-ended questions, but they lack depth. E.g., 'Why is the capital important?' without further exploration.",
+          2: 'Mix of recall and some open-ended questions, but they lack depth. E.g., \'Why is the capital important?\' without further exploration.',
           3: 'Purposeful mix including application & analysis questions. Open-ended questions dominate. Wait time given.',
-          4: "Questions span all Bloom's levels (Remember→Create); students generate questions; Socratic questioning evident.",
+          4: 'Questions span all Bloom\'s levels (Remember→Create); students generate questions; Socratic questioning evident.',
         },
-        aiDetectionMethod: "Classify each question as open or closed; look for a follow-up question after a student's answer, not just moving straight to the next student.",
       },
       {
         id: 'C2',
         name: 'Responsive Re-explanation & Adaptive Teaching',
         levels: {
-          1: "Repeats same explanation when students don't understand.",
+          1: 'Repeats same explanation when students don\'t understand.',
           2: 'Tries a different approach but still teacher-centered.',
           3: 'Uses alternative representations (visual, concrete, analogy). Adjusts teaching to student level.',
-          4: "Diagnoses misconception, re-explains using student's own logic, confirms understanding.",
+          4: 'Diagnoses misconception, re-explains using student\'s own logic, confirms understanding.',
         },
-        aiDetectionMethod: "Compare a first explanation to any follow-up to see if it's genuinely different; listen for correction language ('not quite,' 'actually,' 'the correct answer is') after wrong answers.",
       },
       {
         id: 'C3',
         name: 'Effective Feedback',
         levels: {
-          1: "No feedback given, or only 'good/bad' evaluations. Generic: 'Good job' or 'Try again.'",
-          2: "Feedback given but generic ('try harder'). Specific but does not consistently guide improvement.",
+          1: 'No feedback given, or only \'good/bad\' evaluations. Generic: \'Good job\' or \'Try again.\'',
+          2: 'Feedback given but generic (\'try harder\'). Specific but does not consistently guide improvement.',
           3: 'Specific feedback on what was done well and what to improve. Actionable.',
           4: 'Feedback is specific, actionable, with next steps. Students use feedback to self-correct. Guides refinement of reasoning.',
         },
-        aiDetectionMethod: "Check what the teacher says right after a student responds - a specific comment, or just generic 'good'/'wrong'? Look for guidance words like 'try,' 'instead,' 'next time.'",
       },
       {
         id: 'C4',
+        name: 'Equitable Participation',
+        levels: {
+          1: 'Only 2–3 students participate; others ignored. Teacher-dominated.',
+          2: 'Teacher calls on volunteers only. A few students contribute while others stay silent.',
+          3: 'Deliberate strategies: cold call, pair-share, name sticks. Diverse students included.',
+          4: 'All students participate; teacher tracks contributions; gender-equitable. Students debate and refine arguments.',
+        },
+      },
+      {
+        id: 'C5',
         name: 'Student Agency & Voice',
         levels: {
           1: 'Students are passive recipients; no choice or voice. Content from single perspective.',
@@ -157,79 +187,160 @@ const DOMAINS = {
           3: 'Students make choices about how to demonstrate learning. Explore multiple perspectives.',
           4: 'Students lead discussions, choose methods, self-assess, peer-teach. Create novel solutions. Evaluate alternatives.',
         },
-        aiDetectionMethod: "Listen for choice language ('you choose,' 'which do you prefer') and for moments where a student is leading, suggesting, or deciding something.",
+      },
+      {
+        id: 'C6',
+        name: 'Classroom Management & Routines',
+        levels: {
+          1: 'Frequent disruptions; no visible routines. Students struggle to engage.',
+          2: 'Some routines but inconsistently enforced. Instructions lack clarity for all groups.',
+          3: 'Clear routines (entry, transitions, dismissal); minimal disruptions. Expectations clear.',
+          4: 'Seamless routines; students self-manage; positive behavioral reinforcement. Students actively participate in complex, clearly defined tasks.',
+        },
+      },
+      {
+        id: 'C7',
+        name: 'Positive & Supportive Learning Environment',
+        levels: {
+          1: 'Negative tone; punitive language or humiliation.',
+          2: 'Neutral but cold; no encouragement.',
+          3: 'Warm, encouraging tone; mistakes treated as learning opportunities.',
+          4: 'Joyful classroom; students feel safe to take risks; laughter and curiosity present.',
+        },
+      },
+      {
+        id: 'C8',
+        name: 'Modeling, Scaffolding & Problem-Solving',
+        levels: {
+          1: 'Teacher tells but doesn\'t show. Simple tasks demonstrated without explanation of process.',
+          2: 'Teacher demonstrates once but moves on quickly. Problem-solving modeled but strategies not explained.',
+          3: 'I Do → We Do → You Do scaffolding visible. Problem-solving and creativity modeled with clear strategies.',
+          4: 'Gradual release with checks at each stage; scaffold removed when ready. Teacher brainstorms solutions and explains reasoning.',
+        },
+      },
+      {
+        id: 'C9',
+        name: 'Collaborative Learning',
+        levels: {
+          1: 'No group or pair work. Students work individually without interaction.',
+          2: 'Students in groups but working individually. Tasks lack depth.',
+          3: 'Purposeful pair/group tasks with clear roles. Students work towards synthesized solutions.',
+          4: 'Structured collaboration (think-pair-share, jigsaw); students build on each other\'s ideas. Teams design solutions to community problems.',
+        },
+      },
+      {
+        id: 'C10',
+        name: 'Integration of Taleemabad Technology',
+        levels: {
+          1: 'No technology used despite availability.',
+          2: 'Technology used as distraction/babysitter.',
+          3: 'Taleemabad videos/apps used to support learning objectives.',
+          4: 'Technology integrated seamlessly; students interact with content; teacher facilitates around it.',
+        },
+      },
+      {
+        id: 'C11',
+        name: 'Self & Peer Assessment Facilitation',
+        levels: {
+          1: 'Assessment limited to teacher-led grading. Students receive grades without reflection.',
+          2: 'Some self- or peer-assessment occurs, but inconsistent. Students assess without clear criteria.',
+          3: 'Self- and peer-assessment structured and purposeful. Students use rubrics to assess work.',
+          4: 'Students use rubrics to assess work, suggest improvements for peers, and set goals. Assessment tasks require analysis/evaluation/creation.',
+        },
+      },
+      {
+        id: 'C12',
+        name: 'Classroom Resources & Space for Collaboration',
+        levels: {
+          1: 'Resources and space disorganized, limiting collaborative learning. No group work areas.',
+          2: 'Some organization, but space/resources do not fully support collaboration.',
+          3: 'Resources and space well-organized for collaborative tasks. Materials accessible.',
+          4: 'Tables arranged for group work, materials easily accessible. Environment designed for inquiry and collaboration.',
+        },
       },
     ],
   },
   student_engagement: {
     key: 'D',
     displayName: 'Student Engagement',
-    indicatorCount: 5,
+    indicatorCount: 7,
     indicators: [
       {
         id: 'D1',
-        name: 'Diversity of Conceptual Expression',
+        name: 'Active Participation Rate',
         levels: {
-          1: 'No student responses about the concept appear in the transcript at all.',
-          2: "All student responses closely copy the teacher's wording, or students only give very short answers - one word, a number, or a group chorus.",
-          3: 'Students phrase the concept in 2 or more different ways, but only using words and examples the teacher already introduced.',
-          4: "Students use at least 3 different phrasings of the concept, none copying the teacher's wording - and at least one student uses a word or example the teacher never introduced.",
+          1: 'Less than 25% of students visibly engaged. Collaboration minimal or absent.',
+          2: '25–50% engaged; many passive or off-task.',
+          3: '50–75% actively participating (writing, discussing, solving).',
+          4: 'More than 75% actively engaged; energy is visible; students initiating. Structured collaboration on synthesis/problem-solving.',
         },
-        aiDetectionMethod: "Compare how students phrase the concept against the teacher's own wording, and flag any student-introduced vocabulary or examples.",
       },
       {
         id: 'D2',
-        name: 'Student Reasoning in Responses',
+        name: 'Cognitive Engagement Level (Bloom\'s)',
         levels: {
-          1: 'The teacher never asks for reasoning and no student reasoning appears anywhere in the transcript.',
-          2: 'The teacher asks for reasoning at least once, but no student response actually contains a reason.',
-          3: 'At least one student response contains an explanation or reason, but only after the teacher explicitly asks for one.',
-          4: "At least two student responses contain an explanation or reason - and at least one of them wasn't prompted by the teacher asking 'why'.",
+          1: 'Students copying or doing rote recall only. Passively receiving information.',
+          2: 'Students completing tasks but without thinking deeply.',
+          3: 'Students applying concepts to new problems (Bloom\'s Apply/Analyze).',
+          4: 'Students creating, evaluating, debating — genuine intellectual work. Actively analyse, interpret, and critique content with supporting evidence.',
         },
-        aiDetectionMethod: "Look for reasoning language in student responses ('because...,' 'I think...,' 'so...'), and note whether it followed a direct prompt or came unprompted.",
       },
       {
         id: 'D3',
-        name: 'Student-Initiated Questions',
+        name: 'Student-to-Student Interaction',
         levels: {
-          1: 'No student questions of any kind appear in the transcript.',
-          2: "Students ask only procedural questions ('what page?', 'do we write it down?') - no content questions at all.",
-          3: "At least one student asks a clarification question about the concept, showing they're trying to understand something they're unsure about.",
-          4: 'At least one student asks a genuine question that goes beyond what was taught - extending the concept or connecting it to something else.',
+          1: 'No peer interaction; silent individual work only.',
+          2: 'Students talk but not about content.',
+          3: 'Students discuss content in pairs/groups; academic language used.',
+          4: 'Students build on each other\'s ideas; respectful disagreement; peer teaching. Students debate solutions and propose creative alternatives.',
         },
-        aiDetectionMethod: 'Distinguish content questions from purely logistical ones, and check whether a question extends beyond what was directly taught.',
       },
       {
         id: 'D4',
-        name: 'Spontaneous Transfer & Connection-Making',
+        name: 'Student Confidence & Risk-Taking',
         levels: {
-          1: 'No connection-making activity of any kind appears in the lesson.',
-          2: 'The teacher invites students to make a connection, but no student does.',
-          3: "A student makes a connection to something outside the lesson only after the teacher explicitly prompts them ('where else have you seen this?').",
-          4: 'At least one student makes an unprompted connection between the lesson and something outside it - their own life, an earlier topic, or another subject.',
+          1: 'Students afraid to answer; avoidance behaviors visible.',
+          2: 'Students answer only when certain; no risk-taking.',
+          3: 'Students attempt challenging tasks; some comfortable with mistakes.',
+          4: 'Students volunteer, ask questions, try difficult problems. Mistakes celebrated. Students freely share and debate ideas.',
         },
-        aiDetectionMethod: "Track whether a student's outside-the-lesson connection came before or after a teacher prompt.",
       },
       {
         id: 'D5',
-        name: 'Visible Learning Progression Across the Lesson',
+        name: 'On-Task Behavior During Independent Work',
         levels: {
-          1: 'Too few student responses (fewer than 3) to compare the beginning and end of the lesson.',
-          2: 'Student responses look about the same at the end as at the start - no noticeable change in vocabulary or completeness.',
-          3: 'Student responses are somewhat more complete or accurate by the end, but the improvement is modest or inconsistent.',
-          4: "By the end of the lesson, students use the concept's key vocabulary more often and give longer, more complete responses than at the start - including words only the teacher had used earlier.",
+          1: 'Most students off-task during independent/group work.',
+          2: 'Students start on-task but lose focus quickly.',
+          3: 'Students sustain focus for most of independent work time.',
+          4: 'Students self-regulate; seek help appropriately; persist through difficulty.',
         },
-        aiDetectionMethod: "Compare the vocabulary and length of student responses about the concept from the start of the lesson to the end.",
+      },
+      {
+        id: 'D6',
+        name: 'Student Use of Learning Materials',
+        levels: {
+          1: 'Students don\'t interact with provided materials.',
+          2: 'Materials used passively (watching video, holding textbook).',
+          3: 'Students actively use materials to solve problems or practice.',
+          4: 'Students use materials creatively; extend beyond prescribed use.',
+        },
+      },
+      {
+        id: 'D7',
+        name: 'Inclusivity of Engagement',
+        levels: {
+          1: 'Only front-row or high-ability students engaged.',
+          2: 'Teacher attempts inclusion but success is limited.',
+          3: 'Students across ability levels and genders are participating.',
+          4: 'Deliberate inclusion of marginalized students; no one invisible. Gender-equitable participation.',
+        },
       },
     ],
   },
   teacher_subject_knowledge: {
     key: 'F',
     displayName: 'Teacher Subject Knowledge',
-    indicatorCount: 10,
-    // F1-F3 apply to every subject; F4-F5 = Mathematics; F6-F7 = Science;
-    // F8-F10 = Literacy (English or Urdu). Non-applicable rows are scored 1
-    // with evidence noting the subject mismatch — keeps the denominator at 104.
+    indicatorCount: 8,
     indicators: [
       {
         id: 'F1',
@@ -241,7 +352,6 @@ const DOMAINS = {
           3: 'Content is accurate; no errors observed.',
           4: 'Content is accurate AND teacher explains WHY (conceptual depth, not just facts).',
         },
-        aiDetectionMethod: "Check facts and definitions stated by the teacher against what's correct for the subject, and listen for uncertainty language ('I think,' 'not sure').",
       },
       {
         id: 'F2',
@@ -253,7 +363,6 @@ const DOMAINS = {
           3: 'Key terms used accurately and explained to students.',
           4: 'Terms used naturally; students also use them; bilingual bridging (Urdu/English) effective.',
         },
-        aiDetectionMethod: "Track how often subject-specific vocabulary is used, whether it's defined when first introduced, and whether the language stays precise rather than vague.",
       },
       {
         id: 'F3',
@@ -261,101 +370,71 @@ const DOMAINS = {
         subjectGroup: 'general',
         levels: {
           1: 'Teacher unaware of common misconceptions in this topic.',
-          2: "Aware but doesn't address them proactively.",
+          2: 'Aware but doesn\'t address them proactively.',
           3: 'Anticipates and addresses at least 1–2 common misconceptions.',
           4: 'Systematically surfaces and corrects misconceptions; uses diagnostic questions.',
         },
-        aiDetectionMethod: "Listen for the teacher naming a misconception before students raise it ('many people think X, but actually...'), and for how accurately student errors are corrected.",
       },
       {
         id: 'F4',
-        name: 'Mathematical Discourse & Reasoning',
-        subjectGroup: 'mathematics',
+        name: 'Depth of Explanation',
+        subjectGroup: 'general',
         levels: {
-          1: "Entirely answer-focused throughout ('what is the answer?') with no how or why; no student mathematical explanation at any point.",
-          2: 'Asks reasoning questions but accepts one-word or answer-only responses without pressing further, or reasoning is prompted but no student explanation follows.',
-          3: "Asks reasoning questions ('how do you know?', 'why does that work?') and presses for reasoning rather than accepting answer-only responses.",
-          4: 'Same as level 3, and students produce audible mathematical reasoning at a level appropriate to their grade in response.',
+          1: 'Superficial/procedural explanation only (\'do it this way\').',
+          2: 'Some conceptual explanation but relies on memorization.',
+          3: 'Explains the \'why\' behind procedures; uses multiple representations.',
+          4: 'Deep conceptual teaching; connects to broader principles; encourages student reasoning.',
         },
-        aiDetectionMethod: "Count reasoning questions ('how,' 'why,' 'explain,' 'show me') and check whether a student explanation actually follows.",
       },
       {
         id: 'F5',
-        name: 'Problem-Solving & Productive Struggle',
-        subjectGroup: 'mathematics',
+        name: 'Subject-Specific Pedagogy: MATH',
+        subjectGroup: 'math',
         levels: {
-          1: 'Only routine procedural practice; teacher immediately provides solutions; no think time allowed.',
-          2: 'A challenging problem is presented but think time is too brief, or the teacher jumps in too quickly and removes the challenge.',
-          3: 'Presents a genuinely challenging, multi-step or non-routine problem and allows adequate think time rather than rushing to the answer.',
-          4: "Same as level 3, and the teacher also actively encourages persistence during the struggle ('keep trying, you're on the right track').",
+          1: 'Math taught purely procedurally; no use of manipulatives or visuals.',
+          2: 'Some visual aids but conceptual understanding not developed.',
+          3: 'Uses concrete → pictorial → abstract (CPA) progression; manipulatives present.',
+          4: 'CPA approach mastered; multiple solution strategies explored; math talk norms established.',
         },
-        aiDetectionMethod: 'Identify problem complexity through the language used and measure the length of silent think time before the teacher intervenes.',
       },
       {
         id: 'F6',
-        name: 'Inquiry-Based Approach',
+        name: 'Subject-Specific Pedagogy: SCIENCE',
         subjectGroup: 'science',
         levels: {
-          1: 'Teacher starts directly with a definition or explanation; no space for student thinking at any point; pure transmission throughout.',
-          2: 'Attempts an inquiry opening but gives the answer too quickly, or shifts to pure transmission and never returns.',
-          3: 'Opens a concept with a question, picture, or scenario, and gives students genuine space to respond before explaining.',
-          4: "Same as level 3, and the teacher visibly builds on at least one student's response to guide the class toward the concept.",
+          1: 'Science taught from textbook only; no inquiry or observation.',
+          2: 'Some demonstration but teacher-led; students observe passively.',
+          3: 'Hands-on activities present; students make predictions and observations.',
+          4: 'Full inquiry cycle: question → predict → investigate → conclude. Students design investigations.',
         },
-        aiDetectionMethod: "Check whether the teacher's explanation comes before or after students are given a chance to respond, whenever a new concept is introduced.",
       },
       {
         id: 'F7',
-        name: 'Science Talk & Student Sense-Making',
-        subjectGroup: 'science',
+        name: 'Subject-Specific Pedagogy: LITERACY / LANGUAGE',
+        subjectGroup: 'literacy',
         levels: {
-          1: "All student responses are one-word, chorus, or a direct repetition of the teacher's words; no student expresses an idea in their own words.",
-          2: "Some sentence-level responses but most are one-word or chorus answers, or students mostly repeat the teacher's exact wording.",
-          3: "At least one student expresses a science idea in their own words, not just repeating the teacher's phrase.",
-          4: "Same as level 3, and at least 2 students produce sentence-level responses in their own words, using some form of reasoning ('I think because...').",
+          1: 'Reading taught as decoding only; no comprehension strategies.',
+          2: 'Some reading activities but no explicit strategy instruction.',
+          3: 'Teacher models reading strategies (prediction, summarizing, questioning). Balanced approach.',
+          4: 'Balanced literacy: phonics + fluency + vocabulary + comprehension + writing integrated.',
         },
-        aiDetectionMethod: "Measure whether student responses are one word or a full sentence, and check whether the wording is the student's own or a repeat of the teacher's.",
       },
       {
         id: 'F8',
-        name: 'Explicit Phonics / Decoding',
-        subjectGroup: 'literacy',
+        name: 'Cross-Curricular Connections',
+        subjectGroup: 'general',
         levels: {
-          1: 'Phonics drill and sequence completely skipped; no phonics instruction at any point.',
-          2: 'A general phonics sequence is present but inconsistent - the teacher skips or rushes through one or more steps.',
-          3: 'Phonics instruction follows most of the correct sequence (sound to blending to segmenting), explicitly taught and modelled.',
-          4: 'The full sequence is present and complete - pronunciation, initial/final sounds, blending, and segmenting - with audible student practice at every stage.',
+          1: 'Subject taught in complete isolation.',
+          2: 'Occasional reference to other subjects but not developed.',
+          3: 'Meaningful connections made to at least one other subject area.',
+          4: 'Integrated approach; students see how math connects to science connects to language.',
         },
-        aiDetectionMethod: 'Track whether each stage of the phonics sequence appears, in order, with audible student responses at each one.',
-      },
-      {
-        id: 'F9',
-        name: 'Comprehension Strategy Instruction',
-        subjectGroup: 'literacy',
-        levels: {
-          1: 'No strategy instruction at any point; teacher asks comprehension questions but never teaches HOW to comprehend.',
-          2: 'Names and models the strategy but gives no student practice, or students practise without the strategy ever being named or modelled.',
-          3: 'At least two of the three steps are present - naming the strategy, modelling it with text, or student practice.',
-          4: 'All three steps are present in sequence - the strategy is named explicitly, modelled with text, and students practise it audibly.',
-        },
-        aiDetectionMethod: "Listen for the strategy being named ('this is called predicting'), modelled aloud ('watch me, I think...'), and then practised by students.",
-      },
-      {
-        id: 'F10',
-        name: 'Reading-Writing Connections',
-        subjectGroup: 'literacy',
-        levels: {
-          1: 'Reading and writing are completely separate in the lesson, or only one of the two happens at all.',
-          2: "Reading and writing both happen but the connection between them isn't made explicit - e.g. 'we read, now write' with no real link.",
-          3: 'At least one explicit link is made between reading and writing (e.g. using the text as a model or prompt for student writing).',
-          4: 'Two or more explicit reading-writing connections are made, with the text clearly used as a model for what students go on to write.',
-        },
-        aiDetectionMethod: "Search for bridge language connecting the two ('we read about X, now write about...', 'notice how the author...') and count explicit connections.",
       },
     ],
   },
 };
 
-const TOTAL_INDICATORS = 26; // 7+4+5+10
+const TOTAL_INDICATORS = 37; // FICO V3 B10+C12+D7+F8 (Section E omitted — ASER assessment, not audio-observable)
 const SCALE_MAX = 4;
 const MAX_MARKS = TOTAL_INDICATORS * SCALE_MAX; // 104
 
@@ -372,8 +451,7 @@ function renderIndicatorRubric(ind) {
    - 1: ${levels[1]}
    - 2: ${levels[2]}
    - 3: ${levels[3]}
-   - 4: ${levels[4]}
-   AI Detection Method: ${ind.aiDetectionMethod}`;
+   - 4: ${levels[4]}${ind.aiDetectionMethod ? `\n   AI Detection Method: ${ind.aiDetectionMethod}` : ''}`;
 }
 
 function getSystemPrompt() {
@@ -387,26 +465,35 @@ function getSystemPrompt() {
 
   _cachedSystemPrompt = `You are an expert classroom observer analyzing teaching practices using the FICO Fidelity & Impact Classroom Observation Tool (the ICT canonical rubric).
 
-OBSERVATION FRAMEWORK: FICO
-4 scored sections (B, C, D, F) — 26 indicators total — Scale 1-4
+OBSERVATION FRAMEWORK: FICO V3
+4 scored sections (B, C, D, F) — ${TOTAL_INDICATORS} indicators total — Scale 1-4
+(Section E — Student Assessment — is intentionally out of scope for this flow: it is
+one-on-one ASER/EGRA reading & numeracy testing, not observable from a classroom recording.)
 
-**SCALE:**
-- 1 = Not Observed / Emerging: Indicator not present or not attempted.
-- 2 = Developing: Partially present, inconsistent or ineffective.
-- 3 = Proficient / Effective: Clearly present, mostly consistent and purposeful.
-- 4 = Highly Effective: Exemplary, adapted to context, embedded in practice.
+**SCALE — score by EFFECT, not mere presence:**
+- 1 = Not Observed / Emerging: Indicator not present, not attempted, or not evidenced in the transcript.
+- 2 = Developing: The move APPEARS but is superficial, closed, teacher-centred, or does not achieve its purpose.
+- 3 = Proficient / Effective: The move is present AND the transcript shows it WORKED — a student responds substantively, a check surfaces real understanding, a task lands.
+- 4 = Highly Effective: Proficient PLUS a student independently extends, applies, or transfers — the descriptor's level-4 bar is met.
+
+**SCORING DISCIPLINE (applies to EVERY indicator, no exceptions):**
+- A score of 3 or 4 REQUIRES a direct transcript quote showing BOTH the teacher move AND its effect on students. If you cannot quote the effect, cap the score at 2.
+- If the behaviour is absent from the transcript, score 1. NEVER infer a move "probably happened" — score only what the transcript evidences.
+- A closed or compliance check ("samajh aa gayi?", "are you sure?", "theek hai?", a choral "yes") is NOT a comprehension check. On its own it caps the relevant indicator at 2; reach 3 only if the teacher restates ≥2 named lesson concepts or a student restates/applies the content.
+- For questioning indicators: classify each teacher question by Bloom level and count open-ended vs closed. Do not reach Proficient unless open-ended/higher-order questions dominate (≥50%).
+- Match the transcript to the LEVEL DESCRIPTORS below literally — they are behavioural and specific. Pick the highest level whose description is fully evidenced, not the one the lesson gestured at.
 
 ${sectionBlocks}
 
 **TOTAL: ${MAX_MARKS} marks maximum** (${TOTAL_INDICATORS} indicators × 4)
 
 SUBJECT-CONDITIONAL SECTION F:
-Section F contains three subject-specific groups. Score each indicator using the level descriptors above. If the lesson subject does not match the indicator's SUBJECT tag (e.g. F4-F5 Mathematics rows in a Science lesson), score that indicator as 1 with evidence "Not applicable — lesson subject is <subject>, indicator applies to <subjectGroup>."
+F1-F4 and F8 apply to every subject. F5 = MATHEMATICS, F6 = SCIENCE, F7 = LITERACY/LANGUAGE. If the lesson subject does not match a subject-tagged indicator, score it 1 with evidence "Not applicable — lesson subject is <subject>, indicator applies to <subjectGroup>."
 
 SPECIAL INSTRUCTIONS:
 - For Section B indicator B1 (Instructional Clarity & Learning Objectives): if a lesson plan is linked, compare observed execution against the specific LP objectives + steps.
-- Apply the AI Detection Method exactly as written for each indicator — it is the authored scoring guidance.
-- Provide SPECIFIC transcript evidence for each indicator.
+- Score STRICTLY by the level descriptors + the SCORING DISCIPLINE above. Where an AI Detection Method is given, apply it exactly.
+- Provide SPECIFIC transcript evidence (a real quote) for each indicator; name the EFFECT on students, not just the teacher's move.
 - Reference timestamps when quoting dialogue.`;
 
   return _cachedSystemPrompt;
@@ -433,7 +520,12 @@ function focusAreaLangDirective(language) {
 // ─── Analysis prompt builder ─────────────────────────────────────────
 
 function buildIndicatorJsonRow(ind) {
-  return `        { "id": "${ind.id}", "name": "${ind.name.replace(/"/g, '\\"')}", "score": <1-4>, "evidence": "Detailed description + Quote: \\\"...\\\"", "timestamp": "exact time" }`;
+  // bd-2369: `evidence_summary` is the ≤500-char gist the human observer sees on
+  // the editable Flow form (Meta caps a TextArea at 600). `evidence` stays FULL
+  // and flows to the teacher's report unchanged. One LLM pass emits both — no
+  // extra call. Keep them consistent: the summary is a faithful compression of
+  // the same moment, never a different judgement.
+  return `        { "id": "${ind.id}", "name": "${ind.name.replace(/"/g, '\\"')}", "score": <1-4>, "evidence": "Detailed description + Quote: \\\"...\\\"", "evidence_summary": "<= 500 chars: the move + its effect on students + one short quote — the gist a reviewer needs to sanity-check the score", "timestamp": "exact time" }`;
 }
 
 function buildAnalysisPrompt(transcript, metadata, lessonPlanStructured, photoAnalysis) {
@@ -510,7 +602,12 @@ EVIDENCE RULES:
 - For EACH indicator, describe what the teacher DID (not what they didn't do)
 - Include English translation of dialogue: Quote: "..."
 - Even for score 1, provide detailed evidence of what was observed
-- For non-applicable Section F rows (subject mismatch), score 1 with evidence noting the mismatch`;
+- For non-applicable Section F rows (subject mismatch), score 1 with evidence noting the mismatch
+- For EACH indicator ALSO write "evidence_summary": a self-contained ≤500-character
+  compression of that indicator's "evidence" — the move, its effect on students, and one
+  short quote. It is the ONLY note the human observer reads on the review form, so it must
+  stand alone and justify the score. Do NOT write "see full note" or truncate mid-sentence;
+  compress. It must never contradict the full "evidence".`;
 }
 
 // ─── Score computation ───────────────────────────────────────────────
@@ -569,7 +666,7 @@ function getScoringConstants() {
 
 module.exports = {
   name: 'fico',
-  version: '2.0',
+  version: '3.0', // FICO V3 (37 ind, B/C/D/F) — adopted from canonical Coaching Framework sheet 2026-07-29
   displayName: 'FICO Framework',
   maxMarks: MAX_MARKS,
   hasDebrief: false,

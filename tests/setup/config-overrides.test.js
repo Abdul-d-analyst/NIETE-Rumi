@@ -148,7 +148,9 @@ describe('Voice IDs should be env-var overridable (bd-332)', () => {
   test('VOICE_MODELS uses overridden voice IDs', () => {
     process.env.ELEVENLABS_VOICE_ID_ES = 'custom-es';
     process.env.ELEVENLABS_VOICE_ID_AR = 'custom-ar';
-    process.env.UPLIFT_VOICE_ID_UR = 'custom-ur';
+    // bd-2375: Urdu voice moved from Uplift to ElevenLabs (Sara) — its override
+    // env var is now ELEVENLABS_VOICE_ID_UR.
+    process.env.ELEVENLABS_VOICE_ID_UR = 'custom-ur';
     process.env.UPLIFT_VOICE_ID_SD = 'custom-sd';
     process.env.UPLIFT_VOICE_ID_BAL = 'custom-bal';
 

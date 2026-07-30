@@ -52,10 +52,17 @@ const COACHING_MESSAGES = {
   lessonPlan_request: en("Great! Please send your lesson plan as a document (PDF, Word, or image).\n\nTap 📎 → Document to upload it."),
   // Lesson-plan branch: document received, queued for processing
   lessonPlan_received: en("📄 Lesson plan received! I'm processing it in the background and will weave it into your analysis."),
+  // Lesson-plan branch: the uploaded document doesn't look like a lesson plan
+  // (e.g. a leave letter). We still analyse the recording; we just can't use
+  // this file as a plan. (bd-2372 — Irum, ICT, DC-9.)
+  lessonPlan_notLessonPlan: en("📄 Thanks — but this file doesn't look like a lesson plan, so I won't reference it. I'll go ahead and analyse your classroom recording. If you meant to send a lesson plan, please resend it as a PDF, Word file, or clear page photos."),
   // Lesson-plan branch: legacy ack
   lessonPlan_included: en("✅ Lesson plan received! I'll include this in my analysis."),
   // Recovery: teacher exited the coaching flow without sending audio
   exitedNoAudio: en("No problem! If you'd like to analyze classroom audio in the future, just send me a recording."),
+  // A new classroom recording arrived while an analysis is already running for
+  // her — reassure, don't restart (bd-2376 — M. Salman, ICT, DC-5).
+  coaching_stillAnalysing: en("⏳ I'm still analysing your previous recording — hang tight, no need to resend. I'll share your report as soon as it's ready."),
   // Step 1/5 — transcription kickoff
   step1_transcribing: en("🔄 Step 1/5: Transcribing your classroom audio. This may take 30-60 seconds...hang in there!"),
   // Step 2/5 — pedagogy analysis kickoff (templated; `${step}` resolved by caller via interpolation OR by passing the number 2 when constant)

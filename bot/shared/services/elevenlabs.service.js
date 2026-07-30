@@ -9,6 +9,7 @@ const {
   OPENAI_API_KEY
 } = require('../utils/constants');
 const { logToFile } = require('../utils/logger');
+const { normalizeForUrduTTS } = require('./urdu-tts-normalizer');
 
 /**
  * ElevenLabs Service (Phase 3: Multi-language support)
@@ -126,8 +127,11 @@ class ElevenLabsService {
 
     try {
       if (voiceConfig.provider === 'elevenlabs') {
-        // Use ElevenLabs for en/es/ar
-        return await this.generateSpeechWithVoice(text, voiceConfig.voiceId, languageCode);
+        // Use ElevenLabs for en/es/ar/ur. bd-2375: Urdu goes to Sara — run the
+        // runtime discipline (inline digits → English words, strip Markdown) so
+        // Sara doesn't render "3" as gibberish or read "**" aloud.
+        const ttsText = languageCode === 'ur' ? normalizeForUrduTTS(text) : text;
+        return await this.generateSpeechWithVoice(ttsText, voiceConfig.voiceId, languageCode);
       } else if (voiceConfig.provider === 'uplift') {
         // Use Uplift for Urdu (existing integration in audio.service)
         const AudioService = require('./audio.service');
@@ -164,17 +168,19 @@ class ElevenLabsService {
         hasEmotionTags: /\[[\w]+\]/.test(text)
       });
 
+      // bd-2375: Sara (Urdu) reads best at the LP-voicenotes V20 settings —
+      // higher stability keeps Nastaliq + code-switched English steady. The
+      // expressive 0.0-stability profile stays for en/es/ar (audio tags).
+      const voiceSettings = languageCode === 'ur'
+        ? { stability: 0.7, similarity_boost: 0.85, style: 0.0, use_speaker_boost: true }
+        : { stability: 0.0, similarity_boost: 0.75, style: 0.0, use_speaker_boost: true };
+
       const response = await axios.post(
         `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
         {
           text: text,
           model_id: 'eleven_v3', // v3 supports audio tags and emotion control
-          voice_settings: {
-            stability: 0.0, // 0.0 = Creative (best for expressiveness with audio tags)
-            similarity_boost: 0.75, // How closely to match the voice
-            style: 0.0, // Style exaggeration (0 = natural)
-            use_speaker_boost: true // Enhance speaker clarity
-          }
+          voice_settings: voiceSettings
         },
         {
           headers: {
