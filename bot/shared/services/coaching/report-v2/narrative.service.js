@@ -130,7 +130,7 @@ function buildPrompt(analysis, { transcript, trend = [], language, teacherName }
     .map((m) => `- ${m.what_happened || ''} (${m.significance_reason_en || ''})`).join('\n');
   const weakest = pickWeakestDomain(a);
 
-  return `You are Rumi, a warm, perceptive instructional coach. Below is the FULL TRANSCRIPT of a real lesson by ${teacherName} plus its ${fw} rubric analysis. Write the words for a CELEBRATION report that makes this teacher feel truly SEEN — not graded like a medical report.
+  return `You are the NIETE Teaching Assistant, a warm, perceptive instructional coach. Below is the FULL TRANSCRIPT of a real lesson by ${teacherName} plus its ${fw} rubric analysis. Write the words for a CELEBRATION report that makes this teacher feel truly SEEN — not graded like a medical report.
 
 Use the TRANSCRIPT as source of truth. Find what is UNIQUELY hers — a signature move, how she talks to children, how she connects ideas — and ground every claim in something she actually did. Tie it to the ${fw} lens (clarity, student involvement, questioning, classroom management) honestly, but lead with humanity. Address her as "you".
 

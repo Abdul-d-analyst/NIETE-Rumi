@@ -240,7 +240,7 @@ class AttendanceGeneratorService {
    */
   static async createExcelBuffer(metadata, records) {
     const workbook = new ExcelJS.Workbook();
-    workbook.creator = 'Rumi - Digital Teacher Coach';
+    workbook.creator = 'NIETE - Digital Teacher Coach';
     workbook.created = new Date();
 
     const sheet = workbook.addWorksheet('Attendance', {
@@ -495,7 +495,7 @@ class AttendanceGeneratorService {
    */
   static async createMonthlyRegisterBufferFromData(metadata, month, year, students, sessions) {
     const workbook = new ExcelJS.Workbook();
-    workbook.creator = 'Rumi - Digital Teacher Coach';
+    workbook.creator = 'NIETE - Digital Teacher Coach';
     workbook.created = new Date();
 
     const daysInMonth = new Date(year, month, 0).getDate();

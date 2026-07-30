@@ -61,18 +61,18 @@ function buildWaitMessage({ systemLanguage, contentLanguage, language, dbStats }
     // English: seconds for the sub-2-min fast path; minutes once we cross 2
     // minutes (else "240 seconds" reads weirdly when actual is 4 min).
     if (expectedSec >= 120) {
-      return `⏳ Generating your lesson plan — usually about ${expectedMin}-${expectedMin + 1} minutes (up to ${upperMin} minutes if our servers are busy).\n\nFeel free to keep using Rumi while you wait — your PDF will arrive here when it's ready.`;
+      return `⏳ Generating your lesson plan — usually about ${expectedMin}-${expectedMin + 1} minutes (up to ${upperMin} minutes if our servers are busy).\n\nFeel free to keep using NIETE while you wait — your PDF will arrive here when it's ready.`;
     }
     const upper = upperSec >= 120 ? `${Math.round(upperSec / 60)}-${Math.round(upperSec / 60) + 1} minutes` : `${upperSec} seconds`;
-    return `⏳ Generating your lesson plan — usually about ${expectedSec} seconds (up to ${upper} if our servers are busy).\n\nFeel free to keep using Rumi while you wait — your PDF will arrive here when it's ready.`;
+    return `⏳ Generating your lesson plan — usually about ${expectedSec} seconds (up to ${upper} if our servers are busy).\n\nFeel free to keep using NIETE while you wait — your PDF will arrive here when it's ready.`;
   }
 
   if (lang === 'ur') {
-    return `⏳ آپ کا منصوبہ تیار کیا جا رہا ہے — عام طور پر ${expectedMin} سے ${expectedMin + 1} منٹ۔ (سرور مصروف ہوں تو ${upperMin} منٹ تک)۔\n\nانتظار کے دوران Rumi استعمال کرتے رہیں — تیار ہوتے ہی PDF یہاں آ جائے گی۔`;
+    return `⏳ آپ کا منصوبہ تیار کیا جا رہا ہے — عام طور پر ${expectedMin} سے ${expectedMin + 1} منٹ۔ (سرور مصروف ہوں تو ${upperMin} منٹ تک)۔\n\nانتظار کے دوران NIETE استعمال کرتے رہیں — تیار ہوتے ہی PDF یہاں آ جائے گی۔`;
   }
 
   if (lang === 'sd') {
-    return `⏳ توهان جو منصوبو تيار ٿي رهيو آهي — عام طور تي ${expectedMin} کان ${expectedMin + 1} منٽ ۾۔ (سرور مصروف هجن ته ${upperMin} منٽن تائين)۔\n\nانتظار جي دوران Rumi استعمال ڪندا رهو — تيار ٿيندي ئي PDF هتي اچي ويندي۔`;
+    return `⏳ توهان جو منصوبو تيار ٿي رهيو آهي — عام طور تي ${expectedMin} کان ${expectedMin + 1} منٽ ۾۔ (سرور مصروف هجن ته ${upperMin} منٽن تائين)۔\n\nانتظار جي دوران NIETE استعمال ڪندا رهو — تيار ٿيندي ئي PDF هتي اچي ويندي۔`;
   }
 
   if (lang === 'sw') {
@@ -80,19 +80,19 @@ function buildWaitMessage({ systemLanguage, contentLanguage, language, dbStats }
     // Express in minutes when expectedSec >= 120 (Urdu-routed slow path);
     // seconds otherwise (English-routed fast path).
     if (expectedSec >= 120) {
-      return `⏳ Mpango wako wa somo unatengenezwa — kawaida dakika ${expectedMin} hadi ${expectedMin + 1} (hadi dakika ${upperMin} ikiwa servers zetu ni busy).\n\nUnaweza kuendelea kutumia Rumi wakati unasubiri — PDF yako itafika hapa ikiwa tayari.`;
+      return `⏳ Mpango wako wa somo unatengenezwa — kawaida dakika ${expectedMin} hadi ${expectedMin + 1} (hadi dakika ${upperMin} ikiwa servers zetu ni busy).\n\nUnaweza kuendelea kutumia NIETE wakati unasubiri — PDF yako itafika hapa ikiwa tayari.`;
     }
-    return `⏳ Mpango wako wa somo unatengenezwa — kawaida sekunde ${expectedSec} (hadi dakika ${upperMin} ikiwa servers zetu ni busy).\n\nUnaweza kuendelea kutumia Rumi wakati unasubiri — PDF yako itafika hapa ikiwa tayari.`;
+    return `⏳ Mpango wako wa somo unatengenezwa — kawaida sekunde ${expectedSec} (hadi dakika ${upperMin} ikiwa servers zetu ni busy).\n\nUnaweza kuendelea kutumia NIETE wakati unasubiri — PDF yako itafika hapa ikiwa tayari.`;
   }
 
   if (lang === 'ar') {
     // Arabic (Naskh script). RTL, Eastern Arabic numerals NOT used (we keep
     // Hindu-Arabic 0-9 for math notation consistency across languages).
-    return `⏳ يتم إعداد خطة الدرس الخاصة بك — عادةً ${expectedMin} إلى ${expectedMin + 1} دقائق. (حتى ${upperMin} دقيقة إذا كانت الخوادم مشغولة).\n\nيمكنك الاستمرار في استخدام Rumi أثناء الانتظار — سيصل ملف PDF هنا فور أن يكون جاهزًا.`;
+    return `⏳ يتم إعداد خطة الدرس الخاصة بك — عادةً ${expectedMin} إلى ${expectedMin + 1} دقائق. (حتى ${upperMin} دقيقة إذا كانت الخوادم مشغولة).\n\nيمكنك الاستمرار في استخدام NIETE أثناء الانتظار — سيصل ملف PDF هنا فور أن يكون جاهزًا.`;
   }
 
   // 'pa' — Punjabi (Shahmukhi)
-  return `⏳ تہاڈا منصوبہ تیار کیتا جا رہیا اے — عام طور تے ${expectedMin} توں ${expectedMin + 1} منٹ۔ (سرور مصروف ہون تے ${upperMin} منٹاں تک)۔\n\nانتظار وچ Rumi ورتدے رہو — تیار ہوندے ہی PDF ایتھے آ جاوے گی۔`;
+  return `⏳ تہاڈا منصوبہ تیار کیتا جا رہیا اے — عام طور تے ${expectedMin} توں ${expectedMin + 1} منٹ۔ (سرور مصروف ہون تے ${upperMin} منٹاں تک)۔\n\nانتظار وچ NIETE ورتدے رہو — تیار ہوندے ہی PDF ایتھے آ جاوے گی۔`;
 }
 
 module.exports = { buildWaitMessage };

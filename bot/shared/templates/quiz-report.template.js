@@ -246,7 +246,7 @@ function renderQuizReportHtml(reportData) {
   ${insight ? `
   <div class="section-heading">Teaching Insight</div>
   <div class="insight">
-    <div class="label">From Rumi</div>
+    <div class="label">From NIETE</div>
     <p>${escapeHtml(insight)}</p>
   </div>` : ''}
 

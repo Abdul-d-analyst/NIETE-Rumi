@@ -145,7 +145,7 @@ function buildCoachCardHtml(fb, { lang = 'sw' } = {}) {
     </div>
   </div>
   <div class="ft">
-    <div class="brand"><img src="data:image/png;base64,${A.logoNavy}" alt=""/><span>Rumi</span></div>
+    <div class="brand"><img src="data:image/png;base64,${A.logoNavy}" alt=""/><span>NIETE</span></div>
     <span class="lock">🔒 ${esc(S.coach_card_closing)}</span>
   </div>
 </div></body></html>`;

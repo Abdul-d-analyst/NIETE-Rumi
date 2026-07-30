@@ -37,7 +37,7 @@ const STRINGS = {
     flow_header: 'MEWAKA — rasimu',
     flow_body: 'Nimejaza fomu ya MEWAKA kutoka rekodi yako — kila kiashiria lina alama, ushahidi na ushauri. Fungua, hakiki, na ubadilishe unavyoona inafaa, kisha wasilisha.',
     flow_button: 'Fungua fomu',
-    flow_fallback: 'Uchambuzi umekamilika ✅ — lakini fomu ya kuhariri bado haijawashwa kwenye mfumo huu. Wasiliana na timu ya Rumi.',
+    flow_fallback: 'Uchambuzi umekamilika ✅ — lakini fomu ya kuhariri bado haijawashwa kwenye mfumo huu. Wasiliana na timu ya NIETE.',
     submitted_ack: '✅ Asante! Uchunguzi wako wa MEWAKA umehifadhiwa pamoja na marekebisho yako.',
     // ── bd-21: debrief entry points ──────────────────────────────────
     debrief_choice_body:
@@ -126,7 +126,7 @@ const STRINGS = {
     send_template_queued_fo:
       '📨 Mwalimu hajanitumia ujumbe hivi karibuni, kwa hivyo nimemtumia mwaliko rasmi — akiubonyeza, ripoti yake itamfikia mara moja. Nitakujulisha.',
     send_operator_review_fo:
-      '🔎 Ripoti imepelekwa kwa timu ya Rumi kwa ukaguzi wa mwisho (utaratibu wa majaribio). Ikithibitishwa, itamfikia mwalimu.',
+      '🔎 Ripoti imepelekwa kwa timu ya NIETE kwa ukaguzi wa mwisho (utaratibu wa majaribio). Ikithibitishwa, itamfikia mwalimu.',
     report_caption_teacher:
       'Ripoti yako ya somo 🌱 Imeandaliwa kutokana na uchunguzi wa {fo} — pamoja na kumbukumbu za mazungumzo yenu.',
     companion_from_label: 'Kutoka kwa',
@@ -247,7 +247,7 @@ const STRINGS = {
     flow_header: 'FICO — draft',
     flow_body: "I've pre-filled the FICO form from your recording — every indicator has a rating, evidence, and an improvement note. Open it, review, change anything you disagree with, then submit.",
     flow_button: 'Open the form',
-    flow_fallback: 'Analysis complete ✅ — but the editable form is not yet enabled on this deployment. Please contact the Rumi team.',
+    flow_fallback: 'Analysis complete ✅ — but the editable form is not yet enabled on this deployment. Please contact the NIETE team.',
     submitted_ack: '✅ Thank you! Your FICO observation is saved, with your edits.',
     // ── bd-21: debrief entry points ──────────────────────────────────
     debrief_choice_body:
@@ -336,7 +336,7 @@ const STRINGS = {
     send_template_queued_fo:
       "📨 The teacher hasn't messaged me recently, so I sent them an official invite — one tap and the report arrives. I'll let you know.",
     send_operator_review_fo:
-      '🔎 The report went to the Rumi team for a final check (pilot procedure). Once approved, it reaches the teacher.',
+      '🔎 The report went to the NIETE team for a final check (pilot procedure). Once approved, it reaches the teacher.',
     report_caption_teacher:
       'Your lesson report 🌱 Prepared from {fo}\'s visit — with notes from your conversation together.',
     companion_from_label: 'From',

@@ -13,7 +13,7 @@
 const LANGUAGE_PROMPTS = {
   // URDU - Urban Educated (Lahore/Karachi)
   'ur': {
-    identity: `You are Rumi, a friendly Pakistani teacher's assistant.
+    identity: `You are the NIETE Teaching Assistant, a friendly Pakistani teacher's assistant.
 You speak NATURAL Pakistani Urdu, like teachers in Lahore/Karachi actually talk.`,
 
     codeMixingPolicy: `NATURAL CODE-MIXING (THIS IS REQUIRED, NOT OPTIONAL):
@@ -52,7 +52,7 @@ You: "بالکل! میں ابھی بناتا ہوں۔"`,
 
   // BALOCHI - Rakhshani (Western) dialect
   'bal-PK': {
-    identity: `You are Rumi, speaking everyday Rakhshani Balochi (روزمرہ بلوچی).
+    identity: `You are the NIETE Teaching Assistant, speaking everyday Rakhshani Balochi (روزمرہ بلوچی).
 You chat like a Balochi teacher in Quetta would naturally speak.`,
 
     codeMixingPolicy: `NATURAL MIXING RULES:
@@ -94,7 +94,7 @@ NEVER:
 
   // SINDHI - Vicholi (Central) dialect
   'sd-PK': {
-    identity: `You are Rumi, speaking Vicholi (Central) Sindhi.
+    identity: `You are the NIETE Teaching Assistant, speaking Vicholi (Central) Sindhi.
 Like a Sindhi teacher in Hyderabad naturally talks.`,
 
     scriptNote: `SCRIPT CRITICAL (52 unique letters):
@@ -136,7 +136,7 @@ NEVER:
 
   // PASHTO - Northern/Yusufzai (Peshawar) dialect
   'ps-PK': {
-    identity: `You are Rumi, speaking Northern Pakistani Pashto (Yusufzai/Peshawar style).
+    identity: `You are the NIETE Teaching Assistant, speaking Northern Pakistani Pashto (Yusufzai/Peshawar style).
 NOT Afghan Dari-influenced Pashto.`,
 
     codeMixingPolicy: `NATURAL MIXING:
@@ -184,7 +184,7 @@ NEVER:
 
   // PUNJABI - Lahore Majhi in Shahmukhi script
   'pa-PK': {
-    identity: `You are Rumi, speaking Lahore Majhi Punjabi in Shahmukhi script.
+    identity: `You are the NIETE Teaching Assistant, speaking Lahore Majhi Punjabi in Shahmukhi script.
 Like a Punjabi teacher in Punjab naturally speaks.`,
 
     scriptNote: `SCRIPT CRITICAL:
@@ -239,7 +239,7 @@ WARNING - TONAL LANGUAGE - Standard Urdu TTS will sound wrong!
 
   // SRI LANKAN TAMIL - Jaffna dialect
   'ta-LK': {
-    identity: `You are Rumi, speaking Jaffna Tamil (Northern Sri Lankan standard).
+    identity: `You are the NIETE Teaching Assistant, speaking Jaffna Tamil (Northern Sri Lankan standard).
 Like a Sri Lankan Tamil teacher naturally speaks.`,
 
     scriptNote: `Same Tamil script as India. No unique SL letters.

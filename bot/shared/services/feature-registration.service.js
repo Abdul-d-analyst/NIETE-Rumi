@@ -158,7 +158,7 @@ class FeatureRegistrationService {
           flowToken: userId,
           header: 'Welcome',
           body: 'Quick setup — tell us a little about you.',
-          footer: 'Powered by Rumi',
+          footer: 'Powered by NIETE',
           buttonText: 'Get started',
         });
         logToFile('Registration flow sent (presence-gated)', { userId, phoneNumber });
@@ -353,63 +353,63 @@ class FeatureRegistrationService {
       return;
     }
     const messages = {
-      en: `Nice to meet you, ${firstName}! I've also set up your personal Rumi portal where you can track your growth and access all your lesson plans, coaching reports, and more.
+      en: `Nice to meet you, ${firstName}! I've also set up your personal NIETE portal where you can track your growth and access all your lesson plans, coaching reports, and more.
 
 🔗 *Set up your portal:*
 ${portalUrl}
 
 This link expires in 7 days. What would you like to work on next?`,
 
-      ur: `آپ سے مل کر خوشی ہوئی، ${firstName}! میں نے آپ کا ذاتی Rumi پورٹل بھی بنا دیا ہے جہاں آپ اپنی ترقی دیکھ سکتے ہیں اور اپنے تمام لیسن پلانز، کوچنگ رپورٹس وغیرہ تک رسائی حاصل کر سکتے ہیں۔
+      ur: `آپ سے مل کر خوشی ہوئی، ${firstName}! میں نے آپ کا ذاتی NIETE پورٹل بھی بنا دیا ہے جہاں آپ اپنی ترقی دیکھ سکتے ہیں اور اپنے تمام لیسن پلانز، کوچنگ رپورٹس وغیرہ تک رسائی حاصل کر سکتے ہیں۔
 
 🔗 *اپنا پورٹل سیٹ اپ کریں:*
 ${portalUrl}
 
 یہ لنک 7 دنوں میں ختم ہو جائے گی۔ آگے آپ کس پر کام کرنا چاہیں گے؟`,
 
-      ar: `سعيد بلقائك، ${firstName}! لقد أنشأت أيضًا بوابة Rumi الشخصية الخاصة بك حيث يمكنك تتبع نموك والوصول إلى جميع خطط دروسك وتقارير التدريب والمزيد.
+      ar: `سعيد بلقائك، ${firstName}! لقد أنشأت أيضًا بوابة NIETE الشخصية الخاصة بك حيث يمكنك تتبع نموك والوصول إلى جميع خطط دروسك وتقارير التدريب والمزيد.
 
 🔗 *قم بإعداد بوابتك:*
 ${portalUrl}
 
 تنتهي صلاحية هذا الرابط خلال 7 أيام. ماذا تريد أن تعمل عليه بعد ذلك؟`,
 
-      es: `¡Mucho gusto, ${firstName}! También he configurado tu portal personal de Rumi donde puedes seguir tu progreso y acceder a todos tus planes de lección, informes de coaching y más.
+      es: `¡Mucho gusto, ${firstName}! También he configurado tu portal personal de NIETE donde puedes seguir tu progreso y acceder a todos tus planes de lección, informes de coaching y más.
 
 🔗 *Configura tu portal:*
 ${portalUrl}
 
 Este enlace expira en 7 días. ¿En qué te gustaría trabajar a continuación?`,
 
-      'bal-PK': `توارا گُڈ چاتین، ${firstName}! منا توارا Rumi پورٹل ہم جوڑ کتگ، جتا تو وتی ترقی چاراں بکنئے۔
+      'bal-PK': `توارا گُڈ چاتین، ${firstName}! منا توارا NIETE پورٹل ہم جوڑ کتگ، جتا تو وتی ترقی چاراں بکنئے۔
 
 🔗 *پورٹل سیٹ کن:*
 ${portalUrl}
 
 اے لِنک 7 روچان پُر ختم بیت۔`,
 
-      'sd-PK': `توهان سان ملي خوشي ٿي، ${firstName}! مون توهان جو Rumi پورٹل به ٺاهي ڇڏيو آهي جتي توهان پنهنجي ترقي ڏسي سگهو ٿا۔
+      'sd-PK': `توهان سان ملي خوشي ٿي، ${firstName}! مون توهان جو NIETE پورٹل به ٺاهي ڇڏيو آهي جتي توهان پنهنجي ترقي ڏسي سگهو ٿا۔
 
 🔗 *پنهنجو پورٹل سيٽ اپ ڪريو:*
 ${portalUrl}
 
 هي لنڪ 7 ڏينهن ۾ ختم ٿي ويندي۔`,
 
-      'ps-PK': `ستاسو سره په لیدو خوشحاله شوم، ${firstName}! ما ستاسو شخصي Rumi پورټل هم جوړ کړی چیرته چې تاسو خپله پرمختګ وګورئ۔
+      'ps-PK': `ستاسو سره په لیدو خوشحاله شوم، ${firstName}! ما ستاسو شخصي NIETE پورټل هم جوړ کړی چیرته چې تاسو خپله پرمختګ وګورئ۔
 
 🔗 *خپل پورټل تنظیم کړئ:*
 ${portalUrl}
 
 دا لینک په 7 ورځو کې ختمیږي۔`,
 
-      'pa-PK': `تہانوں مل کے خوشی ہوئی، ${firstName}! میں تہاڈا ذاتی Rumi پورٹل وی بنا دتا اے جتھے تسی اپنی ترقی ویکھ سکدے او۔
+      'pa-PK': `تہانوں مل کے خوشی ہوئی، ${firstName}! میں تہاڈا ذاتی NIETE پورٹل وی بنا دتا اے جتھے تسی اپنی ترقی ویکھ سکدے او۔
 
 🔗 *اپنا پورٹل سیٹ اپ کرو:*
 ${portalUrl}
 
 ایہ لنک 7 دناں چ ختم ہو جاوے گی۔`,
 
-      'ta-LK': `சந்திப்பதில் மகிழ்ச்சி, ${firstName}! உங்கள் தனிப்பட்ட Rumi போர்டலையும் அமைத்துள்ளேன்.
+      'ta-LK': `சந்திப்பதில் மகிழ்ச்சி, ${firstName}! உங்கள் தனிப்பட்ட NIETE போர்டலையும் அமைத்துள்ளேன்.
 
 🔗 *உங்கள் போர்டலை அமைக்கவும்:*
 ${portalUrl}

@@ -34,7 +34,7 @@ describe('buildWaitMessage', () => {
 
   it('Urdu copy is rendered for an Urdu system language', () => {
     const msg = WaitMessage.buildWaitMessage({ systemLanguage: 'ur', contentLanguage: 'ur' });
-    expect(msg).toContain('Rumi');
+    expect(msg).toContain('NIETE');
     expect(/[؀-ۿ]/.test(msg)).toBe(true);
   });
 
@@ -45,7 +45,7 @@ describe('buildWaitMessage', () => {
 
   it('legacy single-language arg still works (used for both copy + timing)', () => {
     const msg = WaitMessage.buildWaitMessage({ language: 'sw' });
-    expect(msg).toContain('Rumi');
+    expect(msg).toContain('NIETE');
   });
 
   it('uses live DB stats when sample_size >= 10', () => {

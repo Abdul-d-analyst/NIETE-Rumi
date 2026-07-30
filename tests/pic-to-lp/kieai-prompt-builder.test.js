@@ -41,14 +41,14 @@ describe('buildPage1Prompt', () => {
 });
 
 describe('buildPage2Prompt coaching corner — env-driven contact line', () => {
-  it('omits the "WhatsApp Rumi ·" contact line when COACHING_WHATSAPP_NUMBER is unset', () => {
+  it('omits the "WhatsApp NIETE ·" contact line when COACHING_WHATSAPP_NUMBER is unset', () => {
     delete process.env.COACHING_WHATSAPP_NUMBER;
     load();
     const en = Builder.buildPage2Prompt({ ...base, language: 'en' });
     const ur = Builder.buildPage2Prompt({ ...base, language: 'ur' });
     expect(en).toContain('Coaching Corner');           // corner itself kept
-    expect(en).not.toContain('WhatsApp Rumi ·');        // contact line omitted
-    expect(ur).not.toContain('WhatsApp Rumi ·');
+    expect(en).not.toContain('WhatsApp NIETE ·');        // contact line omitted
+    expect(ur).not.toContain('WhatsApp NIETE ·');
   });
 
   it('includes the contact line with the configured number when set', () => {
@@ -56,8 +56,8 @@ describe('buildPage2Prompt coaching corner — env-driven contact line', () => {
     load();
     const en = Builder.buildPage2Prompt({ ...base, language: 'en' });
     const ur = Builder.buildPage2Prompt({ ...base, language: 'ur' });
-    expect(en).toContain('WhatsApp Rumi · +1 555 0100');
-    expect(ur).toContain('WhatsApp Rumi · +1 555 0100');
+    expect(en).toContain('WhatsApp NIETE · +1 555 0100');
+    expect(ur).toContain('WhatsApp NIETE · +1 555 0100');
   });
 
   it('never emits a banned PK/TZ phone literal (set or unset)', () => {

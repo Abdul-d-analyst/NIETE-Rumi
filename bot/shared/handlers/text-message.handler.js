@@ -1544,7 +1544,7 @@ async function handleTextMessage(message, from, messageBody, user = null) {
     const flowToken = `${user?.id}:settings:${Date.now()}`;
     await WhatsAppService.sendFlow(from, {
       flowId: SETTINGS_FLOW_ID,
-      header: 'Rumi Settings',
+      header: 'NIETE Settings',
       body: ({
         ur: 'اپنی زبان اور آبزرویشن ٹول کی ترجیحات اپ ڈیٹ کریں۔',
         sw: 'Sasisha mapendeleo yako ya lugha na zana ya uchunguzi.',
@@ -1578,7 +1578,7 @@ async function handleTextMessage(message, from, messageBody, user = null) {
           flowToken: user.id,
           header: "What's running",
           body: "See everything you have in flight — and stop any of it.",
-          footer: 'Powered by Rumi',
+          footer: 'Powered by NIETE',
           buttonText: 'Open status'
         });
         logToFile('✅ Status flow sent', { userId: user.id });
@@ -2710,5 +2710,5 @@ module.exports = {
   parseStyleFromButtonId,
   evaluateHomeworkTrigger, // exported for trigger unit tests
   tryCurriculumLessonPlanServe, // exported for intercept unit tests
-  handleLessonPlanRequest, // exported for the Oxbridge-picker "Generate Rumi LP" tap
+  handleLessonPlanRequest, // exported for the Oxbridge-picker "Generate NIETE LP" tap
 };

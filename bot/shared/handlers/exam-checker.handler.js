@@ -120,7 +120,7 @@ async function handleExamText(message, from, user) {
           header: response.flow.header,
           body: response.flow.body,
           buttonText: response.flow.buttonText || 'Open',
-          footer: 'Powered by Rumi',
+          footer: 'Powered by NIETE',
         });
       } else {
         await WhatsAppService.sendMessage(from, response.text);
@@ -257,7 +257,7 @@ async function handleExamButton(buttonId, from, user) {
           header: response.flow.header,
           body: response.flow.body,
           buttonText: response.flow.buttonText || 'Open',
-          footer: 'Powered by Rumi',
+          footer: 'Powered by NIETE',
         });
       } else {
         await WhatsAppService.sendMessage(from, response.text);
@@ -329,7 +329,7 @@ async function handleExamFlow(flowId, flowResponse, from, user) {
           header: response.flow.header,
           body: response.flow.body,
           buttonText: response.flow.buttonText || 'Open',
-          footer: 'Powered by Rumi',
+          footer: 'Powered by NIETE',
         });
       } else {
         await WhatsAppService.sendMessage(from, response.text);

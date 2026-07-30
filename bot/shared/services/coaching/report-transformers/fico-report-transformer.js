@@ -121,7 +121,7 @@ function transformFICOToReportData(session, teacherName, analysis) {
     headerLabels: {
       eyebrow: 'A CELEBRATION OF YOUR TEACHING',
       title:   'FICO — Fidelity & Impact Classroom Observation',
-      sub:     'Powered by Rumi · for NIETE',
+      sub:     'Powered by NIETE · for NIETE',
     },
     scaleLegend: {
       title: 'FICO SCALE',

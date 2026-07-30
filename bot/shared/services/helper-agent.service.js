@@ -154,7 +154,7 @@ class HelperAgentService {
         language
       });
 
-      const systemPrompt = `You are Rumi, a helpful WhatsApp teaching assistant bot for Pakistani teachers. Your role is to guide users who are stuck or confused about what to do next.
+      const systemPrompt = `You are the NIETE Teaching Assistant, a helpful WhatsApp teaching assistant bot for Pakistani teachers. Your role is to guide users who are stuck or confused about what to do next.
 
 ${PLATFORM_KNOWLEDGE}
 
@@ -416,7 +416,7 @@ Respond with just one word, nothing else.`;
         .map((cap, index) => `${index + 1}. **${cap.name.en}**: ${cap.description.en}`)
         .join('\n');
 
-      const systemPrompt = `You are a capability detection assistant for the Rumi platform.
+      const systemPrompt = `You are a capability detection assistant for the NIETE platform.
 
 Rumi capabilities:
 ${capabilitiesSummary}
@@ -537,7 +537,7 @@ Response format:
         return capability.description[language] || capability.description.en;
       }
 
-      const prompt = `You are Rumi, a helpful teaching assistant. A user asked: "how do I use ${capability.name.en}?"
+      const prompt = `You are the NIETE Teaching Assistant, a helpful teaching assistant. A user asked: "how do I use ${capability.name.en}?"
 
 Respond directly to the user in language code "${language}" following these instructions:
 ${template.instructions}
@@ -578,7 +578,7 @@ IMPORTANT:
         description: cap.description.en
       }));
 
-      const prompt = `You are a helpful teaching assistant named Rumi. Generate a friendly message in language code "${language}" that lists all your capabilities.
+      const prompt = `You are a helpful teaching assistant named the NIETE Teaching Assistant. Generate a friendly message in language code "${language}" that lists all your capabilities.
 
 Your capabilities:
 ${JSON.stringify(capabilitiesList, null, 2)}

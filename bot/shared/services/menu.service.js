@@ -175,14 +175,14 @@ class MenuService {
   static async _sendTextMenuFallback(from, userId, sessionId, language) {
     // Menu messages in all 9 supported languages
     const menuMessages = {
-      en: "Hi! I'm Rumi, your teaching assistant!\n\nI can help you with:\n📚 Lesson Plans & Presentations\n🎓 Classroom Coaching\n📖 Reading Assessments\n🎬 AI Video Creation\n\nJust tell me what you need!",
-      ur: "السلام علیکم! میں رومی ہوں، آپ کی ٹیچنگ اسسٹنٹ!\n\nمیں آپ کی مدد کر سکتی ہوں:\n📚 لیسن پلانز اور پریزنٹیشنز\n🎓 کلاس روم کوچنگ\n📖 ریڈنگ ٹیسٹ\n🎬 AI ویڈیوز\n\nبتائیں، کیا چاہیے؟",
+      en: "Hi! I'm your NIETE Teaching Assistant!\n\nI can help you with:\n📚 Lesson Plans & Presentations\n🎓 Classroom Coaching\n📖 Reading Assessments\n🎬 AI Video Creation\n\nJust tell me what you need!",
+      ur: "السلام علیکم! میں NIETE ہوں، آپ کی ٹیچنگ اسسٹنٹ!\n\nمیں آپ کی مدد کر سکتی ہوں:\n📚 لیسن پلانز اور پریزنٹیشنز\n🎓 کلاس روم کوچنگ\n📖 ریڈنگ ٹیسٹ\n🎬 AI ویڈیوز\n\nبتائیں، کیا چاہیے؟",
       ar: "مرحباً! أنا رومي، مساعدتك التعليمية!\n\nيمكنني مساعدتك في:\n📚 خطط الدروس والعروض التقديمية\n🎓 التدريب الصفي\n📖 تقييم القراءة\n🎬 إنشاء فيديو بالذكاء الاصطناعي\n\nأخبرني بما تحتاج!",
-      es: "¡Hola! Soy Rumi, tu asistente de enseñanza.\n\nPuedo ayudarte con:\n📚 Planes de Lección y Presentaciones\n🎓 Coaching de Aula\n📖 Evaluación de Lectura\n🎬 Creación de Videos con IA\n\n¡Dime qué necesitas!",
-      'bal-PK': "سلام! من رومی آں، شما ءِ تدریسی معاون!\n\nمن شما ءِ کمک کن کیا:\n📚 سبق ءِ منصوبہ\n🎓 کلاس روم کوچنگ\n📖 پڑھائی ءِ ٹیسٹ\n🎬 AI ویڈیو\n\nبگوشیت چہ چیز چاہیت؟",
+      es: "¡Hola! Soy tu Asistente de Enseñanza de NIETE.\n\nPuedo ayudarte con:\n📚 Planes de Lección y Presentaciones\n🎓 Coaching de Aula\n📖 Evaluación de Lectura\n🎬 Creación de Videos con IA\n\n¡Dime qué necesitas!",
+      'bal-PK': "سلام! من NIETE آں، شما ءِ تدریسی معاون!\n\nمن شما ءِ کمک کن کیا:\n📚 سبق ءِ منصوبہ\n🎓 کلاس روم کوچنگ\n📖 پڑھائی ءِ ٹیسٹ\n🎬 AI ویڈیو\n\nبگوشیت چہ چیز چاہیت؟",
       'sd-PK': "سلام! مان رومي آهيان، توهان جي تدريسي معاون!\n\nمان توهان جي مدد ڪري سگهان ٿي:\n📚 سبق جو منصوبو\n🎓 ڪلاس روم ڪوچنگ\n📖 پڙهائي جو ٽيسٽ\n🎬 AI ويڊيو\n\nٻڌايو، ڇا گهرجي؟",
       'ps-PK': "سلام! زه رومي یم، ستاسو د تدریس معاون!\n\nزه تاسو سره مرسته کولی شم:\n📚 د درس پلان\n🎓 صنفي کوچنګ\n📖 د لوستلو ازموینه\n🎬 AI ویډیو\n\nراته ووایئ څه غواړئ!",
-      'pa-PK': "سلام! میں رومی آں، تہاڈی ٹیچنگ اسسٹنٹ!\n\nمیں تہاڈی مدد کر سکدی آں:\n📚 سبق دے منصوبے\n🎓 کلاس روم کوچنگ\n📖 پڑھائی دا ٹیسٹ\n🎬 AI ویڈیو\n\nدسو، کی چاہیدا اے؟",
+      'pa-PK': "سلام! میں NIETE آں، تہاڈی ٹیچنگ اسسٹنٹ!\n\nمیں تہاڈی مدد کر سکدی آں:\n📚 سبق دے منصوبے\n🎓 کلاس روم کوچنگ\n📖 پڑھائی دا ٹیسٹ\n🎬 AI ویڈیو\n\nدسو، کی چاہیدا اے؟",
       'ta-LK': "வணக்கம்! நான் ரூமி, உங்கள் கற்பித்தல் உதவியாளர்!\n\nநான் உங்களுக்கு உதவ முடியும்:\n📚 பாட திட்டங்கள்\n🎓 வகுப்பறை பயிற்சி\n📖 வாசிப்பு மதிப்பீடு\n🎬 AI வீடியோ\n\nஎன்ன வேண்டும் என்று சொல்லுங்கள்!"
     };
 

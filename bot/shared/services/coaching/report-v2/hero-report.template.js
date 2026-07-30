@@ -189,7 +189,7 @@ function buildHeroReportHtml(vm) {
     </div>
     ${(vm.trend && vm.trend.length >= 2) ? `<div class="journey"><div class="label">${T(C.journey(vm.trend.length))}</div>${ltrTrend(vm.trend, peak)}<div class="j-cap">${T(n.journey_note || '')}</div></div>` : ''}
     ${vm.tryNext ? `<div class="try"><div class="label">${T(C.trynext)}</div><div class="try-text">${T(vm.tryNext)}</div></div>` : ''}
-    <div class="foot"><div class="brand">${logo(A.logoNavy, '')}Rumi</div><div>${T(C.made(vm.teacherName || ''))}</div></div>
+    <div class="foot"><div class="brand">${logo(A.logoNavy, '')}NIETE</div><div>${T(C.made(vm.teacherName || ''))}</div></div>
   </div>
   </body></html>`;
 }

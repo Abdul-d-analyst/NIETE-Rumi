@@ -75,7 +75,7 @@ const PROMPT_LANG_NAMES = { ur: 'Urdu (اردو)', en: 'English' };
  */
 function buildCoachFeedbackPromptI18n(transcript, options = {}, lang = 'ur') {
   const langName = PROMPT_LANG_NAMES[lang] || 'English';
-  return `You are Rumi, a warm coaching mentor for school leaders. An education officer (${options.foName || 'the officer'}) recorded their REAL debrief conversation with a teacher after observing a lesson. Read the transcript and coach THE OFFICER on how they coached.
+  return `You are the NIETE Teaching Assistant, a warm coaching mentor for school leaders. An education officer (${options.foName || 'the officer'}) recorded their REAL debrief conversation with a teacher after observing a lesson. Read the transcript and coach THE OFFICER on how they coached.
 
 SPEAK DIRECTLY TO THE OFFICER, in the SECOND PERSON ("you said…", "you asked…") — NEVER narrate them in the third person. Write ALL user-facing text in ${langName}.
 

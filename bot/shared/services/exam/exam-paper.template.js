@@ -367,7 +367,7 @@ async function buildExamDocx({ exam, questions, groupMeta }) {
   const lang = exam.language === 'ur' ? 'ur' : 'en';
 
   const doc = new Document({
-    creator: 'NIETE Rumi',
+    creator: 'NIETE NIETE',
     title: `Grade ${exam.grade} ${exam.subject} ${exam.type}`,
     styles: {
       default: {
