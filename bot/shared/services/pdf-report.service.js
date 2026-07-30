@@ -422,7 +422,7 @@ class PDFReportService {
 
     // Rumi mark — small square PNG placed next to the header title.
     try {
-      const logoPath = path.join(__dirname, '../assets/rumi-mark-navy.png');
+      const logoPath = path.join(__dirname, '../assets/niete-mark-onlight.png');
       if (fs.existsSync(logoPath)) {
         doc.image(logoPath, 50, yPos + 8, { width: 34 });
       }

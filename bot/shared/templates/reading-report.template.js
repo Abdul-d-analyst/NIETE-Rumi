@@ -46,7 +46,7 @@ function getFonts() {
 let _logoCache;
 function getLogo() {
   if (_logoCache !== undefined) return _logoCache;
-  _logoCache = b64(path.join(ASSETS_DIR, 'Rumi Transparent.png'));
+  _logoCache = b64(path.join(ASSETS_DIR, 'niete-mark-onlight.png'));
   return _logoCache;
 }
 
@@ -114,7 +114,7 @@ function renderHeader(data, logoB64) {
   return `
 <div class="header">
   <div class="header-left">
-    ${logoB64 ? `<img src="data:image/png;base64,${logoB64}" alt="Rumi" class="header-logo">` : ''}
+    ${logoB64 ? `<img src="data:image/png;base64,${logoB64}" alt="NIETE" class="header-logo">` : ''}
     <div class="header-text-block">
       <div class="header-title">Reading Assessment</div>
       <div class="header-subtitle">${subtitle}</div>

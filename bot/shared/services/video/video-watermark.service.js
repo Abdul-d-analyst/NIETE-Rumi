@@ -28,7 +28,7 @@ const DEFAULT_CONFIG = {
 };
 
 // Path to the white Rumi logo asset
-const LOGO_PATH = path.join(__dirname, '../../assets/rumi-watermark-logo.png');
+const LOGO_PATH = path.join(__dirname, '../../assets/niete-mark-ondark.png');
 
 class VideoWatermarkService {
 

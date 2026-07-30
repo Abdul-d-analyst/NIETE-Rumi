@@ -48,8 +48,8 @@ let _logos;
 function logos() {
   if (_logos) return _logos;
   _logos = {
-    white: b64(path.join(ASSETS_DIR, 'rumi-mark-white.png')),
-    navy: b64(path.join(ASSETS_DIR, 'rumi-mark-navy.png')),
+    white: b64(path.join(ASSETS_DIR, 'niete-mark-ondark.png')),
+    navy: b64(path.join(ASSETS_DIR, 'niete-mark-onlight.png')),
   };
   return _logos;
 }

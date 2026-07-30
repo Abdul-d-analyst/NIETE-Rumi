@@ -26,8 +26,8 @@ const ASSET = (p) => {
   catch { return ''; }
 };
 const CARD_ASSETS = {
-  logoWhite: ASSET('assets/rumi-mark-white.png'),
-  logoNavy: ASSET('assets/rumi-mark-navy.png'),
+  logoWhite: ASSET('assets/niete-mark-ondark.png'),
+  logoNavy: ASSET('assets/niete-mark-onlight.png'),
   lexR: ASSET('fonts/Lexend-Regular.ttf'),
   lexB: ASSET('fonts/Lexend-Bold.ttf'),
   nastR: ASSET('fonts/NotoNastaliqUrdu-Regular.ttf'),

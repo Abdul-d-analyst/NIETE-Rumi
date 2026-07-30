@@ -21,8 +21,8 @@ const ASSET = (p) => {
   catch { return ''; }
 };
 const A = {
-  logoWhite: ASSET('assets/rumi-mark-white.png'),
-  logoNavy: ASSET('assets/rumi-mark-navy.png'),
+  logoWhite: ASSET('assets/niete-mark-ondark.png'),
+  logoNavy: ASSET('assets/niete-mark-onlight.png'),
   lexR: ASSET('fonts/Lexend-Regular.ttf'),
   lexB: ASSET('fonts/Lexend-Bold.ttf'),
   frauR: ASSET('fonts/Fraunces-Regular.ttf'),
@@ -109,7 +109,7 @@ function buildHeroReportHtml(vm) {
   const peak = (vm.trend && vm.trend.length) ? Math.max(...vm.trend.map((t) => t.pct)) : score.overall;
   const marksLine = (score.marks != null && score.max != null) ? `${score.marks}/${score.max}${MARKS_WORD[lang] || ''}` : '';
   const moment = (n.moments || [])[0];
-  const logo = (b64, cls) => b64 ? `<img class="${cls}" src="data:image/png;base64,${b64}" alt="Rumi">` : '';
+  const logo = (b64, cls) => b64 ? `<img class="${cls}" src="data:image/png;base64,${b64}" alt="NIETE">` : '';
 
   // Domain-altitude scorecard (e.g. MEWAKA: 6 rows w/ proportional bar). Indicator-altitude
   // frameworks render rows the same way (score/max + bar).
