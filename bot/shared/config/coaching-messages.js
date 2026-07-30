@@ -77,8 +77,10 @@ const COACHING_MESSAGES = {
   reportReady: en("✅ Your Classroom Observation Report is ready! 📄"),
   // Voice summary delivery prefix
   voiceSummaryReady: en("🎤 Here's your personalized voice summary:"),
-  // Reflective conversation graceful close
-  reflectionsThanks: en("Thank you for your thoughtful reflections! 🙏"),
+  // Reflective conversation graceful close. bd-2414: Urdu translation so the
+  // fallback closer isn't voiced in English (gender-neutral — no addressee-gendered
+  // verb). The primary closer is now the contextual acknowledgement (voiced).
+  reflectionsThanks: { ...en("Thank you for your thoughtful reflections! 🙏"), ur: "آپ کے سوچ بھرے جوابات کا شکریہ! 🙏" },
   // Retry path: analysis still running when report is requested
   reportInProgress: en("🔄 I'm still processing your classroom analysis. I'll share your report as soon as it's ready."),
   // Voice debrief fallback when generation fails post-PDF
