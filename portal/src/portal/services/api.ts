@@ -1,13 +1,14 @@
 import axios from 'axios';
+import { getApiBaseUrl } from '@/lib/runtime';
 import type { User, DashboardStats, LessonPlan, CoachingSession, SessionDetail, CoachingAnalytics, Pagination, VideoRequest, VideoDetail } from '../types/portal';
 import type { ReadingAssessment, ReadingAssessmentDetail, ReadingStats } from '../types/readingAssessment';
 
-// Use relative URL since frontend and backend are on same domain
-// This fixes mobile cookie blocking issues - no more CORS, no more third-party cookies!
-// GitHub Actions auto-deploy workflow active - edits in Lovable deploy automatically!
-const API_BASE_URL = import.meta.env.PROD
-  ? '/api/portal' // Relative URL for production (same domain)
-  : 'http://localhost:4000/api/portal'; // Absolute URL for local development
+// On the web, frontend and backend share a domain, so a relative URL avoids
+// CORS and third-party cookies entirely. In the Capacitor app there is no
+// such origin — the WebView serves from localhost — so an absolute URL
+// (VITE_API_BASE_URL) is required. getApiBaseUrl() picks the right one and
+// fails loudly if a native build is missing its config.
+const API_BASE_URL = getApiBaseUrl();
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -159,7 +160,49 @@ export const portal = {
   }> => {
     const response = await api.get(`/video/${id}`);
     return response.data;
-  }
+  },
+
+  // Assessment Generator (browser surface for the UG_EG-backed engine).
+  // generate → { jobId }; then poll getAssessmentStatus until completed/failed.
+  generateAssessment: async (
+    spec: AssessmentSpec
+  ): Promise<{ success: boolean; jobId?: string; error?: string }> => {
+    const response = await api.post('/assessment/generate', spec);
+    return response.data;
+  },
+
+  getAssessmentStatus: async (
+    jobId: string,
+    format: 'pdf' | 'docx' = 'pdf'
+  ): Promise<AssessmentStatus> => {
+    const response = await api.get(`/assessment/status/${jobId}`, { params: { format } });
+    return response.data;
+  },
+};
+
+// ── Assessment Generator types ────────────────────────────────────────────
+export type AssessmentQuestionType = {
+  id: string;
+  count: number;
+  category?: 'objective' | 'subjective';
+};
+
+export type AssessmentSpec = {
+  generationType: 'exam' | 'class_assessment';
+  grade: number;
+  subject: string;
+  pageRanges: string;
+  contentSource: 'seen' | 'unseen';
+  questionTypes: AssessmentQuestionType[];
+  format?: 'pdf' | 'docx';
+};
+
+export type AssessmentStatus = {
+  success: boolean;
+  status: 'pending' | 'processing' | 'completed' | 'failed';
+  downloadUrl?: string;
+  filename?: string;
+  error?: string;
 };
 
 export default api;

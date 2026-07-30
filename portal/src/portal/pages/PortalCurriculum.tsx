@@ -26,8 +26,10 @@ import { Button } from '@/components/ui/button';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
 import api from '../services/api';
+import AssessmentGeneratorPanel from '../components/AssessmentGeneratorPanel';
 
 type Grade = { grade: number; label: string; count: number };
 type Subject = { subject: string; label: string; count: number };
@@ -188,10 +190,17 @@ const PortalCurriculum = () => {
             <h1 className="text-3xl sm:text-4xl font-light">Curriculum Library</h1>
           </div>
           <p className="text-muted-foreground">
-            Browse ready-made lesson plans from NBF and Taleemabad. Pick your grade, subject, chapter, and lesson.
+            Browse ready-made lesson plans, or generate a curriculum-based assessment.
           </p>
         </div>
 
+        <Tabs defaultValue="library" className="w-full">
+          <TabsList className="mb-6">
+            <TabsTrigger value="library">Lesson Plan Library</TabsTrigger>
+            <TabsTrigger value="assessment">Assessment Generator</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="library">
         {/* Cascading picker */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
           {/* Grade */}
@@ -342,6 +351,12 @@ const PortalCurriculum = () => {
             )}
           </div>
         )}
+          </TabsContent>
+
+          <TabsContent value="assessment">
+            <AssessmentGeneratorPanel />
+          </TabsContent>
+        </Tabs>
       </div>
     </PortalLayout>
   );

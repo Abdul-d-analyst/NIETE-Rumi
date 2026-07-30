@@ -1,0 +1,103 @@
+apply plugin: 'com.android.application'
+
+// Release signing, sourced from the environment or gradle.properties — NEVER committed.
+//
+// Play App Signing is enabled for this listing, so this is the UPLOAD key: we sign
+// with it, Google verifies, strips our signature, and re-signs with the app-signing
+// key it holds. Anything that pins a certificate (Google Sign-In, App Links
+// assetlinks.json) must use the APP-SIGNING fingerprint, not this one.
+//
+// Set NIETE_KEYSTORE_PATH / NIETE_KEYSTORE_PASSWORD / NIETE_KEY_ALIAS /
+// NIETE_KEY_PASSWORD, or the matching keys in a gitignored keystore.properties.
+// See keystore.properties.template.
+def nieteKeystore = System.getenv('NIETE_KEYSTORE_PATH') ?: findProperty('NIETE_KEYSTORE_PATH')
+def nieteStorePass = System.getenv('NIETE_KEYSTORE_PASSWORD') ?: findProperty('NIETE_KEYSTORE_PASSWORD')
+def nieteAlias = System.getenv('NIETE_KEY_ALIAS') ?: findProperty('NIETE_KEY_ALIAS')
+def nieteKeyPass = System.getenv('NIETE_KEY_PASSWORD') ?: findProperty('NIETE_KEY_PASSWORD')
+def hasNieteSigning = nieteKeystore && nieteStorePass && nieteAlias && nieteKeyPass
+
+android {
+    namespace = "pk.edu.niete"
+    compileSdk = rootProject.ext.compileSdkVersion
+    defaultConfig {
+        applicationId "pk.edu.niete"
+        minSdkVersion rootProject.ext.minSdkVersion
+        targetSdkVersion rootProject.ext.targetSdkVersion
+        versionCode 1202
+        versionName "1202"
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        // Default launcher label; the debug build type overrides it.
+        manifestPlaceholders = [appLabel: "NIETE"]
+        aaptOptions {
+             // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
+             // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
+            ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
+        }
+    }
+    signingConfigs {
+        if (hasNieteSigning) {
+            release {
+                storeFile file(nieteKeystore)
+                storePassword nieteStorePass
+                keyAlias nieteAlias
+                keyPassword nieteKeyPass
+            }
+        }
+    }
+    buildTypes {
+        debug {
+            // Debug builds install as `pk.edu.niete.debug` so they sit alongside
+            // the production NIETE app instead of colliding with it. Without this,
+            // installing a debug build fails with INSTALL_FAILED_UPDATE_INCOMPATIBLE
+            // (different signing key), and the only way through is uninstalling
+            // the real app.
+            //
+            // Release builds are UNAFFECTED — they keep `pk.edu.niete`, which is
+            // required to update the existing Play listing.
+            applicationIdSuffix ".debug"
+            // Distinct launcher label so the two apps are told apart on the
+            // home screen. Uses manifestPlaceholders rather than resValue
+            // because app_name already exists in res/values/strings.xml and
+            // redefining it there is a duplicate-resource build failure.
+            manifestPlaceholders = [appLabel: "NIETE Debug"]
+        }
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            // NO applicationIdSuffix here — release MUST stay exactly `pk.edu.niete`,
+            // the package Play uses to identify the existing listing.
+            if (hasNieteSigning) {
+                signingConfig signingConfigs.release
+            }
+        }
+    }
+}
+
+repositories {
+    flatDir{
+        dirs '../capacitor-cordova-android-plugins/src/main/libs', 'libs'
+    }
+}
+
+dependencies {
+    implementation fileTree(include: ['*.jar'], dir: 'libs')
+    implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
+    implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
+    implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
+    implementation project(':capacitor-android')
+    testImplementation "junit:junit:$junitVersion"
+    androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
+    androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
+    implementation project(':capacitor-cordova-android-plugins')
+}
+
+apply from: 'capacitor.build.gradle'
+
+try {
+    def servicesJSON = file('google-services.json')
+    if (servicesJSON.text) {
+        apply plugin: 'com.google.gms.google-services'
+    }
+} catch(Exception e) {
+    logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
+}
