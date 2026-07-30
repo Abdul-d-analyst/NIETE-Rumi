@@ -3970,4 +3970,186 @@ router.get('/video/:id', requirePortalAuth, async (req, res) => {
   }
 });
 
+// ═══════════════════════════════════════════════════════════════════════════
+// ASSESSMENT GENERATOR (browser surface)
+// ───────────────────────────────────────────────────────────────────────────
+// Surfaces the existing UG_EG-backed Assessment Generator — until now only
+// reachable via the WhatsApp Flow — as a browser feature on the Curriculum
+// page. The generation ENGINE is fully reused (bot/shared assessment-generator
+// client + html renderers + R2). No new DB tables or columns: the job link
+// (job → { userId, spec, filename }) lives in Redis (~30 min TTL) so the status
+// endpoint can (a) authorize the caller and (b) name the rendered file.
+//
+// Poll path: submitJob is called WITHOUT a per-call callbackUrl, and the browser
+// polls GET /assessment/status/:jobId. (If ASSESSMENT_GEN_CALLBACK_URL is set in
+// the env, UG_EG may also POST the bot's webhook — that handler looks the job up
+// under a DIFFERENT Redis key namespace [`assessment_gen_job:`] which the portal
+// never writes, so it harmlessly drops. No double delivery to a teacher.)
+//
+// The bot deps are require()d LAZILY inside the handlers (not at module top):
+// html-to-pdf pulls in Playwright and html-to-docx pulls in @turbodocx — neither
+// is installed in the OSS root test job — and this router must stay loadable
+// there. Everything else in these handlers is portal-owned.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const ASSESSMENT_JOB_TTL_SECONDS = 30 * 60; // 30 min — status lookup window
+const ASSESSMENT_MAX_COUNT_PER_TYPE = 20;   // mirrors the Flow's per-type cap
+
+/**
+ * Validate + normalize the assessment spec from a request body. Returns
+ * { spec, filename } on success, or { error } (a client-facing string) on a
+ * validation failure. Mirrors the buildRequestBody contract in
+ * bot/shared/services/assessment-generator-client.service.js.
+ */
+function _normalizeAssessmentSpec(body) {
+  body = body || {};
+  const generationType = body.generationType === 'class_assessment' ? 'class_assessment' : 'exam';
+
+  const grade = parseInt(body.grade, 10);
+  if (!Number.isFinite(grade) || grade < 1 || grade > 5) {
+    return { error: 'grade must be a number between 1 and 5' };
+  }
+
+  const subject = String(body.subject || '').trim();
+  if (!subject) return { error: 'subject is required' };
+
+  const pageRanges = String(body.pageRanges || '').trim();
+  if (!pageRanges) return { error: 'pageRanges is required (e.g. "10-15")' };
+
+  const contentSource = String(body.contentSource || '').trim().toLowerCase();
+  // 'both' would need two jobs → two rendered files, which breaks the
+  // single-job → single-downloadUrl status contract. Reject it explicitly
+  // rather than silently downgrade; the UI offers only Seen / Unseen.
+  if (contentSource === 'both') {
+    return { error: "Please pick either Seen or Unseen — combined papers aren't supported in the browser yet." };
+  }
+  if (!['seen', 'unseen'].includes(contentSource)) {
+    return { error: 'contentSource must be "seen" or "unseen"' };
+  }
+
+  const rawTypes = Array.isArray(body.questionTypes) ? body.questionTypes : [];
+  const questionTypes = rawTypes
+    .map((qt) => {
+      const id = String((qt && qt.id) || '').trim();
+      const count = Math.min(Math.max(1, parseInt(qt && qt.count, 10) || 0), ASSESSMENT_MAX_COUNT_PER_TYPE);
+      const rawCat = String((qt && qt.category) || '').trim().toLowerCase();
+      const category = rawCat === 'objective' || rawCat === 'subjective' ? rawCat : undefined;
+      const out = { id, count };
+      if (category) out.category = category;
+      return out;
+    })
+    .filter((qt) => qt.id);
+  if (questionTypes.length === 0) {
+    return { error: 'at least one question type is required' };
+  }
+
+  const safeSubject = subject.replace(/[^A-Za-z0-9]/g, '');
+  const typeLabel = generationType === 'class_assessment' ? 'Practice' : 'Exam';
+  const filename = `Grade${grade}_${safeSubject || 'Subject'}_${typeLabel}`;
+
+  return {
+    spec: { generationType, grade, subject, pageRanges, contentSource, questionTypes, curriculum: 'ICT' },
+    filename,
+  };
+}
+
+/**
+ * POST /api/portal/assessment/generate
+ * Body: { generationType, grade, subject, pageRanges, contentSource,
+ *         questionTypes: [{ id, count, category? }], format? }
+ * Submits the job to UG_EG (poll path) and stores the Redis job link.
+ * Returns { success: true, jobId }.
+ */
+router.post('/assessment/generate', requirePortalAuth, async (req, res) => {
+  try {
+    const userId = req.session.portalUserId;
+    const { spec, filename, error } = _normalizeAssessmentSpec(req.body);
+    if (error) return res.status(400).json({ success: false, error });
+
+    const outputFormat = String((req.body && (req.body.format || req.body.outputFormat)) || 'pdf')
+      .toLowerCase() === 'docx' ? 'docx' : 'pdf';
+
+    const AssessmentGenClient = require('../../bot/shared/services/assessment-generator-client.service');
+    const redis = require('../../bot/shared/services/cache/railway-redis.service');
+
+    // Poll path — no per-call callbackUrl (see header note on the env fallback).
+    const { jobId } = await AssessmentGenClient.submitJob(spec);
+    if (!jobId) {
+      return res.status(502).json({ success: false, error: 'Assessment service did not return a job id' });
+    }
+
+    await redis.set(
+      `portal_assessment_job:${jobId}`,
+      { jobId, userId, spec, filename, outputFormat },
+      ASSESSMENT_JOB_TTL_SECONDS,
+    );
+
+    return res.json({ success: true, jobId });
+  } catch (err) {
+    console.error('assessment/generate error:', err);
+    return res.status(500).json({ success: false, error: 'Failed to queue assessment' });
+  }
+});
+
+/**
+ * GET /api/portal/assessment/status/:jobId?format=pdf|docx
+ * Polls UG_EG. On completed, renders exam_paper HTML → PDF (default) or DOCX,
+ * uploads to R2, and returns a short-TTL presigned downloadUrl + filename.
+ * 403 if the job's Redis link belongs to a different teacher (or is absent).
+ */
+router.get('/assessment/status/:jobId', requirePortalAuth, async (req, res) => {
+  try {
+    const userId = req.session.portalUserId;
+    const jobId = req.params.jobId;
+
+    const redis = require('../../bot/shared/services/cache/railway-redis.service');
+    const link = await redis.get(`portal_assessment_job:${jobId}`);
+    if (!link || link.userId !== userId) {
+      // Same response whether the link is missing or owned by someone else —
+      // don't leak whether a given jobId exists.
+      return res.status(403).json({ success: false, error: 'Not authorized for this assessment' });
+    }
+
+    const AssessmentGenClient = require('../../bot/shared/services/assessment-generator-client.service');
+    const result = await AssessmentGenClient.pollStatus(jobId);
+
+    if (result.status === 'failed') {
+      return res.json({ success: true, status: 'failed', error: result.error || 'generation failed' });
+    }
+    if (result.status !== 'completed') {
+      return res.json({ success: true, status: result.status || 'pending' });
+    }
+
+    const examHtml = result.data && result.data.exam_paper;
+    if (!examHtml || typeof examHtml !== 'string') {
+      return res.json({ success: true, status: 'failed', error: 'The assessment came back empty. Please try again.' });
+    }
+
+    // Format: query param wins, else the format picked at submit time, else PDF.
+    const format = String(req.query.format || link.outputFormat || 'pdf').toLowerCase() === 'docx' ? 'docx' : 'pdf';
+    const ext = format;
+
+    let fileBuffer;
+    if (format === 'docx') {
+      const { htmlToDocx } = require('../../bot/shared/utils/html-to-docx');
+      fileBuffer = await htmlToDocx(examHtml, { title: link.filename || 'Assessment' });
+    } else {
+      const { htmlToPdf } = require('../../bot/shared/utils/html-to-pdf');
+      fileBuffer = await htmlToPdf(examHtml, { timeout: 45000 });
+    }
+
+    const r2 = require('../../bot/shared/storage/r2');
+    const filename = `${link.filename || 'Assessment'}.${ext}`;
+    const key = await r2.uploadExamBuffer({ buffer: fileBuffer, userId, examId: jobId, filename });
+    // getPresignedUrl expects a full R2 URL — build it from the bare key first.
+    const publicUrl = r2.buildR2PublicUrl(key);
+    const downloadUrl = await r2.getPresignedUrl(publicUrl, 900); // 15 min short TTL
+
+    return res.json({ success: true, status: 'completed', downloadUrl, filename });
+  } catch (err) {
+    console.error('assessment/status error:', err);
+    return res.status(500).json({ success: false, error: 'Failed to check assessment status' });
+  }
+});
+
 module.exports = router;
