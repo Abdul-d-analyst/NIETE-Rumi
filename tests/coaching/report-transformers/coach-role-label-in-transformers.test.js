@@ -41,11 +41,11 @@ const emptyFICOAnalysis  = { domains: {}, scores: {}, executive_summary: 'ok' };
 const emptyMEWAKAAnalysis = { areas: {}, executive_summary: 'ok' };
 
 describe('report transformers — region-scoped observerName', () => {
-  test('OECD: region-less session → default "Rumi Digital Coach"', () => {
+  test('OECD: region-less session → default "NIETE Digital Coach" (bd-2381)', () => {
     withEnv({}, () => {
       const { transformOECDToReportData } = require('../../../bot/shared/services/coaching/report-transformers/oecd-report-transformer');
       const reportData = transformOECDToReportData({ ...baseSession, users: {} }, 'Hassan', emptyOECDAnalysis, false);
-      expect(reportData.observerName).toBe('Rumi Digital Coach');
+      expect(reportData.observerName).toBe('NIETE Digital Coach');
     });
   });
 
