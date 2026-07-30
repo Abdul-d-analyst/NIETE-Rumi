@@ -70,6 +70,11 @@ const DOMAINS = {
           3: 'Teacher connects new content to previously taught material.',
           4: 'Students actively recall and link prior knowledge; teacher builds on it.',
         },
+        // bd-2383 — named-evidence gate (Naveera R4). The generic "absent→1"
+        // rule left B4 at 96% Proficient+ because the model credits ANY warm-up.
+        // Score by NAMED concepts, never mere presence.
+        aiDetectionMethod:
+          'Do NOT reward the mere presence of a warm-up or an "any recall" opener. Score by NAMED evidence you can quote: level 3 (Proficient) requires the teacher explicitly restating or eliciting TWO OR MORE NAMED concepts from prior lessons that connect to today\'s content — name them. Level 4 requires a STUDENT restating or applying prior knowledge in their OWN words — quote the student. A generic opener ("do you remember yesterday?") with no specific concept actually recalled is level 2 at most; no reference is level 1. If you cannot name the specific prior concepts that were recalled, do NOT score above 2.',
       },
       {
         id: 'B5',
@@ -130,6 +135,11 @@ const DOMAINS = {
           3: 'Structured closure: recap key points, check understanding.',
           4: 'Students summarize learning, connect to next lesson, self-assess.',
         },
+        // bd-2383 — named-evidence gate (Naveera R4). B10 stayed at 89%
+        // Proficient+ because the model credits that the lesson closed at all;
+        // a closed "samajh aa gayi?" check is NOT consolidation.
+        aiDetectionMethod:
+          'Do NOT credit that the lesson merely ended, nor a closed check for understanding ("samajh aa gayi?", "clear?", "theek hai?") — those are yes/no checks, not consolidation. Score by NAMED consolidation evidence you can quote: level 3 (Proficient) requires the teacher recapping TWO OR MORE NAMED key points of TODAY\'s lesson AND a genuine understanding check that surfaces what students learned (an open question, not yes/no). Level 4 requires STUDENTS summarizing the learning in their OWN words or self-assessing — quote them. A closed "did you understand?" with no student output is level 2 at most; an abrupt end is level 1. If you cannot name what was consolidated, do NOT score above 2.',
       },
     ],
   },
