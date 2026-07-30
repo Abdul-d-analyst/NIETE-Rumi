@@ -4,7 +4,7 @@
  * observation report observerName).
  *
  * Contract:
- *   1. Unknown / empty region + no env → "Rumi Digital Coach" (safe default).
+ *   1. Unknown / empty region + no env → "NIETE Digital Coach" (safe default).
  *   2. DEFAULT_COACH_ROLE_LABEL env overrides the deployment-wide default.
  *   3. REGION_COACH_ROLE_LABEL_MAP JSON env overrides per region (lowercased key).
  *   4. Malformed JSON in REGION_COACH_ROLE_LABEL_MAP → fall through to default.
@@ -35,9 +35,9 @@ describe('coachRoleLabelForRegion (region-config)', () => {
   test('safe default when nothing is configured and region is empty', () => {
     withEnv({}, () => {
       const { coachRoleLabelForRegion } = require('../../bot/shared/config/region-config');
-      expect(coachRoleLabelForRegion()).toBe('Rumi Digital Coach');
-      expect(coachRoleLabelForRegion('')).toBe('Rumi Digital Coach');
-      expect(coachRoleLabelForRegion(undefined)).toBe('Rumi Digital Coach');
+      expect(coachRoleLabelForRegion()).toBe('NIETE Digital Coach');
+      expect(coachRoleLabelForRegion('')).toBe('NIETE Digital Coach');
+      expect(coachRoleLabelForRegion(undefined)).toBe('NIETE Digital Coach');
     });
   });
 
@@ -84,13 +84,13 @@ describe('coachRoleLabelForRegion (region-config)', () => {
 });
 
 describe('getCoachingCardCopy (region-scoped cardFooter)', () => {
-  test('cardFooter defaults to "Rumi Digital Coach" when no region and no env', () => {
+  test('cardFooter defaults to "NIETE Digital Coach" when no region and no env', () => {
     withEnv({}, () => {
       const { getCoachingCardCopy, COACHING_CARD_COPY } = require('../../bot/shared/config/coaching-card.config');
       const copy = getCoachingCardCopy('en');
-      expect(copy.cardFooter).toBe('Rumi Digital Coach');
+      expect(copy.cardFooter).toBe('NIETE Digital Coach');
       // Seed copy is not mutated — the returned copy is a shallow clone.
-      expect(COACHING_CARD_COPY.en.cardFooter).toBe('Rumi Digital Coach');
+      expect(COACHING_CARD_COPY.en.cardFooter).toBe('NIETE Digital Coach');
     });
   });
 
@@ -100,7 +100,7 @@ describe('getCoachingCardCopy (region-scoped cardFooter)', () => {
       expect(getCoachingCardCopy('en').cardFooter).toBe('Human Coach');
       expect(getCoachingCardCopy('ur').cardFooter).toBe('Human Coach');
       // Seed unchanged.
-      expect(COACHING_CARD_COPY.en.cardFooter).toBe('Rumi Digital Coach');
+      expect(COACHING_CARD_COPY.en.cardFooter).toBe('NIETE Digital Coach');
     });
   });
 
@@ -110,7 +110,7 @@ describe('getCoachingCardCopy (region-scoped cardFooter)', () => {
     }, () => {
       const { getCoachingCardCopy } = require('../../bot/shared/config/coaching-card.config');
       expect(getCoachingCardCopy('en', 'niete').cardFooter).toBe('Human Coach');
-      expect(getCoachingCardCopy('en', 'tanzania').cardFooter).toBe('Rumi Digital Coach');
+      expect(getCoachingCardCopy('en', 'tanzania').cardFooter).toBe('NIETE Digital Coach');
     });
   });
 
