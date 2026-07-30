@@ -814,8 +814,8 @@ async function handleRegistrationFlow(message, phoneNumber, userId) {
     const userLang = country === 'PK' ? 'ur' : 'en';
 
     const confirmMessagesWithPortal = {
-      en: `Thank you for registering, ${firstName}! You're all set to use Rumi.\n\n🔗 *Set up your Rumi Portal:*\n${portalUrl}\n\nThis link expires in 7 days. What would you like to work on?`,
-      ur: `رجسٹریشن کا شکریہ، ${firstName}! آپ اب Rumi استعمال کر سکتے ہیں۔\n\n🔗 *اپنا Rumi پورٹل سیٹ اپ کریں:*\n${portalUrl}\n\nیہ لنک 7 دنوں میں ختم ہو جائے گی۔ آپ کس پر کام کرنا چاہیں گے؟`
+      en: `Thank you for registering, ${firstName}! You're all set to use NIETE.\n\n🔗 *Set up your NIETE Portal:*\n${portalUrl}\n\nThis link expires in 7 days. What would you like to work on?`,
+      ur: `رجسٹریشن کا شکریہ، ${firstName}! آپ اب NIETE استعمال کر سکتے ہیں۔\n\n🔗 *اپنا NIETE پورٹل سیٹ اپ کریں:*\n${portalUrl}\n\nیہ لنک 7 دنوں میں ختم ہو جائے گی۔ آپ کس پر کام کرنا چاہیں گے؟`
     };
     const confirmMessagesNoPortal = {
       en: `Thank you for registering, ${firstName}! You're all set. What would you like to work on?`,

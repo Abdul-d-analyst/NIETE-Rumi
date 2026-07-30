@@ -26,8 +26,8 @@ const ASSET = (p) => {
   catch { return ''; }
 };
 const CARD_ASSETS = {
-  logoWhite: ASSET('assets/rumi-mark-white.png'),
-  logoNavy: ASSET('assets/rumi-mark-navy.png'),
+  logoWhite: ASSET('assets/niete-mark-ondark.png'),
+  logoNavy: ASSET('assets/niete-mark-onlight.png'),
   lexR: ASSET('fonts/Lexend-Regular.ttf'),
   lexB: ASSET('fonts/Lexend-Bold.ttf'),
   nastR: ASSET('fonts/NotoNastaliqUrdu-Regular.ttf'),
@@ -145,7 +145,7 @@ function buildCoachCardHtml(fb, { lang = 'sw' } = {}) {
     </div>
   </div>
   <div class="ft">
-    <div class="brand"><img src="data:image/png;base64,${A.logoNavy}" alt=""/><span>Rumi</span></div>
+    <div class="brand"><img src="data:image/png;base64,${A.logoNavy}" alt=""/><span>NIETE</span></div>
     <span class="lock">🔒 ${esc(S.coach_card_closing)}</span>
   </div>
 </div></body></html>`;

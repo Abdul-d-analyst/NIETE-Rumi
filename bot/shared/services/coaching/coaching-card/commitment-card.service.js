@@ -71,7 +71,7 @@ function buildPrompt(lang, analysis, q3) {
     strategy: (g.strategies || [])[0] || g.rationale || '',
   }));
 
-  return `You are Rumi, a warm teacher coach. Below is a REAL coaching session. Produce a short "commitment card" the teacher receives on WhatsApp after our reflective conversation.
+  return `You are the NIETE Teaching Assistant, a warm teacher coach. Below is a REAL coaching session. Produce a short "commitment card" the teacher receives on WhatsApp after our reflective conversation.
 
 WRITE ALL THREE TEXT FIELDS (commitment, action, lesson_label) IN ${langName.toUpperCase()} — this teacher's lesson and our whole conversation were in ${langName}. Natural, warm, native ${langName}.
 

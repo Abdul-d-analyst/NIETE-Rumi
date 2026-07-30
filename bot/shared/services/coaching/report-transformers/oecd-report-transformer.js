@@ -239,7 +239,7 @@ function transformOECDToReportData(session, teacherName, enhancedAnalysis, hasPr
       priorFeedback = {
         score: 0,
         maxScore: 0,
-        evidence: "This is the teacher's first classroom observation with Rumi. This section will be populated once the first observation is completed.",
+        evidence: "This is the teacher's first classroom observation with NIETE. This section will be populated once the first observation is completed.",
         timestamp: 'N/A',
         isFirstObservation: true,
       };

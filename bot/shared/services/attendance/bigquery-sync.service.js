@@ -179,7 +179,7 @@ async function ensureTable(client, cfg = getBigQueryConfig()) {
     PARTITION BY period_end
     CLUSTER BY sector, teacher_id
     OPTIONS (
-      description = "Teacher presence rollup from Rumi. Written nightly by bot/workers/attendance-bigquery-export.worker.js."
+      description = "Teacher presence rollup from NIETE. Written nightly by bot/workers/attendance-bigquery-export.worker.js."
     );
   `;
   await client.query({ query: ddl, location: 'US' });

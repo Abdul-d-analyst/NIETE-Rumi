@@ -39,13 +39,13 @@ async function handlePortalCommand(user, phoneNumber) {
       // Already activated messages — portal link is omitted entirely if
       // PORTAL_URL is unset, so cloners don't ship a broken placeholder URL.
       alreadyActivated: portalBase ? {
-        en: `Your Rumi portal is already active!\n\n🔗 *Log in here:*\n${portalBase}/portal/login\n\nUse your phone number and the password you created.`,
+        en: `Your NIETE portal is already active!\n\n🔗 *Log in here:*\n${portalBase}/portal/login\n\nUse your phone number and the password you created.`,
 
-        ur: `آپ کا Rumi پورٹل پہلے سے فعال ہے!\n\n🔗 *یہاں لاگ ان کریں:*\n${portalBase}/portal/login\n\nاپنا فون نمبر اور پاسورڈ استعمال کریں۔`,
+        ur: `آپ کا NIETE پورٹل پہلے سے فعال ہے!\n\n🔗 *یہاں لاگ ان کریں:*\n${portalBase}/portal/login\n\nاپنا فون نمبر اور پاسورڈ استعمال کریں۔`,
 
-        ar: `بوابة Rumi الخاصة بك نشطة بالفعل!\n\n🔗 *سجل الدخول هنا:*\n${portalBase}/portal/login\n\nاستخدم رقم هاتفك وكلمة المرور التي أنشأتها.`,
+        ar: `بوابة NIETE الخاصة بك نشطة بالفعل!\n\n🔗 *سجل الدخول هنا:*\n${portalBase}/portal/login\n\nاستخدم رقم هاتفك وكلمة المرور التي أنشأتها.`,
 
-        es: `¡Tu portal de Rumi ya está activo!\n\n🔗 *Inicia sesión aquí:*\n${portalBase}/portal/login\n\nUsa tu número de teléfono y la contraseña que creaste.`
+        es: `¡Tu portal de NIETE ya está activo!\n\n🔗 *Inicia sesión aquí:*\n${portalBase}/portal/login\n\nUsa tu número de teléfono y la contraseña que creaste.`
       } : {
         en: 'Your account is already active. Ask your administrator for the portal URL.',
         ur: 'آپ کا اکاؤنٹ پہلے سے فعال ہے۔ پورٹل کے لیے اپنے ایڈمنسٹریٹر سے رابطہ کریں۔',

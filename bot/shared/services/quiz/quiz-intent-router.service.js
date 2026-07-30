@@ -120,7 +120,7 @@ async function _openQuizManagerFlow(user, from, topic) {
     flowToken: user.id,
     header: 'Quiz',
     body: topic ? `Quiz on "${topic}" — pick the class to send it to.` : 'Manage your quizzes.',
-    footer: 'Powered by Rumi',
+    footer: 'Powered by NIETE',
     buttonText: 'Open quiz menu'
   });
   logToFile('✅ Quiz Manager Flow opened (post-confirmation)', { userId: user.id, topic });

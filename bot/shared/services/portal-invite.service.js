@@ -63,28 +63,28 @@ class PortalInviteService {
 
       // Multilingual invitation messages
       const messages = {
-        en: `Great! I've created your personal Rumi portal where you can access all your lesson plans, presentations, and coaching reports.
+        en: `Great! I've created your personal NIETE portal where you can access all your lesson plans, presentations, and coaching reports.
 
 🔗 *Set up your portal:*
 ${portalUrl}
 
 This link expires in 7 days. Click it to create your password and log in.`,
 
-        ur: `بہت خوب! میں نے آپ کے لیے Rumi پورٹل بنا دیا ہے جہاں آپ اپنے تمام lesson plans، presentations، اور coaching reports دیکھ سکتے ہیں۔
+        ur: `بہت خوب! میں نے آپ کے لیے NIETE پورٹل بنا دیا ہے جہاں آپ اپنے تمام lesson plans، presentations، اور coaching reports دیکھ سکتے ہیں۔
 
 🔗 *پورٹل سیٹ اپ کریں:*
 ${portalUrl}
 
 یہ لنک 7 دن میں ختم ہو جائے گی۔ اپنا پاسورڈ بنانے اور لاگ ان کرنے کے لیے اسے کلک کریں۔`,
 
-        ar: `رائع! لقد أنشأت بوابة Rumi الشخصية الخاصة بك حيث يمكنك الوصول إلى جميع خطط الدروس والعروض التقديمية وتقارير التدريب.
+        ar: `رائع! لقد أنشأت بوابة NIETE الشخصية الخاصة بك حيث يمكنك الوصول إلى جميع خطط الدروس والعروض التقديمية وتقارير التدريب.
 
 🔗 *قم بإعداد بوابتك:*
 ${portalUrl}
 
 تنتهي صلاحية هذا الرابط خلال 7 أيام. انقر عليه لإنشاء كلمة المرور وتسجيل الدخول.`,
 
-        es: `¡Excelente! He creado tu portal personal de Rumi donde puedes acceder a todos tus planes de lección, presentaciones e informes de coaching.
+        es: `¡Excelente! He creado tu portal personal de NIETE donde puedes acceder a todos tus planes de lección, presentaciones e informes de coaching.
 
 🔗 *Configura tu portal:*
 ${portalUrl}
@@ -341,7 +341,7 @@ Este enlace expira en 7 días. Haz clic en él para crear tu contraseña e inici
     const portalUrl = `${portalBase}/portal/setup/${portalSetupToken}`;
 
     const messages = {
-      en: `Thank you, ${firstName}! Your registration is successful. I've also activated your Rumi portal.
+      en: `Thank you, ${firstName}! Your registration is successful. I've also activated your NIETE portal.
 
 ✅ *Set up your portal here:*
 ${portalUrl}
@@ -356,7 +356,7 @@ This link expires in 7 days. Set up your password now to start tracking your jou
 
 What would you like to work on next?`,
 
-      ur: `شکریہ، ${firstName}! آپ کی رجسٹریشن کامیاب ہو گئی ہے۔ میں نے آپ کا Rumi پورٹل بھی فعال کر دیا ہے۔
+      ur: `شکریہ، ${firstName}! آپ کی رجسٹریشن کامیاب ہو گئی ہے۔ میں نے آپ کا NIETE پورٹل بھی فعال کر دیا ہے۔
 
 ✅ *یہاں اپنا پورٹل سیٹ اپ کریں:*
 ${portalUrl}
@@ -371,7 +371,7 @@ ${portalUrl}
 
 آگے آپ کس چیز پر کام کرنا چاہیں گے؟`,
 
-      ar: `شكراً، ${firstName}! تم تسجيلك بنجاح. لقد قمت أيضاً بتفعيل بوابة Rumi الخاصة بك.
+      ar: `شكراً، ${firstName}! تم تسجيلك بنجاح. لقد قمت أيضاً بتفعيل بوابة NIETE الخاصة بك.
 
 ✅ *قم بإعداد بوابتك هنا:*
 ${portalUrl}
@@ -386,7 +386,7 @@ ${portalUrl}
 
 ماذا تريد أن تعمل عليه بعد ذلك؟`,
 
-      es: `¡Gracias, ${firstName}! Tu registro fue exitoso. También he activado tu portal de Rumi.
+      es: `¡Gracias, ${firstName}! Tu registro fue exitoso. También he activado tu portal de NIETE.
 
 ✅ *Configura tu portal aquí:*
 ${portalUrl}

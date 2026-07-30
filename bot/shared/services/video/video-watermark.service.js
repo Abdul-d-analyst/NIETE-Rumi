@@ -19,7 +19,7 @@ const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
 const DEFAULT_CONFIG = {
   logoSize: 45,           // Logo dimensions in pixels
   fontSize: 18,           // Text font size
-  text: process.env.VIDEO_WATERMARK_TEXT || 'Created with Rumi',
+  text: process.env.VIDEO_WATERMARK_TEXT || 'Created with NIETE',
   position: 'bottom-right',
   boxOpacity: 0.55,       // Dark box opacity
   boxWidth: 400,          // Box width in pixels
@@ -28,7 +28,7 @@ const DEFAULT_CONFIG = {
 };
 
 // Path to the white Rumi logo asset
-const LOGO_PATH = path.join(__dirname, '../../assets/rumi-watermark-logo.png');
+const LOGO_PATH = path.join(__dirname, '../../assets/niete-mark-ondark.png');
 
 class VideoWatermarkService {
 

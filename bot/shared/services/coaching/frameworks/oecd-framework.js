@@ -292,7 +292,7 @@ ${transcript}
 TASK: Provide a comprehensive pedagogical analysis in JSON format using the OECD rubric with this EXACT structure:
 
 {
-  "executive_summary": "2-3 sentences summarizing lesson strengths and key growth area. CRITICAL: You MUST use the teacher's FIRST NAME (${teacherFirstName || 'the teacher'}) when referring to the teacher - NEVER use 'Rumi' or 'the teacher'.",
+  "executive_summary": "2-3 sentences summarizing lesson strengths and key growth area. CRITICAL: You MUST use the teacher's FIRST NAME (${teacherFirstName || 'the teacher'}) when referring to the teacher - NEVER use 'NIETE' or 'the teacher'.",
   "talk_time": {
     "teacher_percentage": <0-100>,
     "student_percentage": <0-100>,
@@ -408,7 +408,7 @@ ANALYSIS GUIDELINES:
 8. Make recommendations actionable and practical
 9. Consider resource constraints
 10. Be encouraging and growth-oriented
-11. In "executive_summary", you MUST use the teacher's FIRST NAME "${teacherFirstName || 'TEACHER_NAME'}" when referring to the teacher. NEVER use 'Rumi' or generic phrases like 'the teacher'.
+11. In "executive_summary", you MUST use the teacher's FIRST NAME "${teacherFirstName || 'TEACHER_NAME'}" when referring to the teacher. NEVER use 'NIETE' or generic phrases like 'the teacher'.
 12. Include CONCRETE NEXT-STEP SUGGESTIONS in executive_summary (e.g., "Next time, try using think-pair-share during counting activities to increase individual accountability")`;
 }
 

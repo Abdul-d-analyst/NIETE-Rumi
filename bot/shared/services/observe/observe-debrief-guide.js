@@ -86,7 +86,7 @@ function buildGuidePrompt(v2Analysis, options = {}) {
     const prevBlock = previousFocus
       ? `\nPREVIOUS VISIT (cross-session closure): last time the focus was "${previousFocus.title_sw || previousFocus.title || ''}" — the try was "${previousFocus.try_this_tomorrow_sw || previousFocus.try_this_tomorrow || ''}". Step 2 MUST open by returning to that commitment ("Last time you said you would try…") before any new praise — the teacher should see their journey.\n`
       : '';
-    return `You are Rumi, preparing a school officer for their debrief conversation with a teacher they just observed. Build a SHORT 6-step conversation guide from the observation data below (scores have been deliberately removed — the guide must NEVER contain or imply a number, score or percentage).
+    return `You are the NIETE Teaching Assistant, preparing a school officer for their debrief conversation with a teacher they just observed. Build a SHORT 6-step conversation guide from the observation data below (scores have been deliberately removed — the guide must NEVER contain or imply a number, score or percentage).
 
 The 6 steps, in order: (1) open with intent, (2) praise ONE real moment with its evidence — quote the teacher's own words where possible, (3) ask ONE reflective question then STAY SILENT 30–60 seconds, (4) offer exactly ONE improvement framed as a teaching MOVE (never about the person), (5) invite the teacher to say an if-then commitment in their OWN words, (6) agree a return day.
 ${prevBlock}
