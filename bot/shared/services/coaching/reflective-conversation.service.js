@@ -314,13 +314,15 @@ class ReflectiveConversationService {
         if (sessionData) {
           const languageCode = await getUserLanguage(sessionData.user_id);
 
-          // bd-2374: reflect her answer back before the close, so the flow
-          // acknowledges what SHE said instead of jumping to a generic thanks.
-          // Best-effort — null on any failure and we fall through to the
-          // generic thanks exactly as before.
+          // bd-2374 + bd-2414: the closing VOICE note is the contextual
+          // acknowledgement — reflecting what SHE said — spoken in HER language,
+          // NOT a generic English "thank you". Best-effort: on any failure we
+          // fall back to a localized thanks (now translated to Urdu). We do NOT
+          // also send the acknowledgement as a separate text message.
+          let ackLine = null;
           try {
             const currentQuestion = (questions[questionIndex] && questions[questionIndex].question) || '';
-            const ackLine = await generateAcknowledgement(response, currentQuestion, languageCode, {
+            ackLine = await generateAcknowledgement(response, currentQuestion, languageCode, {
               langName: ACK_LANG_NAME[String(languageCode || 'en').slice(0, 2)] || 'English',
               generator: async (prompt) => {
                 const r = await GPT5MiniService.openai.chat.completions.create({
@@ -330,23 +332,21 @@ class ReflectiveConversationService {
                 return r.choices?.[0]?.message?.content || '';
               },
             });
-            if (ackLine) await WhatsAppService.sendMessage(from, ackLine);
           } catch (ackError) {
             logToFile('⚠️  Reflective acknowledgement failed (non-fatal)', { error: ackError.message });
           }
 
-          // The voice path strips the trailing emoji (TTS reads ":pray:" otherwise);
-          // the text path keeps it.
-          const localised = getCoachingMessage('reflectionsThanks', languageCode);
-          const spokenForm = localised.replace(/\s*🙏\s*$/u, '');
+          // The voice path strips the trailing emoji (TTS reads ":pray:" otherwise).
+          const closingText = (ackLine && ackLine.trim()) || getCoachingMessage('reflectionsThanks', languageCode);
+          const spokenForm = closingText.replace(/\s*🙏\s*$/u, '');
 
           try {
             const voiceBuffer = await ElevenLabsService.generateSpeechForLanguage(spokenForm, languageCode);
             await WhatsAppService.sendAudio(from, voiceBuffer, TEMP_DIR);
           } catch (voiceError) {
             // Fallback to text if voice fails
-            logToFile('⚠️  Voice generation failed for thank you message, sending text', { error: voiceError.message });
-            await WhatsAppService.sendMessage(from, localised);
+            logToFile('⚠️  Voice generation failed for reflection closer, sending text', { error: voiceError.message });
+            await WhatsAppService.sendMessage(from, closingText);
           }
         } else {
           // Session row missing — language unknown, default to English.
