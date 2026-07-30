@@ -1778,9 +1778,39 @@ async function handleDocumentMessage(message, from, user) {
 
         return; // Exit early - voice handler will process the audio
       } catch (durationError) {
+        // bd-2409 — enrich the log so the NEXT long-audio failure is fully
+        // diagnosable (Maria's 29:40 recording died here with no userId/mediaId
+        // logged, so the root could not be pinned; the truncation theory was
+        // disproven — no session row was ever created).
         logToFile('⚠️ Could not get audio duration, treating as regular document', {
-          error: durationError.message
+          error: durationError.message,
+          stack: durationError.stack,
+          userId: user && user.id,
+          from,
+          documentId,
+          mimeType,
+          fileSizeMB: audioClassification.sizeMB,
         });
+        // bd-2409 — INVARIANT: a school leader's long recording must NEVER fall
+        // through to the misleading "send a classroom audio first" reply. If the
+        // duration probe fails we cannot classify it as long, but a leader who
+        // sent an audio DOCUMENT almost certainly sent a classroom recording —
+        // route to /observe (dark-safe: inert unless OBSERVE is on). This upholds
+        // observe-audio-router's stated invariant even on a probe failure.
+        try {
+          const { isSchoolLeader } = require('./shared/services/observe/observe-gate');
+          if (isSchoolLeader(user)) {
+            const { routeLeaderAudio } = require('./shared/services/observe/observe-audio-router');
+            const observeHandled = await routeLeaderAudio({
+              user, from, audioId: documentId, sessionId: null, isLongAudio: true,
+            });
+            if (observeHandled) return;
+          }
+        } catch (routeErr) {
+          logToFile('⚠️ observe fallback on duration-probe failure errored', {
+            userId: user && user.id, error: routeErr.message,
+          });
+        }
         // Continue with regular document flow if duration check fails
       }
     }
@@ -1811,8 +1841,14 @@ async function handleDocumentMessage(message, from, user) {
       );
     }
   } catch (error) {
+    // bd-2409 — include userId + stack + documentId so a dropped recording is
+    // attributable (Maria's 29:40 recording left NO diagnosable trail because
+    // this catch logged only {error, from}).
     logToFile('❌ Error handling document', {
       error: error.message,
+      stack: error.stack,
+      userId: user && user.id,
+      documentId: message && message.document && message.document.id,
       from
     });
     await WhatsAppService.sendMessage(from, "Sorry, I encountered an error processing your document.");
