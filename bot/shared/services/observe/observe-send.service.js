@@ -520,6 +520,27 @@ async function _sendPackage(dest, pngBuffer, caption, companionText) {
  *                  window-closed template (payload observe_report_<sid>).
  *  'teacher_tap' — the teacher tapped the template button: direct delivery.
  */
+/**
+ * bd-2411 — a teacher-delivery send failed on the worker (e.g. a Meta template
+ * 400, an R2 miss). The old code let the exception propagate silently: the
+ * coach had already been told "📨 sending now, I'll confirm once it lands" by
+ * handleSendConfirm, the delivery stayed frozen at 'awaiting_confirm', and
+ * NEITHER the coach nor the teacher heard anything again (R17/18). Record the
+ * failure and tell the coach so it's visible + one-tap retryable via /observe.
+ */
+async function _handleDeliverFailure(sessionId, foPhone, S, path, err, meta = {}) {
+  logToFile('❌ observe send: teacher delivery failed', {
+    sessionId, path, template: meta.tpl && meta.tpl.name,
+    error: err && err.message, stack: err && err.stack,
+  });
+  await mergeTeacherDelivery(sessionId, {
+    status: 'send_failed',
+    last_error: err && err.message,
+    failed_at: new Date().toISOString(),
+  }).catch(() => {});
+  await WhatsAppService.sendMessage(foPhone, S.send_failed_fo).catch(() => {});
+}
+
 async function processTeacherReport(sessionId, payload = {}) {
   const session = await _loadSession(sessionId);
   const foPhone = payload.from && payload.phase !== 'teacher_tap'
@@ -620,23 +641,33 @@ async function processTeacherReport(sessionId, payload = {}) {
       // Body: {{1}} teacher name, {{2}} FO name. QUICK_REPLY carries the
       // session-scoped payload so the tap routes back to THIS report.
       const tpl = reportTemplateConfig();   // FEAT-093 bd-54 — per-market template
-      await WhatsAppService.sendTemplate(delivery.teacher_phone, tpl.name, tpl.lang, [
-        { type: 'body',
-          parameters: [
-            { type: 'text', text: delivery.teacher_name },
-            { type: 'text', text: foName },
-          ] },
-        { type: 'button', sub_type: 'quick_reply', index: '0',
-          parameters: [{ type: 'payload', payload: `${TEMPLATE_PAYLOAD_PREFIX}${sessionId}` }] },
-      ]);
+      try {
+        await WhatsAppService.sendTemplate(delivery.teacher_phone, tpl.name, tpl.lang, [
+          { type: 'body',
+            parameters: [
+              { type: 'text', text: delivery.teacher_name },
+              { type: 'text', text: foName },
+            ] },
+          { type: 'button', sub_type: 'quick_reply', index: '0',
+            parameters: [{ type: 'payload', payload: `${TEMPLATE_PAYLOAD_PREFIX}${sessionId}` }] },
+        ]);
+      } catch (sendErr) {
+        await _handleDeliverFailure(sessionId, foPhone, S, 'template', sendErr, { tpl });
+        return;
+      }
       await mergeTeacherDelivery(sessionId, { status: 'awaiting_teacher_tap' });
       await WhatsAppService.sendMessage(foPhone, S.send_template_queued_fo);
       logToFile('📨 observe send: template sent (window closed)', { sessionId });
       return;
     }
 
-    const png = await downloadFromR2(delivery.report_key);
-    await _sendPackage(delivery.teacher_phone, png, delivery.caption || '', delivery.companion_text);
+    try {
+      const png = await downloadFromR2(delivery.report_key);
+      await _sendPackage(delivery.teacher_phone, png, delivery.caption || '', delivery.companion_text);
+    } catch (sendErr) {
+      await _handleDeliverFailure(sessionId, foPhone, S, 'direct', sendErr);
+      return;
+    }
     await mergeTeacherDelivery(sessionId, { status: 'sent', sent_at: new Date().toISOString() });
     await WhatsAppService.sendMessage(foPhone, S.send_done_fo);
     logToFile('✅ observe send: combined report delivered to teacher', { sessionId });
