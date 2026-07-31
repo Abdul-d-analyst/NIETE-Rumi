@@ -592,8 +592,24 @@ async function loadGrandQuizState(userId, levelId) {
     const hoursLeft = Math.max(1, Math.round((new Date(cooldown.cooldown_until) - Date.now()) / 3_600_000));
     return { badge: 'badge_quiz_cooldown', body: '⏳ Grand Quiz — Locked after a recent failed attempt.', caption: `Try again in about ${hoursLeft} hours.`, cta: `⏳ Cooldown (${hoursLeft}h)` };
   }
-  if (!allDone) return { badge: 'badge_quiz_locked', body: '🔒 Grand Quiz — Unlocks when all courses are complete.', caption: '62 questions · 100% required · 24h cooldown on fail', cta: '🔒 Locked' };
-  return { badge: 'badge_quiz_available', body: '📝 Grand Quiz — Ready. Start your level exam.', caption: '100% required to pass · 24h cooldown on fail', cta: 'Start exam' };
+  // bd-2393 — the pass bar is per-vendor (NIETE 80%, Beacon House 70%), and the
+  // question count is per-quiz. Both were hardcoded ("62 questions · 100%
+  // required"), which was wrong on every level.
+  const [{ count: qCount }, { data: lvRow }] = await Promise.all([
+    supabase.from('training_questions').select('id', { count: 'exact', head: true })
+      .eq('grand_quiz_id', catalog.id).eq('is_active', true),
+    supabase.from('training_levels').select('vendor_id').eq('id', levelId).maybeSingle(),
+  ]);
+  let passPct = 100;
+  if (lvRow?.vendor_id) {
+    const { data: vendor } = await supabase
+      .from('training_vendors').select('passing_pct').eq('id', lvRow.vendor_id).maybeSingle();
+    const p = Number(vendor?.passing_pct);
+    if (Number.isFinite(p) && p > 0 && p <= 100) passPct = p;
+  }
+  const qPart = qCount ? `${qCount} questions · ` : '';
+  if (!allDone) return { badge: 'badge_quiz_locked', body: '🔒 Grand Quiz — Unlocks when all courses are complete.', caption: `${qPart}${passPct}% required · 24h cooldown on fail`, cta: '🔒 Locked' };
+  return { badge: 'badge_quiz_available', body: '📝 Grand Quiz — Ready. Start your level exam.', caption: `${qPart}${passPct}% to pass · 24h cooldown on fail`, cta: 'Start exam' };
 }
 
 // ─── Presentation helpers ──────────────────────────────────────────────────

@@ -16,6 +16,10 @@ const WhatsAppService = require('../whatsapp.service');
 const { getPresignedUrl } = require('../../storage/r2');
 const { logToFile } = require('../../utils/logger');
 const { logEvent } = require('../../utils/structured-logger');
+// bd-2390 — the single writer for teacher_training_progress. Lives in its own
+// module so quiz-delivery can record a completion without requiring this file
+// (which requires quiz-delivery back).
+const { markModuleComplete } = require('./progress.service');
 
 /**
  * A module is delivered as a PDF (not a video) when it has no video_url but
@@ -239,32 +243,6 @@ async function deliverNextModule(userId, courseId, phoneNumber) {
  * Mark a module complete and deliver the next one (or completion message).
  * Called from the button-reply handler.
  */
-/**
- * Write the completion row for a module. Idempotent — safe to call twice.
- *
- * bd-2390: this is the ONLY place a progress row is created by the runtime,
- * and it is reached from exactly two callers: a module with no quiz (the tap
- * is the only signal available) and a passed module quiz. Keeping it in one
- * function is what stops "completed" from drifting back to "tapped".
- *
- * @param {string} userId   users.id (uuid)
- * @param {number} moduleId training_modules.id
- * @returns {Promise<boolean>} true if the row is present after the call
- */
-async function markModuleComplete(userId, moduleId) {
-  const { error } = await supabase
-    .from('teacher_training_progress')
-    .upsert(
-      { user_id: userId, module_id: moduleId, completed_at: new Date().toISOString() },
-      { onConflict: 'user_id,module_id' }
-    );
-  if (error) {
-    logToFile('❌ Progress upsert failed', { userId, moduleId, error: error.message });
-    return false;
-  }
-  return true;
-}
-
 async function handleModuleDone(userId, moduleId, phoneNumber) {
   const moduleIdNum = parseInt(moduleId, 10);
   if (!moduleIdNum) return false;
@@ -470,4 +448,6 @@ async function deliverModuleById(moduleId, phoneNumber, opts = {}) {
   return true;
 }
 
+// markModuleComplete is re-exported for the existing callers/tests that reach
+// for it here; progress.service.js is the definition.
 module.exports = { deliverNextModule, handleModuleDone, deliverModuleById, deliverPdfModule, isPdfModule, markModuleComplete };
