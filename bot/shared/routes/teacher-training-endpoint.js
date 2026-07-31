@@ -45,20 +45,21 @@ async function handleTeacherTrainingInit(userId /*, flowToken */) {
   logToFile('🎓 Training Flow INIT', { userId });
   const catalog = await loadVisibleLevelsWithProgress(userId);
   const teacher = await loadTeacher(userId);
-  if (!teacher) return errorScreen('We could not find your training profile. Please contact NIETE support.');
+  if (!teacher) return entryErrorScreen('We could not find your training profile. Please contact NIETE support.');
   if (catalog.length === 0) {
-    return errorScreen(
+    return entryErrorScreen(
       `No training assigned yet, ${teacher.first_name || 'teacher'}. ` +
       'Please contact your NIETE program lead to enrol you.'
     );
   }
 
-  const vendors = partitionByVendor(catalog);
-  if (vendors.length > 1) {
-    return buildVendorPicker(userId, teacher, vendors);
-  }
-  // Single-vendor teacher — skip picker, go straight to home for that vendor.
-  return buildTrainingHome(userId, { vendorKey: vendors[0].vendor_key, teacher, catalog });
+  // OPS-115 — INIT must return a routing-model ENTRY POINT (a node with no
+  // incoming edges). VENDOR_PICKER is the only one; TRAINING_HOME has an
+  // incoming edge from it. The old single-vendor shortcut returned
+  // TRAINING_HOME to save a tap and the client rejected the whole Flow with
+  // "invalid-screen-transition ... already have incoming nodes". Always open
+  // on the picker — single-vendor teachers see a one-row list and tap through.
+  return buildVendorPicker(userId, teacher, partitionByVendor(catalog));
 }
 
 /**
@@ -73,6 +74,9 @@ async function handleTeacherTrainingDataExchange(userId, screen, screenData /*, 
     if (action === 'open_vendor') {
       const vendorKey = String(screenData._vendor_key || '').trim();
       if (!vendorKey) return createErrorResponse('Missing vendor');
+      // OPS-115 — the placeholder row emitted by entryErrorScreen. Nothing to
+      // open; close cleanly instead of resolving it to an arbitrary vendor.
+      if (vendorKey === 'none') return buildSuccessScreen('No training assigned yet.');
       return buildTrainingHome(userId, { vendorKey });
     }
     if (action === 'close') return buildSuccessScreen('See you soon!');
@@ -167,10 +171,9 @@ async function handleTeacherTrainingBack(userId, screen /*, flowToken */) {
   // No vendor key is carried through the raw BACK gesture — recompute from state.
   const catalog = await loadVisibleLevelsWithProgress(userId);
   const teacher = await loadTeacher(userId);
-  if (!teacher) return errorScreen('We could not find your training profile. Please contact NIETE support.');
-  const vendors = partitionByVendor(catalog);
-  if (vendors.length > 1) return buildVendorPicker(userId, teacher, vendors);
-  return buildTrainingHome(userId, { vendorKey: vendors[0]?.vendor_key, teacher, catalog });
+  if (!teacher) return entryErrorScreen('We could not find your training profile. Please contact NIETE support.');
+  // OPS-115 — same entry-point rule as INIT; always land on the picker.
+  return buildVendorPicker(userId, teacher, partitionByVendor(catalog));
 }
 
 // ─── Builders ──────────────────────────────────────────────────────────────
@@ -716,6 +719,32 @@ function errorScreen(message) {
   return {
     screen: 'SUCCESS',
     data: { message, extension_message_response: { params: { training_action: 'error' } } },
+  };
+}
+
+/**
+ * OPS-115 — an error shown as the FIRST screen (from INIT or a raw BACK).
+ *
+ * errorScreen() renders on SUCCESS, which has incoming edges from all three
+ * other screens, so it is not a legal entry point: returning it from INIT
+ * fails with "invalid-screen-transition" and the teacher sees "Something went
+ * wrong" instead of the message. VENDOR_PICKER is the only entry node, so
+ * first-screen errors render there with the reason in the caption. Mid-Flow
+ * errors keep using errorScreen().
+ *
+ * vendor_options carries ONE placeholder row rather than []: the
+ * RadioButtonsGroup is `required: true`, and an empty data-source is itself a
+ * payload-validation failure — which would just swap this bug for another.
+ */
+function entryErrorScreen(message) {
+  return {
+    screen: 'VENDOR_PICKER',
+    data: {
+      hero_title:    'Teacher Training',
+      hero_subtitle: ' ',
+      hero_caption:  message,
+      vendor_options: [{ id: 'none', title: 'No programs available', description: message }],
+    },
   };
 }
 
