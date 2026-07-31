@@ -1,5 +1,5 @@
 /**
- * OPS-115 — "Something went wrong" on every /training open.
+ * BUG-144 — "Something went wrong" on every /training open.
  *
  * WhatsApp requires the screen returned by INIT (and by a raw BACK) to be an
  * ENTRY POINT of the Flow's routing model: a node with NO incoming edges.
@@ -107,7 +107,7 @@ const MULTI = [
   { id: 'v2', key: 'OXBRIDGE', name: 'Oxbridge', levels: ['Game-Based Teaching'] },
 ];
 
-describe('OPS-115 — INIT must return a routing-model entry point', () => {
+describe('BUG-144 — INIT must return a routing-model entry point', () => {
   test('single-vendor teacher gets VENDOR_PICKER, not the TRAINING_HOME shortcut', async () => {
     mockTables = enrolment({ vendors: SINGLE });
     const res = await handleTeacherTrainingInit('u1', 'u1:teacher-training:1');
