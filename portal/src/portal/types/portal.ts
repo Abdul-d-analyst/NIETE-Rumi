@@ -2,6 +2,16 @@ export interface User {
   firstName: string;
   lastName: string;
   phoneNumber: string;
+  /** The user's registered country (users.country on the API). Optional
+   *  because older API responses may omit it. */
+  country?: string | null;
+  /**
+   * bd-2434 (Leader Portal): the user's role (users.role on the API). Decides
+   * whether the portal shows the school-leader dashboard vs the teacher
+   * experience. Optional because older API responses may omit it (→ teacher).
+   * See src/portal/lib/leaderRole.ts (LEADER_ROLES / isLeader).
+   */
+  role?: string | null;
 }
 
 export interface DashboardStats {
@@ -135,4 +145,51 @@ export interface VideoDetail extends VideoRequest {
   thumbnailUrl?: string; // Presigned URL from backend
   current_step?: number;
   error_message?: string;
+}
+
+// ============================================================================
+// Leader Portal (bd-2434) — the school-leader "My Patch" surface.
+// ============================================================================
+
+/** One teacher in a leader's patch (leader_teachers ∩ Rumi activity). */
+export interface LeaderPatchTeacher {
+  teacherExtId: string | null;
+  name: string | null;
+  phone: string | null;
+  onRumi: boolean;
+  rumiUserId: string | null;
+  coachingSessions: number;
+  lessonPlans: number;
+  lastSessionAt: string | null;
+  lastScore: number | null;   // framework-agnostic %, null if never coached
+}
+
+/** My Patch headline KPIs + focus list (GET /leader/overview). */
+export interface LeaderOverview {
+  totalTeachers: number;
+  onRumi: number;
+  notOnRumi: number;
+  totalCoachingSessions: number;
+  totalLessonPlans: number;
+  scoredTeachers: number;
+  avgLastScore: number | null;
+  focus: LeaderPatchTeacher[];
+}
+
+/** Single teacher detail (GET /leader/teacher/:id) — patch-membership guarded. */
+export interface LeaderTeacherDetail {
+  teacher: { rumiUserId: string; name: string; phone: string; onRumi: boolean };
+  stats: {
+    coachingSessions: number;
+    lessonPlans: number;
+    readingAssessments: number;
+    lastScore: number | null;
+  };
+  sessions: Array<{
+    id: string;
+    date: string;
+    score: number | null;
+    points: number | null;
+    maxPoints: number | null;
+  }>;
 }

@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { getApiBaseUrl } from '@/lib/runtime';
-import type { User, DashboardStats, LessonPlan, CoachingSession, SessionDetail, CoachingAnalytics, Pagination, VideoRequest, VideoDetail } from '../types/portal';
+import type { User, DashboardStats, LessonPlan, CoachingSession, SessionDetail, CoachingAnalytics, Pagination, VideoRequest, VideoDetail, LeaderOverview, LeaderPatchTeacher, LeaderTeacherDetail } from '../types/portal';
 import type { ReadingAssessment, ReadingAssessmentDetail, ReadingStats } from '../types/readingAssessment';
 
 // On the web, frontend and backend share a domain, so a relative URL avoids
@@ -203,6 +203,25 @@ export type AssessmentStatus = {
   downloadUrl?: string;
   filename?: string;
   error?: string;
+};
+
+// Leader Portal endpoints (bd-2434) — school-leader family only.
+// The backend gate 403s non-leaders; the frontend also hides these via isLeader.
+export const leader = {
+  getOverview: async (): Promise<{ success: boolean; overview: LeaderOverview }> => {
+    const response = await api.get('/leader/overview');
+    return response.data;
+  },
+
+  getTeachers: async (): Promise<{ success: boolean; total: number; onRumi: number; teachers: LeaderPatchTeacher[] }> => {
+    const response = await api.get('/leader/teachers');
+    return response.data;
+  },
+
+  getTeacher: async (id: string): Promise<{ success: boolean } & LeaderTeacherDetail> => {
+    const response = await api.get(`/leader/teacher/${id}`);
+    return response.data;
+  }
 };
 
 export default api;

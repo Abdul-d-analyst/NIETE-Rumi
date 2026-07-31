@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
 import { BookOpen, MessageSquare, TrendingUp, ExternalLink } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import Chart from 'react-apexcharts';
 import { ApexOptions } from 'apexcharts';
 import { useAuth } from '../hooks/useAuth';
+import { isLeader } from '../lib/leaderRole';
 import { portal } from '../services/api';
 import PortalLayout from '../components/PortalLayout';
 import StatCard from '../components/StatCard';
@@ -18,6 +19,15 @@ import type { DashboardStats, LessonPlan, CoachingSession } from '../types/porta
 const PortalDashboard = () => {
   const { user } = useAuth();
   const { toast } = useToast();
+  const navigate = useNavigate();
+
+  // bd-2434: the teacher dashboard is not the leader's home. A school leader
+  // (coach / principal / aeo / …) belongs on My Patch — bounce them there.
+  // Guards every entry point: the post-login redirect, a bookmark, a refresh.
+  const userIsLeader = isLeader(user);
+  useEffect(() => {
+    if (userIsLeader) navigate('/portal/leader', { replace: true });
+  }, [userIsLeader, navigate]);
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<DashboardStats>({ totalLessonPlans: 0, totalCoachingSessions: 0 });
   const [recentLessonPlans, setRecentLessonPlans] = useState<LessonPlan[]>([]);
@@ -109,6 +119,10 @@ const PortalDashboard = () => {
     name: 'Score',
     data: scoreTrend.map(item => item.percentage)
   }];
+
+  // bd-2434: a leader is being redirected to My Patch — don't flash the teacher
+  // dashboard (or its empty state) at them while the navigation happens.
+  if (userIsLeader) return null;
 
   if (loading) {
     return (

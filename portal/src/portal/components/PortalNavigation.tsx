@@ -1,6 +1,7 @@
 import { Link, useLocation } from 'react-router-dom';
-import { Home, BookOpen, Library, GraduationCap, MessageSquare, TrendingUp, LogOut } from 'lucide-react';
+import { Home, BookOpen, Library, GraduationCap, MessageSquare, TrendingUp, LogOut, Users } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
+import { isLeader } from '../lib/leaderRole';
 import { cn } from '@/lib/utils';
 import nieteLogo from '@/assets/niete-logo.png';
 
@@ -9,7 +10,14 @@ const PortalNavigation = () => {
   const { logout, user } = useAuth();
   const currentPath = location.pathname;
 
-  const navItems = [
+  // bd-2434 (Leader Portal): the school-leader family gets the leader nav
+  // (My Patch / Teachers); teachers keep today's nav unchanged. The NIETE logo
+  // + wordmark below are identical for both. Leader-family only.
+  const leaderNav = [
+    { title: 'My Patch', path: '/portal/leader', icon: Home },
+    { title: 'Teachers', path: '/portal/leader/teachers', icon: Users },
+  ];
+  const teacherNav = [
     { title: 'Dashboard', path: '/portal/dashboard', icon: Home },
     { title: 'Curriculum', path: '/portal/curriculum', icon: Library },
     { title: 'Training', path: '/portal/training', icon: GraduationCap },
@@ -17,6 +25,8 @@ const PortalNavigation = () => {
     { title: 'Coaching', path: '/portal/coaching', icon: MessageSquare },
     { title: 'Analytics', path: '/portal/coaching/analytics', icon: TrendingUp },
   ];
+
+  const navItems = isLeader(user) ? leaderNav : teacherNav;
 
   const isActive = (path: string) => currentPath === path;
 
