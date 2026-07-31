@@ -408,6 +408,23 @@ async function loadTeacher(userId) {
  * so this returns the 4 TALEEMABAD levels — but we walk the Programs → Scopes →
  * Levels graph so multi-Vendor is supported for free from day one.
  */
+/**
+ * bd-2391 — does this attempt row represent a passed LEVEL EXAM?
+ *
+ * `training_assessment_attempts` stores both the per-module quick check
+ * (quiz_kind='training_module') and the level exam (quiz_kind='grand'), and
+ * BOTH carry level_id. Only the latter may certify a level or satisfy a
+ * chain-lock. Rows with a missing quiz_kind are treated as grand: they predate
+ * the column, when the table held level exams only.
+ *
+ * @param {object} a attempt row (needs is_passed, quiz_kind)
+ * @returns {boolean}
+ */
+function isGrandPass(a) {
+  if (!a || a.is_passed !== true) return false;
+  return (a.quiz_kind || 'grand') === 'grand';
+}
+
 async function loadVisibleLevelsWithProgress(userId) {
   // 1. Active program assignments for this teacher
   const { data: assignments, error: aErr } = await supabase
@@ -462,7 +479,11 @@ async function loadVisibleLevelsWithProgress(userId) {
   const [{ data: courses }, { data: progressRows }, { data: attempts }, { data: quizzes }] = await Promise.all([
     supabase.from('training_courses').select('id, level_id, is_active').in('level_id', levelIds),
     supabase.from('teacher_training_progress').select('module_id, module:training_modules(course_id)').eq('user_id', userId),
-    supabase.from('training_assessment_attempts').select('level_id, status, is_passed, cooldown_until, completed_at').eq('user_id', userId).in('level_id', levelIds),
+    // bd-2391 — GRAND attempts only. Per-module quick-check attempts also carry
+    // a level_id and set is_passed=true on a perfect score, so an unfiltered
+    // read makes one 9-question module quiz certify the whole level (hiding the
+    // real exam behind a "Review" CTA and chain-unlocking the next level).
+    supabase.from('training_assessment_attempts').select('level_id, status, is_passed, cooldown_until, completed_at').eq('user_id', userId).eq('quiz_kind', 'grand').in('level_id', levelIds),
     supabase.from('training_grand_quizzes').select('id, level_id, quiz_type').in('level_id', levelIds).eq('quiz_type', 'grand_quiz'),
   ]);
 
@@ -479,14 +500,17 @@ async function loadVisibleLevelsWithProgress(userId) {
     const coursesStarted = lvCourses.filter(c => (progressByCourse.get(c.id) || 0) > 0);
     // NOTE: full "course completed" requires all modules of the course to be in progress; phase 1
     // uses "started" as a proxy until the module-completion path is wired.
-    const passedAttempt = (attempts || []).find(a => a.level_id === lv.id && a.is_passed === true);
+    // bd-2391 — `isGrandPass` also guards in memory, not just in the query, so
+    // the "only a level exam certifies a level" rule survives a caller that
+    // hands us unfiltered rows.
+    const passedAttempt = (attempts || []).find(a => a.level_id === lv.id && isGrandPass(a));
     const cooldownAttempt = (attempts || []).find(a => a.level_id === lv.id && a.status === 'failed' && a.cooldown_until && new Date(a.cooldown_until) > new Date());
     const vendor = vendorById.get(lv.vendor_id);
     const chainLocked = vendor?.unlock_logic === 'chain';
     const prevLevel = visibleLevels
       .filter(l => l.vendor_id === lv.vendor_id)
       .find(l => l.order_index === lv.order_index - 1);
-    const prevPassed = !prevLevel || !!(attempts || []).find(a => a.level_id === prevLevel.id && a.is_passed === true);
+    const prevPassed = !prevLevel || !!(attempts || []).find(a => a.level_id === prevLevel.id && isGrandPass(a));
     const isFirst = !prevLevel;
     const grand = (quizzes || []).find(q => q.level_id === lv.id) || null;
 
@@ -540,14 +564,17 @@ async function loadCoursesWithProgress(userId, levelId) {
 async function loadGrandQuizState(userId, levelId) {
   const [{ data: catalog }, { data: attempts }, { data: courses }, { data: modules }, { data: progressRows }] = await Promise.all([
     supabase.from('training_grand_quizzes').select('id, quiz_type').eq('level_id', levelId).eq('quiz_type', 'grand_quiz').eq('is_active', true).maybeSingle(),
-    supabase.from('training_assessment_attempts').select('status, is_passed, cooldown_until').eq('user_id', userId).eq('level_id', levelId),
+    // bd-2391 — GRAND attempts only (see isGrandPass). Without this a passed
+    // module quiz rendered "🏆 You passed this level exam" on LEVEL_DETAIL and
+    // replaced the "Take exam" CTA with "✓ Passed".
+    supabase.from('training_assessment_attempts').select('status, is_passed, cooldown_until, quiz_kind').eq('user_id', userId).eq('quiz_kind', 'grand').eq('level_id', levelId),
     supabase.from('training_courses').select('id').eq('level_id', levelId).eq('is_active', true),
     supabase.from('training_modules').select('id, course_id').eq('is_active', true),
     supabase.from('teacher_training_progress').select('module_id').eq('user_id', userId),
   ]);
   if (!catalog) return { badge: 'badge_quiz_available', body: '🎓 No level exam — finish all sessions to complete this level.', caption: ' ', cta: ' ' };
 
-  const passed = (attempts || []).some(a => a.is_passed === true);
+  const passed = (attempts || []).some(isGrandPass);
   const cooldown = (attempts || []).find(a => a.status === 'failed' && a.cooldown_until && new Date(a.cooldown_until) > new Date());
   const doneIds = new Set((progressRows || []).map(r => r.module_id));
   const courseIds = new Set((courses || []).map(c => c.id));
@@ -763,4 +790,8 @@ module.exports = {
   levelOptionTitle,
   ghostSlotData,
   levelProgressLine,
+  // bd-2391 — level-state computation, exported so the "a module quiz must not
+  // certify the level" contract can be asserted directly.
+  loadVisibleLevelsWithProgress,
+  loadGrandQuizState,
 };
