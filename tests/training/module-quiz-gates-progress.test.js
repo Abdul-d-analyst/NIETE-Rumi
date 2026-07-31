@@ -12,11 +12,15 @@
  *      and delivers NO next module — it only sends the quiz.
  *   2. Passing the quiz writes the progress row and then delivers next.
  *   3. Failing the quiz writes NO progress row and offers an immediate retry.
- *   4. The pass bar is per-vendor, read from training_vendors.passing_pct
- *      (NIETE/TALEEMABAD 80, Beacon House / Oxbridge 70).
- *   5. A module with NO questions keeps the old behaviour (tap completes it),
+ *   4. A module with NO questions keeps the old behaviour (tap completes it),
  *      otherwise those modules would be uncompletable.
- *   6. Grand-quiz grading is untouched.
+ *
+ * Pass marks (NIETE team, confirmed against the historical data):
+ *   - module quiz ("quick check")  → 100% for EVERY vendor
+ *   - grand quiz (the level exam)  → 80% NIETE/TALEEMABAD, 70% BH/Oxbridge,
+ *                                    from training_vendors.passing_pct
+ *
+ * The grand-quiz bar is exercised in tests/training/grand-quiz-passing-pct.test.js.
  */
 
 let ContentDelivery;
@@ -123,14 +127,21 @@ const USER = 'user-uuid-1';
 const PHONE = '923001234567';
 
 /** Catalog fixture. vendorKey drives the pass bar under test. */
-function setupCatalog({ moduleId = 42, courseId = 7, levelId = 3, vendorKey = 'TALEEMABAD', passingPct = 80 } = {}) {
+function setupCatalog({
+  moduleId = 42, courseId = 7, levelId = 3, vendorKey = 'TALEEMABAD',
+  modulePassingPct = 100, examPassingPct = 80,
+} = {}) {
   tableStates.training_modules = {
     rows: [{ id: moduleId, course_id: courseId, title: 'Module 1', order_index: 1 }],
   };
   tableStates.training_courses = { rows: [{ id: courseId, level_id: levelId, title: 'Course 1' }] };
   tableStates.training_levels = { rows: [{ id: levelId, name: 'Level 1', order_index: 0, vendor_id: 'vendor-1' }] };
   tableStates.training_vendors = {
-    rows: [{ id: 'vendor-1', key: vendorKey, name: vendorKey, passing_pct: passingPct, unlock_logic: 'chain' }],
+    rows: [{
+      id: 'vendor-1', key: vendorKey, name: vendorKey,
+      module_passing_pct: modulePassingPct, passing_pct: examPassingPct,
+      unlock_logic: 'chain',
+    }],
   };
   tableStates.teacher_training_progress = { rows: [] };
   tableStates.teacher_training_assignments = { rows: [{ program_id: 'program-uuid-1' }] };
@@ -197,10 +208,10 @@ describe('bd-2390 — module quiz gates progress + next module', () => {
     expect(writes.length).toBeGreaterThan(0);
   });
 
-  test('passing the module quiz (NIETE, 80%) writes the progress row', async () => {
-    setupCatalog({ vendorKey: 'TALEEMABAD', passingPct: 80 });
+  test('passing the module quiz (NIETE, 100%) writes the progress row', async () => {
+    setupCatalog({ vendorKey: 'TALEEMABAD', modulePassingPct: 100 });
     setQuestionCount(5);
-    const attemptId = setAttempt({ totalQuestions: 5, correct: 4 }); // 80% — exactly at the bar
+    const attemptId = setAttempt({ totalQuestions: 5, correct: 5 }); // perfect — NIETE's bar
 
     await QuizDelivery.gradeAttempt(attemptId, PHONE);
 
@@ -209,8 +220,24 @@ describe('bd-2390 — module quiz gates progress + next module', () => {
     expect(writes.length).toBeGreaterThan(0);
   });
 
-  test('failing the module quiz (NIETE, 79% < 80%) writes NO progress row', async () => {
-    setupCatalog({ vendorKey: 'TALEEMABAD', passingPct: 80 });
+  test('NIETE module quiz at 80% FAILS — the module bar is 100, not the exam bar', async () => {
+    // Guards the exact confusion this change corrects: 80 is the NIETE
+    // LEVEL-EXAM bar; their module quick-checks require every answer right.
+    setupCatalog({ vendorKey: 'TALEEMABAD', modulePassingPct: 100, examPassingPct: 80 });
+    setQuestionCount(5);
+    const attemptId = setAttempt({ totalQuestions: 5, correct: 4 }); // 80%
+
+    await QuizDelivery.gradeAttempt(attemptId, PHONE);
+
+    const writes = mutationsOn('teacher_training_progress')
+      .filter(m => m.op === 'upsert' || m.op === 'insert');
+    expect(writes).toHaveLength(0);
+    const updates = mutationsOn('training_assessment_attempts').filter(m => m.op === 'update');
+    expect(updates[updates.length - 1].payload.is_passed).toBe(false);
+  });
+
+  test('failing the module quiz writes NO progress row', async () => {
+    setupCatalog({ vendorKey: 'TALEEMABAD', modulePassingPct: 100 });
     setQuestionCount(100);
     const attemptId = setAttempt({ totalQuestions: 100, correct: 79 });
 
@@ -222,7 +249,7 @@ describe('bd-2390 — module quiz gates progress + next module', () => {
   });
 
   test('failing offers an immediate retry button (no cooldown)', async () => {
-    setupCatalog({ vendorKey: 'TALEEMABAD', passingPct: 80 });
+    setupCatalog({ vendorKey: 'TALEEMABAD', modulePassingPct: 100 });
     setQuestionCount(5);
     const attemptId = setAttempt({ totalQuestions: 5, correct: 2 });
 
@@ -239,7 +266,7 @@ describe('bd-2390 — module quiz gates progress + next module', () => {
   });
 
   test('a failed module attempt is recorded as failed, not passed', async () => {
-    setupCatalog({ vendorKey: 'TALEEMABAD', passingPct: 80 });
+    setupCatalog({ vendorKey: 'TALEEMABAD', modulePassingPct: 100 });
     setQuestionCount(5);
     const attemptId = setAttempt({ totalQuestions: 5, correct: 2 });
 
@@ -251,8 +278,8 @@ describe('bd-2390 — module quiz gates progress + next module', () => {
     expect(last.is_passed).toBe(false);
   });
 
-  test('Beacon House passes at 70% where NIETE would fail', async () => {
-    setupCatalog({ vendorKey: 'BEACONHOUSE', passingPct: 70 });
+  test('Beacon House module quiz passes at 70% where NIETE would fail', async () => {
+    setupCatalog({ vendorKey: 'BEACONHOUSE', modulePassingPct: 70, examPassingPct: 70 });
     setQuestionCount(10);
     const attemptId = setAttempt({ totalQuestions: 10, correct: 7 }); // 70%
 
@@ -264,9 +291,34 @@ describe('bd-2390 — module quiz gates progress + next module', () => {
     expect(last.status).toBe('passed');
   });
 
-  test('grand-quiz grading is unchanged (still 100% to pass)', async () => {
-    setupCatalog();
-    const attemptId = setAttempt({ totalQuestions: 5, correct: 4, kind: 'grand' });
+  test('Oxbridge module quiz passes at 70%', async () => {
+    setupCatalog({ vendorKey: 'OXBRIDGE', modulePassingPct: 70, examPassingPct: 70 });
+    setQuestionCount(10);
+    const attemptId = setAttempt({ totalQuestions: 10, correct: 7 });
+
+    await QuizDelivery.gradeAttempt(attemptId, PHONE);
+
+    const updates = mutationsOn('training_assessment_attempts').filter(m => m.op === 'update');
+    expect(updates[updates.length - 1].payload.is_passed).toBe(true);
+  });
+
+  test('a lookup failure falls back to the strictest bar (100), never an easier pass', async () => {
+    setupCatalog({ vendorKey: 'TALEEMABAD', modulePassingPct: 100 });
+    setQuestionCount(10);
+    tableStates.training_vendors = { rows: [] }; // vendor row missing
+    const attemptId = setAttempt({ totalQuestions: 10, correct: 9 }); // 90%
+
+    await QuizDelivery.gradeAttempt(attemptId, PHONE);
+
+    const updates = mutationsOn('training_assessment_attempts').filter(m => m.op === 'update');
+    expect(updates[updates.length - 1].payload.is_passed).toBe(false);
+  });
+});
+
+describe('bd-2390 — grand quiz (level exam) uses the vendor exam bar', () => {
+  test('NIETE grand quiz passes at 80% (was hardcoded to 100%)', async () => {
+    setupCatalog({ vendorKey: 'TALEEMABAD', examPassingPct: 80 });
+    const attemptId = setAttempt({ totalQuestions: 10, correct: 8, kind: 'grand' });
     tableStates.training_assessment_attempts.rows[0].grand_quiz_id = 9;
     tableStates.training_assessment_attempts.rows[0].training_module_id = null;
 
@@ -274,7 +326,23 @@ describe('bd-2390 — module quiz gates progress + next module', () => {
 
     const updates = mutationsOn('training_assessment_attempts').filter(m => m.op === 'update');
     const last = updates[updates.length - 1].payload;
-    expect(last.is_passed).toBe(false); // 4/5 is not 100%
+    expect(last.is_passed).toBe(true);
+    expect(last.status).toBe('passed');
+  });
+
+  test('NIETE grand quiz fails below 80%', async () => {
+    setupCatalog({ vendorKey: 'TALEEMABAD', examPassingPct: 80 });
+    const attemptId = setAttempt({ totalQuestions: 10, correct: 7, kind: 'grand' }); // 70%
+    tableStates.training_assessment_attempts.rows[0].grand_quiz_id = 9;
+    tableStates.training_assessment_attempts.rows[0].training_module_id = null;
+
+    await QuizDelivery.gradeAttempt(attemptId, PHONE);
+
+    const updates = mutationsOn('training_assessment_attempts').filter(m => m.op === 'update');
+    const last = updates[updates.length - 1].payload;
+    expect(last.is_passed).toBe(false);
     expect(last.status).toBe('failed');
+    // Level exams keep their cooldown — unlike module quizzes.
+    expect(last.cooldown_until).toBeTruthy();
   });
 });
