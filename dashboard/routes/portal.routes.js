@@ -1270,9 +1270,12 @@ async function _computeLevelStates(userId, levels) {
       .select('module_id, training_modules!inner(course_id, is_active)')
       .eq('user_id', userId)
       .eq('training_modules.is_active', true),
+    // bd-2391 — GRAND attempts only, matching _loadGrandQuizGate below. Module
+    // quick-check attempts carry a level_id and is_passed=true on a perfect
+    // score, so an unfiltered read certifies the level off one module quiz.
     supabase.from('training_assessment_attempts')
-      .select('level_id, status, is_passed, cooldown_until, completed_at')
-      .eq('user_id', userId).in('level_id', levelIds),
+      .select('level_id, status, is_passed, cooldown_until, completed_at, quiz_kind')
+      .eq('user_id', userId).eq('quiz_kind', 'grand').in('level_id', levelIds),
     vendorIds.length
       ? supabase.from('training_vendors').select('id, unlock_logic').in('id', vendorIds)
       : Promise.resolve({ data: [] }),
@@ -1311,7 +1314,10 @@ async function _computeLevelStates(userId, levels) {
   for (const lv of levels) {
     const lvCourses = (courses || []).filter(c => c.level_id === lv.id);
     const coursesStarted = lvCourses.filter(c => (progressByCourse.get(c.id) || 0) > 0);
-    const passedAttempt = (attempts || []).find(a => a.level_id === lv.id && a.is_passed === true);
+    // bd-2391 — guard in memory too, so the rule holds even if a caller passes
+    // unfiltered rows. A missing quiz_kind predates the column (level exams only).
+    const isGrandPass = (a) => a && a.is_passed === true && (a.quiz_kind || 'grand') === 'grand';
+    const passedAttempt = (attempts || []).find(a => a.level_id === lv.id && isGrandPass(a));
     const cooldownAttempt = (attempts || []).find(a =>
       a.level_id === lv.id && a.status === 'failed' && a.cooldown_until && new Date(a.cooldown_until) > new Date()
     );
@@ -1325,7 +1331,7 @@ async function _computeLevelStates(userId, levels) {
     const prevLevel = levels
       .filter(l => l.vendor_id === lv.vendor_id)
       .find(l => l.order_index === lv.order_index - 1);
-    const prevPassed = !prevLevel || !!(attempts || []).find(a => a.level_id === prevLevel.id && a.is_passed === true);
+    const prevPassed = !prevLevel || !!(attempts || []).find(a => a.level_id === prevLevel.id && isGrandPass(a));
     const isFirst = !prevLevel;
 
     let state;
@@ -2325,12 +2331,13 @@ const GRAND_QUIZ_COOLDOWN_HOURS = 24;
 
 /**
  * Load the teacher's grand-quiz gate for a level. Query-for-query mirror of
- * the WhatsApp Flow's loadGrandQuizState() with one deliberate tightening:
- * passed/cooldown checks filter attempts to quiz_kind='grand'. (The Flow
- * scans ALL attempts on the level; per-module attempts also carry level_id
- * and is_passed=true on a perfect score, which would wrongly report the
- * LEVEL as passed and block the real exam. Filtering by kind is strictly
- * more correct on both surfaces — flagged for backport to the Flow.)
+ * the WhatsApp Flow's loadGrandQuizState(): passed/cooldown checks filter
+ * attempts to quiz_kind='grand', because per-module attempts also carry a
+ * level_id and is_passed=true on a perfect score, which would wrongly report
+ * the LEVEL as passed and block the real exam.
+ *
+ * bd-2391: the Flow backport this once flagged is done — both surfaces now
+ * filter by kind here AND in the levels list above.
  *
  * Returns { quiz, passed, passedAttempt, cooldownUntil, allCoursesStarted,
  *           coursesTotal, coursesStarted, questionCount }.
