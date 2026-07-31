@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
+import { isLeader } from '../lib/leaderRole';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
@@ -27,8 +28,10 @@ const PortalLogin = () => {
     try {
       const result = await login(phoneNumber, password);
       if (result.success) {
-        toast({ title: "Welcome back!", description: "Redirecting to dashboard..." });
-        setTimeout(() => navigate('/portal/dashboard'), 1000);
+        // bd-2434: school leaders go straight to My Patch, not the teacher dashboard.
+        const dest = isLeader(result.user) ? '/portal/leader' : '/portal/dashboard';
+        toast({ title: "Welcome back!", description: "Redirecting…" });
+        setTimeout(() => navigate(dest), 1000);
       } else {
         toast({ title: "Login Failed", description: result.error, variant: "destructive" });
       }

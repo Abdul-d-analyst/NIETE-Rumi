@@ -29,7 +29,9 @@ export const useAuth = () => {
       const response = await auth.login(phoneNumber, password);
       if (response.success) {
         await checkAuth(); // Refresh user data
-        return { success: true };
+        // bd-2434: hand the role back so the caller can route a leader straight
+        // to My Patch instead of flashing the teacher dashboard.
+        return { success: true, user: response.user };
       }
       return { success: false, error: response.error || 'Login failed' };
     } catch (error: any) {

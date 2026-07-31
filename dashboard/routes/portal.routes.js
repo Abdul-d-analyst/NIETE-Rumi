@@ -32,6 +32,18 @@ const supabase = require('../config/supabase');
 const { S3Client, GetObjectCommand } = require('@aws-sdk/client-s3');
 const { generatePresignedUrl, generatePresignedUrls, isValidR2Url } = require('../services/r2.service');
 const { fetchAllPaged } = require('../lib/fetch-all-paged');
+// bd-2434 — Leader Portal (NIETE port of upstream bd-2385..2388):
+// role gate (school-leader family only) + framework-agnostic overall score.
+const { publicUserPayload, makeRequireLeaderRole } = require('../lib/leader-role');
+const { getOverall } = require('../services/coaching-frameworks.service');
+// Leader "patch" resolver (leader_teachers → Rumi users + activity) needs the
+// pg pool — the LATERAL-join SQL can't be expressed through supabase-js.
+const pool = require('../config/database');
+const { getPatchTeachers } = require('../services/leader-patch.service');
+// My Patch overview aggregation (pure, over the resolver output).
+const { summarizePatch } = require('../services/leader-overview.service');
+// Single teacher detail (patch-membership guarded).
+const { getPatchTeacherDetail } = require('../services/leader-teacher-detail.service');
 
 // Configure R2 S3 client for private PDF access. Lazy — resolved on first
 // use, not at module load, so mounting these routes never depends on R2 env
@@ -215,6 +227,10 @@ async function getUserById(userId) {
 
   return user;
 }
+
+// bd-2434 — server-side gate for the leader-only endpoints below. Client-side
+// nav gating is UX; this is the real access control.
+const requireLeaderRole = makeRequireLeaderRole({ getUser: getUserById });
 
 // ============================================================================
 // AUTHENTICATION ENDPOINTS
@@ -495,9 +511,8 @@ router.post('/login', publicAuthLimiter, async (req, res) => {
       res.json({
         success: true,
         message: 'Login successful',
-        user: {
-          firstName: user.first_name
-        }
+        // bd-2434: includes `role` so the frontend can gate the leader nav / My Patch.
+        user: publicUserPayload(user)
       });
     });
   } catch (error) {
@@ -788,11 +803,8 @@ router.get('/dashboard', requirePortalAuth, async (req, res) => {
     // Return partial data even if some queries failed
     res.json({
       success: true,
-      user: {
-        firstName: user.first_name,
-        lastName: user.last_name,
-        phoneNumber: user.phone_number
-      },
+      // bd-2434: includes `role` (+ contact fields) via the shared shaper.
+      user: publicUserPayload(user, { includeContact: true }),
       stats: {
         totalLessonPlans: lessonPlansResult.status === 'fulfilled' ? (lessonPlansResult.value.count || 0) : 0,
         totalCoachingSessions: coachingSessionsResult.status === 'fulfilled' ? (coachingSessionsResult.value.count || 0) : 0
@@ -802,11 +814,14 @@ router.get('/dashboard', requirePortalAuth, async (req, res) => {
         id: recentCoachingSessionData.id,
         date: recentCoachingSessionData.created_at,
         session_date: recentCoachingSessionData.created_at,
-        // NOTE: Actual path is analysis_data.scores.overall_marks and scores.percentage
-        score: recentCoachingSessionData.analysis_data?.scores?.overall_marks || recentCoachingSessionData.analysis_data?.scores?.grand_total || 0,
-        overallScore: recentCoachingSessionData.analysis_data?.scores?.overall_marks || recentCoachingSessionData.analysis_data?.scores?.grand_total || 0,
-        maxScore: recentCoachingSessionData.analysis_data?.scores?.max_marks || 118,
-        percentage: recentCoachingSessionData.analysis_data?.scores?.percentage || 0
+        // bd-2434: framework-agnostic overall score. NIETE FICO stores
+        // scores.{overall_marks, overall_max_marks, overall_percentage} —
+        // getOverall normalises that AND the legacy max_marks/percentage shape
+        // (the old inline read showed 0% for FICO rows).
+        ...(() => {
+          const o = getOverall(recentCoachingSessionData.analysis_data);
+          return { score: o.points, overallScore: o.points, maxScore: o.maxPoints || 118, percentage: o.percentage };
+        })()
       } : null
     });
   } catch (error) {
@@ -815,6 +830,93 @@ router.get('/dashboard', requirePortalAuth, async (req, res) => {
       success: false,
       error: 'Failed to load dashboard data'
     });
+  }
+});
+
+// ============================================================================
+// LEADER PORTAL (bd-2434, NIETE port of upstream bd-2385+) — school-leader
+// family only. Every route below is guarded by requireLeaderRole (server-side),
+// which loads the user once and attaches it as req.portalUser.
+// ============================================================================
+
+/**
+ * GET /api/portal/leader/me
+ * Session hydration for the leader portal — confirms the caller is in the
+ * leader family (the gate 403s otherwise) and returns their identity so the
+ * "My Patch" home can greet them by name. The overview KPIs / roster arrive on
+ * the dedicated endpoints below.
+ */
+router.get('/leader/me', requirePortalAuth, requireLeaderRole, async (req, res) => {
+  res.json({
+    success: true,
+    user: publicUserPayload(req.portalUser, { includeContact: true })
+  });
+});
+
+/**
+ * GET /api/portal/leader/overview
+ * "My Patch" home data — headline KPIs across the leader's patch (teacher count,
+ * how many are on Rumi, total coaching sessions + lesson plans, average recent
+ * score) and a focus list (on-Rumi teachers with the lowest recent scores).
+ */
+router.get('/leader/overview', requirePortalAuth, requireLeaderRole, async (req, res) => {
+  try {
+    const teachers = await getPatchTeachers(
+      (sql, params) => pool.query(sql, params),
+      req.session.portalUserId
+    );
+    res.json({ success: true, overview: summarizePatch(teachers) });
+  } catch (error) {
+    console.error('leader/overview error:', error);
+    res.status(500).json({ success: false, error: 'Failed to load your patch overview.' });
+  }
+});
+
+/**
+ * GET /api/portal/leader/teachers
+ * The leader's whole patch — every teacher migrated into Rumi under them
+ * (leader_teachers), each joined to their Rumi activity (coaching sessions,
+ * lesson plans, last framework-agnostic score). Teachers not yet on Rumi are
+ * included with onRumi:false so the leader sees their full patch.
+ */
+router.get('/leader/teachers', requirePortalAuth, requireLeaderRole, async (req, res) => {
+  try {
+    const teachers = await getPatchTeachers(
+      (sql, params) => pool.query(sql, params),
+      req.session.portalUserId
+    );
+    res.json({
+      success: true,
+      total: teachers.length,
+      onRumi: teachers.filter((t) => t.onRumi).length,
+      teachers
+    });
+  } catch (error) {
+    console.error('leader/teachers error:', error);
+    res.status(500).json({ success: false, error: 'Failed to load your teachers.' });
+  }
+});
+
+/**
+ * GET /api/portal/leader/teacher/:id
+ * One teacher's detail — but ONLY if they're in this leader's patch (the
+ * resolver proves membership and returns null otherwise, so a leader cannot view
+ * a teacher outside their patch). :id is the teacher's Rumi user id.
+ */
+router.get('/leader/teacher/:id', requirePortalAuth, requireLeaderRole, async (req, res) => {
+  try {
+    const detail = await getPatchTeacherDetail(
+      (sql, params) => pool.query(sql, params),
+      req.session.portalUserId,
+      req.params.id
+    );
+    if (!detail) {
+      return res.status(404).json({ success: false, error: 'Teacher not found in your patch.' });
+    }
+    res.json({ success: true, ...detail });
+  } catch (error) {
+    console.error('leader/teacher/:id error:', error);
+    res.status(500).json({ success: false, error: 'Failed to load teacher detail.' });
   }
 });
 
