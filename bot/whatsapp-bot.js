@@ -440,6 +440,15 @@ app.post('/webhook', async (req, res) => {
         await WhatsAppService.sendMessage(from, '⏸ Paused. Send /training when you want to pick up where you left off.');
         return;
       }
+      // bd-2390 — immediate retry of a failed module quiz. Must be matched
+      // BEFORE the generic `training_quiz_` answer handler below, whose id
+      // regex expects `training_quiz_<uuid>_<option>` and would reject this.
+      if (buttonId.startsWith('training_quiz_retry_')) {
+        const moduleId = buttonId.replace('training_quiz_retry_', '');
+        const QuizDelivery = require('./shared/services/training/quiz-delivery.service');
+        await QuizDelivery.startTrainingQuiz(user.id, parseInt(moduleId, 10), from);
+        return;
+      }
       if (buttonId.startsWith('training_quiz_')) {
         const QuizDelivery = require('./shared/services/training/quiz-delivery.service');
         await QuizDelivery.handleQuizButton(user.id, buttonId, from);

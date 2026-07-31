@@ -541,6 +541,74 @@ async function recordAnswer(attemptId, questionIndex, questionId, chosenOption, 
     );
 }
 
+// bd-2390 — pass marks are per-vendor AND per-quiz-kind:
+//
+//   vendor        module quiz    level exam
+//   TALEEMABAD    100%           80%   (grand quiz)
+//   BEACONHOUSE    70%           70%   (capstone)
+//   OXBRIDGE       70%           n/a   (no level exam)
+//
+// Both live on training_vendors (module_passing_pct / passing_pct) so a
+// policy change is a DB update, not a deploy. 100 is the fallback for either
+// column: the strictest bar, so a lookup failure can never hand out an easier
+// pass than the vendor intended.
+const DEFAULT_PASS_PCT = 100;
+
+/**
+ * Resolve a vendor's pass mark by walking module → course → level → vendor.
+ *
+ * @param {number} moduleId training_modules.id
+ * @param {'module'|'exam'} kind which bar to read — the module-quiz bar
+ *        (`module_passing_pct`) or the level-exam bar (`passing_pct`)
+ * @returns {Promise<number>} passing percentage, 1-100
+ */
+async function getVendorPassingPct(moduleId, kind = 'module') {
+  const column = kind === 'exam' ? 'passing_pct' : 'module_passing_pct';
+  if (!moduleId) return DEFAULT_PASS_PCT;
+  try {
+    const { data: mod } = await supabase
+      .from('training_modules').select('course_id').eq('id', moduleId).maybeSingle();
+    if (!mod?.course_id) return DEFAULT_PASS_PCT;
+    const { data: course } = await supabase
+      .from('training_courses').select('level_id').eq('id', mod.course_id).maybeSingle();
+    if (!course?.level_id) return DEFAULT_PASS_PCT;
+    return await getVendorPassingPctByLevel(course.level_id, kind);
+  } catch (err) {
+    logToFile('⚠️ Could not resolve vendor pass mark — using default', {
+      moduleId, column, default: DEFAULT_PASS_PCT, error: err?.message,
+    });
+    return DEFAULT_PASS_PCT;
+  }
+}
+
+/**
+ * Same lookup, but starting from a level (the grand quiz knows its level, not
+ * a module).
+ *
+ * @param {number} levelId training_levels.id
+ * @param {'module'|'exam'} kind
+ * @returns {Promise<number>} passing percentage, 1-100
+ */
+async function getVendorPassingPctByLevel(levelId, kind = 'exam') {
+  const column = kind === 'exam' ? 'passing_pct' : 'module_passing_pct';
+  if (!levelId) return DEFAULT_PASS_PCT;
+  try {
+    const { data: level } = await supabase
+      .from('training_levels').select('vendor_id').eq('id', levelId).maybeSingle();
+    if (!level?.vendor_id) return DEFAULT_PASS_PCT;
+    const { data: vendor } = await supabase
+      .from('training_vendors').select(`key, ${column}`).eq('id', level.vendor_id).maybeSingle();
+    const pct = Number(vendor?.[column]);
+    if (!Number.isFinite(pct) || pct <= 0 || pct > 100) return DEFAULT_PASS_PCT;
+    return pct;
+  } catch (err) {
+    logToFile('⚠️ Could not resolve vendor pass mark by level — using default', {
+      levelId, column, default: DEFAULT_PASS_PCT, error: err?.message,
+    });
+    return DEFAULT_PASS_PCT;
+  }
+}
+
 /**
  * Grade a completed attempt. Branches on quiz_kind:
  *   - grand              → pass/fail, cert or cooldown message
@@ -563,19 +631,57 @@ async function gradeAttempt(attemptId, phoneNumber) {
   const score = (answers || []).filter(a => a.is_correct === true).length;
 
   if (attempt.quiz_kind === KIND_TRAINING_MODULE) {
-    // Non-blocking: mark completed, no pass/fail bar, no cooldown.
-    // is_passed carries the pedagogical signal (100%); the enum-level
-    // status uses 'passed' to mean "attempt closed" — training-module
-    // attempts don't have a failing enum state.
-    const isPerfect = score === attempt.total_questions;
+    // bd-2390 — the module quiz is now a GATE, so it has a real pass/fail.
+    //
+    // Previously this wrote status:'passed' unconditionally ("attempt
+    // closed"), which made a failed check indistinguishable from a passed
+    // one for every downstream reader. The bar is per-vendor and comes from
+    // training_vendors.module_passing_pct — NIETE 100 (their quick checks
+    // are meant to be answered correctly), Beacon House / Oxbridge 70.
+    // Note this is a DIFFERENT column from the level-exam bar below.
+    //
+    // No cooldown: a teacher who misses the bar retries immediately.
+    const passingPct = await getVendorPassingPct(attempt.training_module_id, 'module');
+    const total = attempt.total_questions || 0;
+    const pct = total > 0 ? (score / total) * 100 : 0;
+    const isPassed = total > 0 && pct >= passingPct;
+
     await supabase.from('training_assessment_attempts').update({
-      status: 'passed',
+      status: isPassed ? 'passed' : 'failed',
       score,
-      is_passed: isPerfect,
+      is_passed: isPassed,
       completed_at: new Date().toISOString(),
       last_activity_at: new Date().toISOString(),
       cooldown_until: null,
     }).eq('id', attemptId);
+
+    if (!isPassed) {
+      // Hold the teacher here: no progress row, no next module. Offer an
+      // immediate re-attempt of the same module quiz.
+      logEvent('training_quiz_failed', {
+        user_uuid: attempt.user_id,
+        attempt_uuid: attemptId,
+        module_row_id: attempt.training_module_id,
+        raw_score: score,
+        total_qs: total,
+        pct_required: passingPct,
+      });
+      const pctRounded = Math.round(pct);
+      await WhatsAppService.sendMessage(
+        phoneNumber,
+        `📝 *Quick check — not quite.*\n\n` +
+        `You got *${score}/${total}* (${pctRounded}%). You need ${passingPct}% to move on.\n\n` +
+        `Give it another go — you can retry right away.`
+      );
+      await WhatsAppService.sendInteractiveButtons(phoneNumber, {
+        body: 'Ready to try the quick check again?',
+        buttons: [
+          { id: `training_quiz_retry_${attempt.training_module_id}`, title: '🔄 Try again' },
+          { id: 'training_pause', title: '⏸ Pause' },
+        ],
+      });
+      return true;
+    }
 
     // Semantic event — keys deliberately snake_case_less to avoid tripping
     // the column-completeness parser (which scans `logEvent(...)` object
@@ -587,15 +693,20 @@ async function gradeAttempt(attemptId, phoneNumber) {
       module_row_id: attempt.training_module_id,
       raw_score: score,
       total_qs: attempt.total_questions,
-      is_perfect: isPerfect,
+      is_perfect: score === total,
     };
     logEvent('training_quiz_completed', completedEventPayload);
 
-    const pct = Math.round((score / Math.max(1, attempt.total_questions)) * 100);
-    const line = isPerfect
-      ? `Nice — *${score}/${attempt.total_questions}* correct. Perfect score! ✨`
-      : `You got *${score}/${attempt.total_questions}* (${pct}%). That's just for your own tracking — the next module is on its way.`;
-    await WhatsAppService.sendMessage(phoneNumber, `📝 *Quick check — done.*\n\n${line}`);
+    // Passed — NOW the module counts as complete. This is the only runtime
+    // path (besides a module with no quiz) that writes a progress row.
+    const { markModuleComplete, deliverNextModule } = require('./content-delivery.service');
+    await markModuleComplete(attempt.user_id, attempt.training_module_id);
+
+    const pctRounded = Math.round(pct);
+    const line = score === total
+      ? `Nice — *${score}/${total}* correct. Perfect score! ✨`
+      : `You got *${score}/${total}* (${pctRounded}%) — that clears the ${passingPct}% bar.`;
+    await WhatsAppService.sendMessage(phoneNumber, `📝 *Quick check — passed.*\n\n${line}`);
 
     // bd-2234 — Oxbridge-style levels certify on quiz scores (all modules
     // complete, best score >= 70% each). Cheap early-outs inside; capstone
@@ -615,11 +726,36 @@ async function gradeAttempt(attemptId, phoneNumber) {
         `Certificate code: \`${certRes.certificate_code}\`\nYou can also download it from your portal.`
       );
     }
+
+    // bd-2390 — the next module is released here, not on the button tap.
+    // Resolve the course from the module we just passed.
+    const { data: passedMod } = await supabase
+      .from('training_modules')
+      .select('course_id')
+      .eq('id', attempt.training_module_id)
+      .maybeSingle();
+    if (passedMod?.course_id) {
+      await deliverNextModule(attempt.user_id, passedMod.course_id, phoneNumber);
+    } else {
+      logToFile('⚠️ Passed module has no course_id — cannot advance', {
+        moduleId: attempt.training_module_id,
+      });
+    }
     return true;
   }
 
-  // Grand quiz — 100% required.
-  const isPassed = score === attempt.total_questions;
+  // Grand quiz (the level exam) — bar comes from training_vendors.passing_pct.
+  //
+  // bd-2390: this was hardcoded to 100% (`score === total_questions`), which
+  // is not the marking policy and not what the legacy platform did. NIETE
+  // level exams pass at 80%; Beacon House certifies via the capstone path at
+  // 70%. Holding teachers to a perfect score meant failing people who had
+  // genuinely passed — across 30,996 historical attempts the source data
+  // matches ">= 80 TALEEMABAD / >= 70 otherwise" for all but 4 rows.
+  const examPassingPct = await getVendorPassingPctByLevel(attempt.level_id, 'exam');
+  const examTotal = attempt.total_questions || 0;
+  const examPct = examTotal > 0 ? (score / examTotal) * 100 : 0;
+  const isPassed = examTotal > 0 && examPct >= examPassingPct;
   const update = {
     status: isPassed ? 'passed' : 'failed',
     score,
@@ -642,13 +778,13 @@ async function gradeAttempt(attemptId, phoneNumber) {
     await WhatsAppService.sendMessage(
       phoneNumber,
       `🏆 *Congratulations, ${cert.teacher_name}!*\n\n` +
-      `You passed the ${cert.level_name} grand quiz with *${score}/${attempt.total_questions}* — a perfect score.\n\n` +
+      `You passed the ${cert.level_name} grand quiz with *${score}/${attempt.total_questions}* (${Math.round(examPct)}%).\n\n` +
       `Certificate code: \`${cert.certificate_code}\`\n\nSend /training to continue to the next level.`
     );
   } else {
     await WhatsAppService.sendMessage(
       phoneNumber,
-      `❌ *Not this time.*\n\nYou scored *${score}/${attempt.total_questions}*. This exam requires 100%.\n\n` +
+      `❌ *Not this time.*\n\nYou scored *${score}/${attempt.total_questions}* (${Math.round(examPct)}%). This exam requires ${examPassingPct}%.\n\n` +
       `Try again in *${COOLDOWN_HOURS} hours*. Use that time to review the modules you struggled with.\n\n` +
       `Send /training when you're ready.`
     );
@@ -656,4 +792,4 @@ async function gradeAttempt(attemptId, phoneNumber) {
   return true;
 }
 
-module.exports = { startGrandQuiz, startTrainingQuiz, sendQuestion, handleQuizButton };
+module.exports = { startGrandQuiz, startTrainingQuiz, sendQuestion, handleQuizButton, gradeAttempt };
