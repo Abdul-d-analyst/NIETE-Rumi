@@ -268,29 +268,45 @@ class MenuService {
 
   /**
    * Handle Lesson Planning choice
-   * Issue #57 FIX: Store state in Redis (like video flow) so handler can detect topic reply
+   *
+   * FEAT-109 (2026-07-31): When PAKISTAN_LP_FLOW_ID is configured, send the
+   * Grade→Subject→Chapter→Topic Flow instead of asking for a free-text topic.
+   * This routes teachers to pre-generated LPs (served from R2) and bypasses
+   * the Gamma generation path. Fall back to the old topic-prompt only if the
+   * Flow env var is absent — presence-based gating per NIETE architecture.
+   *
    * @private
    */
   static async _handleLessonPlanningChoice(userId, sessionId, from, language) {
-    const redis = redisService.redis;
+    const PAKISTAN_LP_FLOW_ID = process.env.PAKISTAN_LP_FLOW_ID || '';
 
+    if (PAKISTAN_LP_FLOW_ID) {
+      const flowSent = await WhatsAppService.sendFlow(from, {
+        flowId: PAKISTAN_LP_FLOW_ID,
+        header: '📘 Lesson Plans',
+        body: 'Pick your class, subject, chapter and topic — the lesson plan lands in your chat.',
+        buttonText: 'Pick Class',
+        flowToken: `${userId}:pakistan-lp:${Date.now()}`,
+      });
+      if (flowSent) {
+        logToFile('LP menu → Pakistan LP Flow sent (FEAT-109)', { userId, sessionId });
+        return;
+      }
+      logToFile('LP menu → Pakistan LP Flow send failed, falling back to topic prompt', { userId, sessionId });
+    }
+
+    // Fallback (Gamma path) — only when Flow not configured or send failed.
+    const redis = redisService.redis;
     const message = language === 'ur'
       ? 'بہترین! آپ کس موضوع پر لیسن پلان یا پریزنٹیشن چاہتے ہیں؟\n\nمثال کے طور پر: "گریڈ 5 کے لیے فوٹو سنتھیسس"'
       : "What topic would you like a lesson plan or presentation on?\n\nFor example: 'Photosynthesis for Grade 5'";
-
     await WhatsAppService.sendMessage(from, message);
-
-    // Issue #57 FIX: Store in Redis (like video flow does) so topic reply is processed correctly
     const stateKey = `user:${userId}:awaiting_lesson_plan_topic`;
     const stateData = JSON.stringify({
-      sessionId,
-      language,
-      from,
-      askedAt: new Date().toISOString()
+      sessionId, language, from, askedAt: new Date().toISOString(),
     });
-    await redis.setex(stateKey, 300, stateData); // 5 minute expiry
-
-    logToFile('Stored awaiting_lesson_plan_topic state', { userId, sessionId, language });
+    await redis.setex(stateKey, 300, stateData);
+    logToFile('Stored awaiting_lesson_plan_topic state (fallback)', { userId, sessionId, language });
   }
 
   /**
