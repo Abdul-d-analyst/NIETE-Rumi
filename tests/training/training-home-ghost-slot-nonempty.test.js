@@ -1,5 +1,5 @@
 /**
- * OPS-115 — TRAINING_HOME "Something went wrong" on Flow open.
+ * BUG-144 — TRAINING_HOME "Something went wrong" on Flow open.
  *
  * The published Flow renders 5 fixed level slots. A teacher enrolled in a
  * 4-level program leaves slot 5 unused, so buildTrainingHome fills it from

@@ -179,7 +179,7 @@ async function processEncryptedRequest(encryptedRequest, handler) {
     flow_token: decryptedData.flow_token ? 'present' : 'missing',
   });
 
-  // OPS-115 — when the WhatsApp client fails to render a screen it re-POSTs
+  // BUG-144 — when the WhatsApp client fails to render a screen it re-POSTs
   // with {error, error_message} in the data payload. That message is the only
   // place the real reason appears; without it we are guessing at causes.
   const clientErr = decryptedData?.data;

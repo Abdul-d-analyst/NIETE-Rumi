@@ -98,7 +98,7 @@ describe('bd-2137 — vendor-aware level labels', () => {
   test('ghost slots are marked hidden for the Flow', () => {
     const ghost = ghostSlotData(3);
     expect(ghost.visible).toBe(false);
-    // OPS-115 — blank-but-not-empty. An '' here fails WhatsApp's payload
+    // BUG-144 — blank-but-not-empty. An '' here fails WhatsApp's payload
     // validation and breaks the whole screen; see
     // training-home-ghost-slot-nonempty.test.js.
     expect(ghost.progress).toBe(' ');

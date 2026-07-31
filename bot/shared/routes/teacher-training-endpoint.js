@@ -53,7 +53,7 @@ async function handleTeacherTrainingInit(userId /*, flowToken */) {
     );
   }
 
-  // OPS-115 — INIT must return a routing-model ENTRY POINT (a node with no
+  // BUG-144 — INIT must return a routing-model ENTRY POINT (a node with no
   // incoming edges). VENDOR_PICKER is the only one; TRAINING_HOME has an
   // incoming edge from it. The old single-vendor shortcut returned
   // TRAINING_HOME to save a tap and the client rejected the whole Flow with
@@ -74,7 +74,7 @@ async function handleTeacherTrainingDataExchange(userId, screen, screenData /*, 
     if (action === 'open_vendor') {
       const vendorKey = String(screenData._vendor_key || '').trim();
       if (!vendorKey) return createErrorResponse('Missing vendor');
-      // OPS-115 — the placeholder row emitted by entryErrorScreen. Nothing to
+      // BUG-144 — the placeholder row emitted by entryErrorScreen. Nothing to
       // open; close cleanly instead of resolving it to an arbitrary vendor.
       if (vendorKey === 'none') return buildSuccessScreen('No training assigned yet.');
       return buildTrainingHome(userId, { vendorKey });
@@ -172,7 +172,7 @@ async function handleTeacherTrainingBack(userId, screen /*, flowToken */) {
   const catalog = await loadVisibleLevelsWithProgress(userId);
   const teacher = await loadTeacher(userId);
   if (!teacher) return entryErrorScreen('We could not find your training profile. Please contact NIETE support.');
-  // OPS-115 — same entry-point rule as INIT; always land on the picker.
+  // BUG-144 — same entry-point rule as INIT; always land on the picker.
   return buildVendorPicker(userId, teacher, partitionByVendor(catalog));
 }
 
@@ -658,7 +658,7 @@ function levelOptionTitle(lv) {
 // `visible` bindings hide them once the asset update ships) and keeps a
 // neutral title so clients on the OLD flow version see a single dash line
 // instead of the phantom "🔒 Level N — Not part of this program" category.
-// OPS-115 — `progress` must be a SPACE, never ''. WhatsApp validates the whole
+// BUG-144 — `progress` must be a SPACE, never ''. WhatsApp validates the whole
 // data payload against the screen schema BEFORE applying `visible`, so an empty
 // string bound to a TextBody fails the render and the client shows "Something
 // went wrong" — even though the row is hidden. Same rule loadGrandQuizState
@@ -723,7 +723,7 @@ function errorScreen(message) {
 }
 
 /**
- * OPS-115 — an error shown as the FIRST screen (from INIT or a raw BACK).
+ * BUG-144 — an error shown as the FIRST screen (from INIT or a raw BACK).
  *
  * errorScreen() renders on SUCCESS, which has incoming edges from all three
  * other screens, so it is not a legal entry point: returning it from INIT
