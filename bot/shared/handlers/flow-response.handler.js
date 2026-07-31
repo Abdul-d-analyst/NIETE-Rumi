@@ -895,6 +895,58 @@ async function handleTeacherTrainingFlow(message, phoneNumber, userId) {
   return true;
 }
 
+/**
+ * bd-2432 (port of main-bot FEAT-116 bd-2301) — the observe-visit picker
+ * completion. The "Start observation" tap arrives here via the nfm_reply
+ * webhook (flowType 'observe_visit' from the detector). Binds the picked
+ * teacher (VisitHandler 'complete') and sends the capture prompt naming her
+ * and the live framework. Degrades to a plain English prompt on ANY error —
+ * a coach is never dead-ended mid-visit.
+ */
+async function handleObserveVisitFlow(message, phoneNumber, userId) {
+  const { buildVisitCapturePrompt, observeLang } = require('../services/observe/observe-strings');
+  const { getObservePack } = require('../services/observe/observe-framework');
+  const VisitHandler = require('./observe-visit-flow.handler');
+  const WhatsAppService = require('../services/whatsapp.service');
+  try {
+    const responseJson = JSON.parse(message.interactive.nfm_reply.response_json || '{}');
+    const flowToken = responseJson.flow_token || userId;
+    const step = responseJson.step || 'start';
+    if (step !== 'start') return true; // non-terminal steps are endpoint-side no-ops
+
+    let user = null;
+    try {
+      const { data } = await supabase
+        .from('users')
+        .select('id, role, preferences, preferred_language, region')
+        .eq('id', userId)
+        .single();
+      user = data || null;
+    } catch (_) { /* arm falls back inside the handler */ }
+
+    const result = await VisitHandler.handle(userId, 'complete', 'BRIEF', responseJson, flowToken, user);
+
+    const framework = ((getObservePack().key) || 'fico').toUpperCase();
+    const teacherName = result && result.boundTeacher && result.boundTeacher.teacher_name;
+    await WhatsAppService.sendMessage(
+      phoneNumber,
+      buildVisitCapturePrompt(observeLang(user || {}), { teacherName, framework })
+    );
+    return true;
+  } catch (error) {
+    logToFile('❌ observe-visit completion failed — degrading to plain capture prompt', {
+      userId, error: error.message,
+    });
+    try {
+      await WhatsAppService.sendMessage(
+        phoneNumber,
+        '🎙️ When the lesson starts, record it and send me the audio — I\'ll draft the observation form for you.'
+      );
+    } catch (_) { /* nothing left to degrade to */ }
+    return true;
+  }
+}
+
 module.exports = {
   handleFlowResponse,
   handleReadingAssessmentFlow,
@@ -902,6 +954,7 @@ module.exports = {
   handleAttendanceMarkingFlow,
   handleRegistrationFlow,
   handleTeacherTrainingFlow,
+  handleObserveVisitFlow,
   mapLevelToPassageType,
   READING_ASSESSMENT_FLOW_ID,
   ATTENDANCE_SETUP_FLOW_ID,

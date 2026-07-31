@@ -381,4 +381,31 @@ function observeLang(user) {
   return 'en';
 }
 
-module.exports = { observeStrings, observeLang };
+// ── Visit-picker capture prompt (bd-2432, port of main-bot bd-2328) ──────────
+// Sent right after the coach taps "Start observation" in the visit Flow: names
+// the BOUND teacher and the live framework (FICO on NIETE — never hardcode
+// MEWAKA). en/ur only (NIETE market, Rule 20/bd-2405).
+const VISIT_CAPTURE_TEMPLATES = {
+  en: {
+    withName: '🎙️ You\'re observing *{name}*. When the lesson starts, record it and send me the audio — I\'ll draft the {fw} form for you.',
+    noName: '🎙️ When the lesson starts, record it and send me the audio — I\'ll draft the {fw} form for you.',
+  },
+  ur: {
+    withName: '🎙️ آپ *{name}* کا مشاہدہ کر رہے ہیں۔ سبق شروع ہو تو ریکارڈ کر کے آڈیو مجھے بھیجیں — میں آپ کے لیے {fw} فارم تیار کر دوں گی۔',
+    noName: '🎙️ سبق شروع ہو تو ریکارڈ کر کے آڈیو مجھے بھیجیں — میں آپ کے لیے {fw} فارم تیار کر دوں گی۔',
+  },
+};
+
+/**
+ * @param {string} lang     coach language ('ur' | anything-else→en)
+ * @param {{teacherName?:string, framework?:string}} [opts]
+ */
+function buildVisitCapturePrompt(lang, opts = {}) {
+  const l = lang === 'ur' ? 'ur' : 'en';
+  const fw = String(opts.framework || 'FICO').toUpperCase();
+  const t = VISIT_CAPTURE_TEMPLATES[l];
+  const template = opts.teacherName ? t.withName : t.noName;
+  return template.replace('{name}', opts.teacherName || '').replace('{fw}', fw);
+}
+
+module.exports = { observeStrings, observeLang, buildVisitCapturePrompt };
