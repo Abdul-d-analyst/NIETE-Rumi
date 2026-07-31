@@ -655,8 +655,13 @@ function levelOptionTitle(lv) {
 // `visible` bindings hide them once the asset update ships) and keeps a
 // neutral title so clients on the OLD flow version see a single dash line
 // instead of the phantom "🔒 Level N — Not part of this program" category.
+// OPS-115 — `progress` must be a SPACE, never ''. WhatsApp validates the whole
+// data payload against the screen schema BEFORE applying `visible`, so an empty
+// string bound to a TextBody fails the render and the client shows "Something
+// went wrong" — even though the row is hidden. Same rule loadGrandQuizState
+// already follows with its `caption: ' '` / `cta: ' '` no-quiz case.
 function ghostSlotData(slot) {
-  return { title: '·', progress: '', visible: false };
+  return { title: '·', progress: ' ', visible: false };
 }
 
 function levelEmoji(lv) {
