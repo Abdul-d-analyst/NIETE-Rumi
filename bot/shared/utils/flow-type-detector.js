@@ -60,6 +60,11 @@ function detectFlowType(responseJson) {
   if (responseJson.teacher_ext_id !== undefined && responseJson.step !== undefined) {
     return 'observe_visit';
   }
+  // bd-2444: the scheduling UI's other exits (debrief tap, "I'm done") carry
+  // an explicit discriminator — same misroute-proofing as above.
+  if (responseJson.observe_visit_action !== undefined) {
+    return 'observe_visit';
+  }
 
   // 1. Reading Assessment (highest priority - unique fields)
   const hasReadingFields = responseJson.screen_0_Student_Full_Name_0 ||

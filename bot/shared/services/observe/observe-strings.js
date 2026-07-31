@@ -408,4 +408,32 @@ function buildVisitCapturePrompt(lang, opts = {}) {
   return template.replace('{name}', opts.teacherName || '').replace('{fw}', fw);
 }
 
-module.exports = { observeStrings, observeLang, buildVisitCapturePrompt };
+// ── Scheduling "done" exit ack (bd-2444, operator 2026-07-31) ────────────────
+// Sent in chat after "I'm done for now" on CONFIRM_SCHEDULED: recap the saved
+// schedule in the coach's preferred/locked language + the /observe re-entry.
+const SCHEDULE_DONE_TEMPLATES = {
+  en: '✅ Observation scheduled for *{name}* on {date} at {slot}. Tap /observe anytime to see your schedule.',
+  ur: '✅ *{name}* کا مشاہدہ {date}، {slot} کے لیے شیڈول ہو گیا۔ اپنے تمام شیڈول دیکھنے کے لیے کبھی بھی /observe لکھیں۔',
+};
+
+const _ACK_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+function _ackDate(ymd) {
+  const ms = Date.parse(`${ymd}T00:00:00Z`);
+  if (!Number.isFinite(ms)) return String(ymd || '');
+  const d = new Date(ms);
+  return `${d.getUTCDate()} ${_ACK_MONTHS[d.getUTCMonth()]}`;
+}
+
+/**
+ * @param {string} lang  coach language ('ur' | anything-else→en)
+ * @param {{teacherName?:string, date?:string, slot?:string}} [opts] date = YYYY-MM-DD
+ */
+function buildScheduleDoneAck(lang, opts = {}) {
+  const l = lang === 'ur' ? 'ur' : 'en';
+  return SCHEDULE_DONE_TEMPLATES[l]
+    .replace('{name}', opts.teacherName || '')
+    .replace('{date}', _ackDate(opts.date))
+    .replace('{slot}', opts.slot || '');
+}
+
+module.exports = { observeStrings, observeLang, buildVisitCapturePrompt, buildScheduleDoneAck };

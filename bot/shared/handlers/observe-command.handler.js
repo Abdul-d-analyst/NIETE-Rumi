@@ -143,6 +143,13 @@ async function handleObserveCommand(user, from, messageBody) {
 
     case 'capture':
     default: {
+      // bd-2444: with the scheduling UI live, the Flow's MENU covers pending
+      // debriefs (with counts) — an assigned coach goes straight to the Flow
+      // and the chat interception below is skipped. Flag off, or unassigned
+      // coach (maybeLaunchVisitFlow → false): today's path, byte-identical.
+      if (process.env.OBSERVE_SCHEDULING_UI === 'true') {
+        if (await maybeLaunchVisitFlow(user, from)) return true;
+      }
       // bd-21: pending debriefs surface as an interactive list first. The
       // list tap decides the next step, so no capture state is armed here.
       // Lookup failure degrades to the plain capture prompt — the pendings
