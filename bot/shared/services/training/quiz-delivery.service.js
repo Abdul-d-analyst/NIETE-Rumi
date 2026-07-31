@@ -3,8 +3,10 @@
  *
  * Inline Q-by-Q state machine that handles TWO quiz kinds:
  *
- *   1. Grand quiz (kind='grand')       — per-Level, BLOCKING, 100% required
- *                                        to pass, 24h cooldown on failure.
+ *   1. Grand quiz (kind='grand')       — per-Level, BLOCKING, pass bar from
+ *                                        training_vendors.passing_pct (NIETE
+ *                                        80%, Beacon House 70%), 24h cooldown
+ *                                        on failure.
  *   2. Training-module quiz (kind='training_module') — per-Module,
  *                                        NON-BLOCKING (feedback-only, no
  *                                        cooldown), fired automatically after
@@ -97,17 +99,37 @@ async function startGrandQuiz(userId, levelOrder, phoneNumber) {
     return false;
   }
 
-  // 1. Level from order_index
-  const { data: level, error: lErr } = await supabase
-    .from('training_levels')
-    .select('id, name, order_index')
-    .eq('order_index', levelOrderIdx)
-    .maybeSingle();
-  if (lErr || !level) {
-    logToFile('❌ Level lookup failed', { levelOrder, error: lErr?.message });
+  // 1. Level from order_index — WITHIN THE TEACHER'S OWN SCOPED CATALOG.
+  //
+  // bd-2392: order_index is per-vendor, so it is NOT unique. NIETE Skilled
+  // Practitioner and Beacon House Mathematics are both order_index 2; the old
+  // `.eq('order_index', n).maybeSingle()` matched two rows, errored, and told
+  // the teacher "Could not find that level" — every NIETE level exam except
+  // Aspiring Teacher (order_index 0) was unreachable.
+  //
+  // Resolving through loadVisibleLevelsWithProgress() also means we can only
+  // ever start an exam on a level the teacher is actually scoped to.
+  const { loadVisibleLevelsWithProgress } = require('../../routes/teacher-training-endpoint');
+  const catalog = await loadVisibleLevelsWithProgress(userId);
+  const candidates = (catalog || []).filter(l => l.order_index === levelOrderIdx);
+  // Prefer a level whose vendor actually has a grand quiz; among ties prefer
+  // the one the teacher is ready to sit. Chain vendors (NIETE) are the only
+  // ones with a real grand_quiz, so this resolves the collision cleanly.
+  const level =
+    candidates.find(l => l.state === 'ready_for_quiz' && l.grand_quiz_id) ||
+    candidates.find(l => l.grand_quiz_id) ||
+    candidates[0] ||
+    null;
+  if (!level) {
+    logToFile('❌ Level lookup failed — not in the teacher\'s scoped catalog', {
+      userId, levelOrder, levelOrderIdx, candidates: (catalog || []).map(l => l.order_index),
+    });
     await WhatsAppService.sendMessage(phoneNumber, 'Could not find that level. Send /training to try again.');
     return false;
   }
+  logToFile('🎓 Resolved grand-quiz level', {
+    userId, levelOrder, levelId: level.id, name: level.name, vendor: level.vendor_key,
+  });
 
   // 2. Grand quiz for the level
   const { data: quiz, error: qErr } = await supabase
@@ -181,7 +203,7 @@ async function startGrandQuiz(userId, levelOrder, phoneNumber) {
       level_id: level.id,
       current_question_index: 0,
       total_questions: totalQuestions,
-      total_score: totalQuestions, // one point per question, 100% required to pass
+      total_score: totalQuestions, // one point per question; the pass bar is a % of this
       status: 'in_progress',
     })
     .select('id')
@@ -192,10 +214,13 @@ async function startGrandQuiz(userId, levelOrder, phoneNumber) {
     return false;
   }
 
+  // bd-2393 — quote the vendor's real bar (NIETE 80%, BH 70%), not "100%".
+  const passPct = await getVendorPassingPctByLevel(level.id, 'exam');
+  const needed = Math.ceil((passPct / 100) * totalQuestions);
   await WhatsAppService.sendMessage(
     phoneNumber,
     `🎓 *Level ${level.order_index + 1} · ${level.name} — Grand Quiz*\n\n` +
-    `${totalQuestions} questions · You need *100% to pass*.\n` +
+    `${totalQuestions} questions · You need *${passPct}% to pass* (${needed} of ${totalQuestions}).\n` +
     `If you fail, there's a ${COOLDOWN_HOURS}-hour cooldown before your next attempt.\n\n` +
     `Answer each question by tapping an option below.`
   );
@@ -342,7 +367,8 @@ async function startTrainingQuiz(userId, moduleId, phoneNumber) {
 async function sendQuestion(attemptId, phoneNumber) {
   const { data: attempt } = await supabase
     .from('training_assessment_attempts')
-    .select('id, quiz_kind, grand_quiz_id, training_module_id, current_question_index, total_questions, status')
+    // level_id is needed for the bd-2393 per-question footer (vendor pass bar).
+    .select('id, quiz_kind, grand_quiz_id, training_module_id, level_id, current_question_index, total_questions, status')
     .eq('id', attemptId)
     .single();
   if (!attempt) return false;
@@ -405,9 +431,15 @@ async function sendQuestion(attemptId, phoneNumber) {
 
   const multi = isMultiKey(q.correct_option);
   let bodyText = q.question_text || '(missing question text)';
-  let footer = attempt.quiz_kind === KIND_TRAINING_MODULE
-    ? 'Self-check · tap an option'
-    : '100% required to pass · tap an option';
+  // bd-2393 — the exam footer quoted a flat "100% required", which is not the
+  // marking policy for any vendor's level exam (NIETE 80, BH 70).
+  let footer;
+  if (attempt.quiz_kind === KIND_TRAINING_MODULE) {
+    footer = 'Self-check · tap an option';
+  } else {
+    const footerPct = await getVendorPassingPctByLevel(attempt.level_id, 'exam');
+    footer = `${footerPct}% required to pass · tap an option`;
+  }
 
   if (optionsInBody) {
     bodyText += '\n\n' + options
@@ -699,7 +731,10 @@ async function gradeAttempt(attemptId, phoneNumber) {
 
     // Passed — NOW the module counts as complete. This is the only runtime
     // path (besides a module with no quiz) that writes a progress row.
-    const { markModuleComplete, deliverNextModule } = require('./content-delivery.service');
+    // markModuleComplete comes from progress.service (not content-delivery) to
+    // keep this file off the content-delivery ↔ quiz-delivery cycle.
+    const { markModuleComplete } = require('./progress.service');
+    const { deliverNextModule } = require('./content-delivery.service');
     await markModuleComplete(attempt.user_id, attempt.training_module_id);
 
     const pctRounded = Math.round(pct);

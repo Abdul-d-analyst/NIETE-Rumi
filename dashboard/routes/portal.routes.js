@@ -2423,7 +2423,7 @@ router.post('/training/module/:id/quiz-attempts', requirePortalAuth, async (req,
 // certificate) and bot/shared/routes/teacher-training-endpoint.js
 // loadGrandQuizState (eligibility). The portal MUST keep identical semantics:
 //   - eligibility: every active course in the level has ≥1 completed module
-//   - pass bar: 100% (score === total_questions)
+//   - pass bar: training_vendors.passing_pct (NIETE 80%, Beacon House 70%)
 //   - fail: status='failed' + 24h cooldown_until; no cooldown on pass
 //   - certificate: issued via the bot's shared certificate service on pass
 // ────────────────────────────────────────────────────────────────────────────
@@ -2648,7 +2648,7 @@ router.get('/training/level/:id/grand-quiz/questions', requirePortalAuth, async 
  *
  *   - `quiz_kind='grand'`, `grand_quiz_id`, `level_id`, `program_id`
  *   - `total_score = total_questions` (one point per question)
- *   - pass bar: 100% — `is_passed = (score === total_questions)`
+ *   - pass bar: `training_vendors.passing_pct` (NIETE 80%, Beacon House 70%)
  *   - pass  → `status='passed'`,  `cooldown_until = null`, certificate issued
  *   - fail  → `status='failed'`,  `cooldown_until = now + 24h`
  *   - answers: one row per question with the canonical 0-based
@@ -2775,7 +2775,23 @@ router.post('/training/level/:id/grand-quiz/attempts', requirePortalAuth, async 
 
     const totalQuestions = qList.length;
     const score = graded.filter(g => g.is_correct).length;
-    const isPassed = score === totalQuestions;   // 100% required — grand-quiz pass bar
+    // bd-2393 — the pass bar comes from the vendor (NIETE 80%, Beacon House
+    // 70%), matching quiz-delivery.service.js gradeAttempt. This graded at
+    // score === totalQuestions (100%), which failed teachers who had passed.
+    // Fallback 100 is the strictest bar, so a lookup failure never hands out
+    // an easier pass than intended.
+    let examPassPct = 100;
+    {
+      const { data: lvRow } = await supabase
+        .from('training_levels').select('vendor_id').eq('id', levelId).maybeSingle();
+      if (lvRow?.vendor_id) {
+        const { data: vendor } = await supabase
+          .from('training_vendors').select('passing_pct').eq('id', lvRow.vendor_id).maybeSingle();
+        const p = Number(vendor?.passing_pct);
+        if (Number.isFinite(p) && p > 0 && p <= 100) examPassPct = p;
+      }
+    }
+    const isPassed = totalQuestions > 0 && (score / totalQuestions) * 100 >= examPassPct;
     const completedAt = new Date().toISOString();
     const cooldownUntil = isPassed
       ? null
