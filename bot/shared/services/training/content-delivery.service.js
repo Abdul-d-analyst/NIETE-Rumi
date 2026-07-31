@@ -239,6 +239,32 @@ async function deliverNextModule(userId, courseId, phoneNumber) {
  * Mark a module complete and deliver the next one (or completion message).
  * Called from the button-reply handler.
  */
+/**
+ * Write the completion row for a module. Idempotent — safe to call twice.
+ *
+ * bd-2390: this is the ONLY place a progress row is created by the runtime,
+ * and it is reached from exactly two callers: a module with no quiz (the tap
+ * is the only signal available) and a passed module quiz. Keeping it in one
+ * function is what stops "completed" from drifting back to "tapped".
+ *
+ * @param {string} userId   users.id (uuid)
+ * @param {number} moduleId training_modules.id
+ * @returns {Promise<boolean>} true if the row is present after the call
+ */
+async function markModuleComplete(userId, moduleId) {
+  const { error } = await supabase
+    .from('teacher_training_progress')
+    .upsert(
+      { user_id: userId, module_id: moduleId, completed_at: new Date().toISOString() },
+      { onConflict: 'user_id,module_id' }
+    );
+  if (error) {
+    logToFile('❌ Progress upsert failed', { userId, moduleId, error: error.message });
+    return false;
+  }
+  return true;
+}
+
 async function handleModuleDone(userId, moduleId, phoneNumber) {
   const moduleIdNum = parseInt(moduleId, 10);
   if (!moduleIdNum) return false;
@@ -254,18 +280,18 @@ async function handleModuleDone(userId, moduleId, phoneNumber) {
     return false;
   }
 
-  // Upsert progress row (idempotent — safe to double-tap).
-  const { error: pErr } = await supabase
-    .from('teacher_training_progress')
-    .upsert(
-      { user_id: userId, module_id: moduleIdNum, completed_at: new Date().toISOString() },
-      { onConflict: 'user_id,module_id' }
-    );
-  if (pErr) {
-    logToFile('❌ Progress upsert failed', { userId, moduleId: moduleIdNum, error: pErr.message });
-  }
-
-  logToFile('🎓 Module marked done', { userId, moduleId: moduleIdNum, courseId: mod.course_id, title: mod.title });
+  // bd-2390 — the module quiz GATES completion; the progress row is no
+  // longer written here. Tapping "▶ Next video" is a request to move on,
+  // not proof of learning. Previously this handler upserted progress on the
+  // tap and fired the quiz + next module in parallel, so "completed" meant
+  // "tapped the button" — a teacher could tap through a whole course in
+  // seconds and every module read as done (and the certificate services
+  // then issued level certificates off completions nobody earned).
+  //
+  // Now: a module WITH a quiz sends only the quiz and stops. The progress
+  // row and the next module are handled by quiz-delivery.gradeAttempt once
+  // the teacher passes. A module with NO questions keeps the old
+  // tap-completes behaviour — otherwise it could never be finished.
 
   // Per-module training quiz (non-blocking).
   //
@@ -299,14 +325,31 @@ async function handleModuleDone(userId, moduleId, phoneNumber) {
     source: 'module_done',
   };
   logEvent('training_quiz_eligibility_checked', eligPayload);
+
   if (quizQCount && quizQCount > 0) {
     const QuizDelivery = require('./quiz-delivery.service');
-    // Fire-and-forget — kicks Q1 out ahead of the next module video.
-    // Any failure inside the quiz path is logged there; we never block
-    // the teacher's forward progress on it.
-    Promise.resolve(QuizDelivery.startTrainingQuiz(userId, moduleIdNum, phoneNumber))
-      .catch((err) => logToFile('⚠️ Non-blocking training quiz failed', { moduleId: moduleIdNum, error: err?.message }));
+    logToFile('🎓 Module quiz gates completion — sending quiz, holding next module', {
+      userId, moduleId: moduleIdNum, questions: quizQCount,
+    });
+    try {
+      await QuizDelivery.startTrainingQuiz(userId, moduleIdNum, phoneNumber);
+    } catch (err) {
+      // If the quiz can't be delivered the teacher would be stranded with no
+      // way forward, so fall back to the legacy tap-completion. Logged loudly
+      // — this is a real failure, not a normal path.
+      logToFile('❌ Module quiz failed to start — falling back to tap-completion', {
+        userId, moduleId: moduleIdNum, error: err?.message,
+      });
+      await markModuleComplete(userId, moduleIdNum);
+      await WhatsAppService.sendMessage(phoneNumber, `✅ *${mod.title}* — marked done. Loading next module…`);
+      return await deliverNextModule(userId, mod.course_id, phoneNumber);
+    }
+    return true;
   }
+
+  // No quiz on this module — the tap is the only completion signal available.
+  await markModuleComplete(userId, moduleIdNum);
+  logToFile('🎓 Module marked done (no quiz)', { userId, moduleId: moduleIdNum, courseId: mod.course_id, title: mod.title });
 
   // BH open-ended capstone offer (bd-2233) — when this module completes the
   // level for an all_modules vendor, offer the level's Grand Quiz. Fire-and-
@@ -427,4 +470,4 @@ async function deliverModuleById(moduleId, phoneNumber, opts = {}) {
   return true;
 }
 
-module.exports = { deliverNextModule, handleModuleDone, deliverModuleById, deliverPdfModule, isPdfModule };
+module.exports = { deliverNextModule, handleModuleDone, deliverModuleById, deliverPdfModule, isPdfModule, markModuleComplete };
