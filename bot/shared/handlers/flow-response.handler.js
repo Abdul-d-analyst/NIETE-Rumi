@@ -904,15 +904,18 @@ async function handleTeacherTrainingFlow(message, phoneNumber, userId) {
  * a coach is never dead-ended mid-visit.
  */
 async function handleObserveVisitFlow(message, phoneNumber, userId) {
-  const { buildVisitCapturePrompt, observeLang } = require('../services/observe/observe-strings');
+  const { buildVisitCapturePrompt, buildScheduleDoneAck, observeLang } = require('../services/observe/observe-strings');
   const { getObservePack } = require('../services/observe/observe-framework');
   const VisitHandler = require('./observe-visit-flow.handler');
   const WhatsAppService = require('../services/whatsapp.service');
   try {
     const responseJson = JSON.parse(message.interactive.nfm_reply.response_json || '{}');
     const flowToken = responseJson.flow_token || userId;
-    const step = responseJson.step || 'start';
-    if (step !== 'start') return true; // non-terminal steps are endpoint-side no-ops
+    // bd-2444: three exits — 'start' (bind + capture prompt, the legacy path),
+    // 'debrief' (hand off to the chat debrief), 'done' (localized schedule ack).
+    const visitAction = responseJson.observe_visit_action
+      || ((responseJson.step || 'start') === 'start' ? 'start' : null);
+    if (!visitAction) return true; // non-terminal steps are endpoint-side no-ops
 
     let user = null;
     try {
@@ -923,6 +926,21 @@ async function handleObserveVisitFlow(message, phoneNumber, userId) {
         .single();
       user = data || null;
     } catch (_) { /* arm falls back inside the handler */ }
+
+    if (visitAction === 'debrief') {
+      const ObserveDebrief = require('../services/observe/observe-debrief.service');
+      await ObserveDebrief.startDebrief(responseJson.session_id, phoneNumber, user);
+      return true;
+    }
+
+    if (visitAction === 'done') {
+      await WhatsAppService.sendMessage(phoneNumber, buildScheduleDoneAck(observeLang(user || {}), {
+        teacherName: responseJson.teacher_name,
+        date: responseJson.sched_date,
+        slot: responseJson.sched_slot,
+      }));
+      return true;
+    }
 
     const result = await VisitHandler.handle(userId, 'complete', 'BRIEF', responseJson, flowToken, user);
 

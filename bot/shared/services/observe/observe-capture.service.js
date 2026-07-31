@@ -60,9 +60,11 @@ async function startFromAudio(user, from, audioId, sessionId, audioDurationSecon
   // bd-2432: the visit picker binds a teacher BEFORE the recording. When bound,
   // the teacher owns the row; the observer split below is unchanged either way.
   let ownerUserId = user.id;
+  let boundTeacher = null;
   try {
     const st = await ObserveState.getState(user.id);
     if (st && st.boundTeacher) {
+      boundTeacher = st.boundTeacher;
       const teacherId = await resolveBoundTeacherUserId(st.boundTeacher);
       if (teacherId) ownerUserId = teacherId;
     }
@@ -97,6 +99,19 @@ async function startFromAudio(user, from, audioId, sessionId, audioDurationSecon
 
   const CoachingJobQueueService = require('../coaching/coaching-job-queue.service');
   await CoachingJobQueueService.queueTranscription(session.id, { from, audioId });
+
+  // bd-2445: the observation started — retire the matching upcoming schedule
+  // (the teacher leaves "My schedule"). markDone is tolerant; a lifecycle
+  // failure must never block the capture.
+  if (boundTeacher && boundTeacher.teacher_ext_id) {
+    try {
+      const ScheduleStore = require('./observe-schedule.service');
+      await ScheduleStore.markDone(user.id, boundTeacher.teacher_ext_id, boundTeacher.school_ext_id || null, session.id);
+    } catch (err) {
+      logToFile('⚠️ observe: schedule markDone failed (non-blocking)', { userId: user.id, error: err.message });
+    }
+  }
+
   await ObserveState.setState(user.id, 'analyzing', { sessionId: session.id });
   await WhatsAppService.sendMessage(from, S.audio_received);
 
