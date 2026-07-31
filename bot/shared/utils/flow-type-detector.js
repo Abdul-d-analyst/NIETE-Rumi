@@ -51,6 +51,16 @@ function detectFlowType(responseJson) {
     return 'observe';
   }
 
+  // 0.2 Observe Visit picker (bd-2432, port of main-bot FEAT-116 bd-2301).
+  //     The "Start observation" completion carries teacher_ext_id + step —
+  //     teacher_ext_id is UNIQUE to this flow, so the rule is false-positive-
+  //     proof. MUST sit above the loose attendance_marking flow_token fallback
+  //     (any ':' in the token) — the exact misroute class that hit the
+  //     exam-generator on 2026-07-12 and observe (0.1) before it.
+  if (responseJson.teacher_ext_id !== undefined && responseJson.step !== undefined) {
+    return 'observe_visit';
+  }
+
   // 1. Reading Assessment (highest priority - unique fields)
   const hasReadingFields = responseJson.screen_0_Student_Full_Name_0 ||
                            responseJson.screen_0_Select_the_reading_level_2 ||

@@ -17,14 +17,61 @@ const ObserveState = require('./observe-state.service');
 const { observeStrings, observeLang } = require('./observe-strings');
 const { logToFile } = require('../../utils/logger');
 
+/**
+ * bd-2432 (port of main-bot FEAT-116) — resolve the visit-picker's bound
+ * teacher to a users.id so the session row is owned by the TEACHER (her trend
+ * keys correctly from day one) while the coach stays observer_user_id.
+ * Prefer the bound user_id; else look up by phone; else create a minimal
+ * teacher row. ANY failure → null (observer stays owner — never dead-end).
+ */
+async function resolveBoundTeacherUserId(boundTeacher) {
+  try {
+    if (!boundTeacher) return null;
+    if (boundTeacher.user_id) return boundTeacher.user_id;
+    const phone = boundTeacher.phone_e164;
+    if (!phone) return null;
+    const { data: existing } = await supabase
+      .from('users').select('id').eq('phone_number', phone).limit(1);
+    if (existing && existing[0]) return existing[0].id;
+    const name = (boundTeacher.teacher_name || '').trim();
+    const { data: created, error } = await supabase
+      .from('users')
+      .insert({
+        phone_number: phone,
+        first_name: name ? name.split(/\s+/)[0] : null,
+        name: name || null,
+        role: 'teacher',
+        preferred_language: boundTeacher.preferred_language || 'en',
+        source: 'observe_visit_bind',
+      })
+      .select()
+      .single();
+    if (error || !created) return null;
+    return created.id;
+  } catch (_) {
+    return null;
+  }
+}
+
 async function startFromAudio(user, from, audioId, sessionId, audioDurationSeconds = null) {
   const lang = observeLang(user);
   const S = observeStrings(lang);
 
+  // bd-2432: the visit picker binds a teacher BEFORE the recording. When bound,
+  // the teacher owns the row; the observer split below is unchanged either way.
+  let ownerUserId = user.id;
+  try {
+    const st = await ObserveState.getState(user.id);
+    if (st && st.boundTeacher) {
+      const teacherId = await resolveBoundTeacherUserId(st.boundTeacher);
+      if (teacherId) ownerUserId = teacherId;
+    }
+  } catch (_) { /* unbound capture — today's behavior */ }
+
   const { data: session, error } = await supabase
     .from('coaching_sessions')
     .insert({
-      user_id: user.id,                       // row owner = observer until teacher identified (D5)
+      user_id: ownerUserId,                   // bound teacher when picked via the visit Flow; else observer (D5)
       session_id: sessionId,
       audio_id: audioId,
       audio_duration_seconds: audioDurationSeconds,
@@ -59,4 +106,4 @@ async function startFromAudio(user, from, audioId, sessionId, audioDurationSecon
   return session;
 }
 
-module.exports = { startFromAudio };
+module.exports = { startFromAudio, resolveBoundTeacherUserId };

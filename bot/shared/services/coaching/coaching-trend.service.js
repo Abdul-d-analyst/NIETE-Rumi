@@ -67,7 +67,7 @@ function pctFromRow(row) {
  *   any error or missing data.
  */
 async function loadTrendData(userId, opts = {}) {
-  const { limit = DEFAULT_LIMIT, locale = 'sw', excludeSessionId = null } = opts;
+  const { limit = DEFAULT_LIMIT, locale = 'sw', excludeSessionId = null, teacherOwnOnly = false } = opts;
   try {
     if (!userId) return [];
 
@@ -76,11 +76,17 @@ async function loadTrendData(userId, opts = {}) {
     // teacher with a long history yields a stale, frozen sparkline. Order DESC
     // so the DB returns the newest N, then reverse() below to get ascending
     // (oldest→newest) for left-to-right plotting.
-    const { data, error } = await supabase
+    let q = supabase
       .from('coaching_sessions')
       .select('id, created_at, analysis_data')
       .eq('user_id', userId)
-      .eq('status', 'completed')
+      .eq('status', 'completed');
+    // bd-2430 (two clean sources): the Support Brief wants the teacher's OWN
+    // AI-coaching only — the visit picker binds leader observations onto the
+    // teacher's user_id, and without this filter her trend would mix both.
+    // Default (hero report) is unchanged.
+    if (teacherOwnOnly) q = q.is('observation_type', null);
+    const { data, error } = await q
       .order('created_at', { ascending: false })
       .limit(limit);
 

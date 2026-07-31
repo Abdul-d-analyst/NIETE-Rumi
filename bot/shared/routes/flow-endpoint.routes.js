@@ -496,6 +496,36 @@ router.post('/observe-mewaka', async (req, res) => {
   }
 });
 
+/**
+ * bd-2432 (port of main-bot FEAT-116) — the /observe visit picker
+ * (school → teacher → support brief, endpoint-based data_exchange).
+ * Publish the Flow with endpoint_uri .../api/flows/observe-visit and set
+ * OBSERVE_VISIT_FLOW_ID. flow_token = the coach's bare user.id.
+ */
+router.post('/observe-visit', async (req, res) => {
+  try {
+    if (!FlowEncryptionService.isConfigured()) {
+      logToFile('Flow encryption not configured', { endpoint: 'observe-visit' });
+      return res.status(500).json({ error: 'Flow encryption not configured' });
+    }
+    const encryptedResponse = await FlowEncryptionService.processEncryptedRequest(
+      req.body,
+      async (decryptedData) => {
+        const { action, flow_token: flowToken, screen, data: screenData } = decryptedData;
+        if (action === 'ping') return FlowEncryptionService.handlePing();
+        const userId = (flowToken || '').split(':')[0];
+        const VisitHandler = require('../handlers/observe-visit-flow.handler');
+        return VisitHandler.handle(userId, action, screen, screenData || {}, flowToken);
+      }
+    );
+    res.set('Content-Type', 'text/plain');
+    res.send(encryptedResponse);
+  } catch (error) {
+    logToFile('Flow endpoint error', { endpoint: 'observe-visit', error: error.message });
+    res.status(500).json({ error: error.message });
+  }
+});
+
 router.post('/registration', async (req, res) => {
   try {
     if (!FlowEncryptionService.isConfigured()) {

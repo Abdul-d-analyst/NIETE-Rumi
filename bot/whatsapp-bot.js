@@ -1288,6 +1288,17 @@ app.post('/webhook', async (req, res) => {
         } catch (observeAckErr) {
           logToFile('⚠️ observe ack failed (submission itself already persisted)', { error: observeAckErr.message });
         }
+      } else if (flowType === 'observe_visit') {
+        // bd-2432 (port of main-bot FEAT-116 bd-2301): the visit picker's
+        // "Start observation" completion — bind the picked teacher and send
+        // the record prompt. Without this branch the completion falls to the
+        // generic "/menu" fallback below (the exact upstream bd-2294 failure).
+        logToFile('🔭 Detected observe-visit flow submission', { from, responseFields: Object.keys(responseJson) });
+        try {
+          await FlowResponseHandler.handleObserveVisitFlow(message, from, user?.id);
+        } catch (visitErr) {
+          logToFile('❌ observe-visit completion handler failed', { from, error: visitErr.message });
+        }
       } else {
         // Unknown flow type
         logToFile('⚠️ Received unknown flow submission', {
@@ -1610,14 +1621,21 @@ app.post('/webhook', async (req, res) => {
             await ObserveDebrief.startDebrief(parsed.sessionId, from, user);
           } else {
             // "new observation" — same arm as /observe's capture path.
-            // observeLang (NOT the main bot's sw/en test) — NIETE serves ur/en,
-            // and Riffat's list rendered in Urdu, so the sw test would have
-            // replied in English to an Urdu user.
-            const { observeStrings, observeLang } = require('./shared/services/observe/observe-strings');
-            const ObserveState = require('./shared/services/observe/observe-state.service');
-            const { getObserveArm } = require('./shared/services/observe/observe-gate');
-            await WhatsAppService.sendMessage(from, observeStrings(observeLang(user)).capture_prompt);
-            await ObserveState.setState(user.id, 'awaiting_audio', { arm: getObserveArm(user) });
+            // bd-2432 (upstream bd-2330): an assigned coach reaches the
+            // school→teacher→brief picker from THIS tap too — the pending-
+            // debrief list preempts /observe, so without this route a coach
+            // with a pending debrief could never reach the picker.
+            const { maybeLaunchVisitFlow } = require('./shared/handlers/observe-command.handler');
+            if (!(await maybeLaunchVisitFlow(user, from))) {
+              // observeLang (NOT the main bot's sw/en test) — NIETE serves ur/en,
+              // and Riffat's list rendered in Urdu, so the sw test would have
+              // replied in English to an Urdu user.
+              const { observeStrings, observeLang } = require('./shared/services/observe/observe-strings');
+              const ObserveState = require('./shared/services/observe/observe-state.service');
+              const { getObserveArm } = require('./shared/services/observe/observe-gate');
+              await WhatsAppService.sendMessage(from, observeStrings(observeLang(user)).capture_prompt);
+              await ObserveState.setState(user.id, 'awaiting_audio', { arm: getObserveArm(user) });
+            }
           }
         } else {
           logToFile('⚠️ observe debrief list tap without user/parse', { listId, hasUser: !!user });

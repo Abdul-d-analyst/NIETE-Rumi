@@ -1,0 +1,275 @@
+{
+  "version": "7.0",
+  "data_api_version": "3.0",
+  "routing_model": {
+    "SELECT_SCHOOL": [
+      "SELECT_TEACHER"
+    ],
+    "SELECT_TEACHER": [
+      "BRIEF"
+    ],
+    "BRIEF": []
+  },
+  "screens": [
+    {
+      "id": "SELECT_SCHOOL",
+      "title": "Pick a school",
+      "data": {
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "main-content": {
+                "type": "object",
+                "properties": {
+                  "title": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "metadata": {
+                    "type": "string"
+                  }
+                }
+              },
+              "on-click-action": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "payload": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          },
+          "__example__": [
+            {
+              "id": "s1",
+              "main-content": {
+                "title": "GPS Jand",
+                "description": "Tap to see teachers",
+                "metadata": "4 teachers · 2 due for a visit"
+              },
+              "on-click-action": {
+                "name": "data_exchange",
+                "payload": {
+                  "step": "school",
+                  "school_ext_id": "s1"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "NavigationList",
+            "name": "school_list",
+            "list-items": "${data.items}"
+          }
+        ]
+      },
+      "refresh_on_back": true
+    },
+    {
+      "id": "SELECT_TEACHER",
+      "title": "Who needs a visit?",
+      "refresh_on_back": true,
+      "data": {
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "main-content": {
+                "type": "object",
+                "properties": {
+                  "title": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "metadata": {
+                    "type": "string"
+                  }
+                }
+              },
+              "start": {
+                "type": "object",
+                "properties": {
+                  "image": {
+                    "type": "string"
+                  },
+                  "alt-text": {
+                    "type": "string"
+                  }
+                }
+              },
+              "on-click-action": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "payload": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          },
+          "__example__": [
+            {
+              "id": "t1",
+              "main-content": {
+                "title": "Ayesha",
+                "description": "Grade 2",
+                "metadata": "Due · last seen 12 weeks ago"
+              },
+              "on-click-action": {
+                "name": "data_exchange",
+                "payload": {
+                  "step": "teacher",
+                  "teacher_ext_id": "t1",
+                  "school_ext_id": "s1"
+                }
+              }
+            }
+          ]
+        },
+        "school_ext_id": {
+          "type": "string",
+          "__example__": "s1"
+        }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "NavigationList",
+            "name": "teacher_list",
+            "list-items": "${data.items}"
+          }
+        ]
+      }
+    },
+    {
+      "id": "BRIEF",
+      "title": "Support brief",
+      "terminal": true,
+      "data": {
+        "teacher_name": {
+          "type": "string",
+          "__example__": "Ayesha Bibi"
+        },
+        "subtitle": {
+          "type": "string",
+          "__example__": "Grade 2 · GPS Dhok Bilal"
+        },
+        "strength_text": {
+          "type": "string",
+          "__example__": "✅ What's working: questioning & how she teaches"
+        },
+        "growth_text": {
+          "type": "string",
+          "__example__": "🌱 Where your support helps most: getting every student involved"
+        },
+        "moves_intro": {
+          "type": "string",
+          "__example__": "During your visit:"
+        },
+        "moves_text": {
+          "type": "string",
+          "__example__": "1. Watch her questioning: does she pause after asking, or answer it herself? If there's no wait-time, suggest she count silently to five.\n2. Count how many students actually speak. If it's only a few, suggest a 30-second think-pair-share.\n3. Watch how she checks understanding — suggest a one-question exit slip."
+        },
+        "trend_text": {
+          "type": "string",
+          "__example__": "📈 Journey: Developing → Proficient (3 sessions)"
+        },
+        "debrief_reminder": {
+          "type": "string",
+          "__example__": "In the debrief, pick just ONE thing to work on with her — and open with a genuine strength."
+        },
+        "guidance_text": {
+          "type": "string",
+          "__example__": "This is guidance to support your visit — not a grade or a ranking."
+        },
+        "teacher_ext_id": {
+          "type": "string",
+          "__example__": "t1"
+        },
+        "school_ext_id": {
+          "type": "string",
+          "__example__": "s1"
+        }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "TextHeading",
+            "text": "${data.teacher_name}"
+          },
+          {
+            "type": "TextSubheading",
+            "text": "${data.subtitle}"
+          },
+          {
+            "type": "TextBody",
+            "text": "${data.strength_text}"
+          },
+          {
+            "type": "TextBody",
+            "text": "${data.growth_text}"
+          },
+          {
+            "type": "TextSubheading",
+            "text": "${data.moves_intro}"
+          },
+          {
+            "type": "TextBody",
+            "text": "${data.moves_text}"
+          },
+          {
+            "type": "TextBody",
+            "text": "${data.trend_text}"
+          },
+          {
+            "type": "TextBody",
+            "text": "${data.debrief_reminder}"
+          },
+          {
+            "type": "TextCaption",
+            "text": "${data.guidance_text}"
+          },
+          {
+            "type": "Footer",
+            "label": "Start observation",
+            "on-click-action": {
+              "name": "complete",
+              "payload": {
+                "step": "start",
+                "teacher_ext_id": "${data.teacher_ext_id}",
+                "school_ext_id": "${data.school_ext_id}"
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}
