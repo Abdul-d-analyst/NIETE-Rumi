@@ -345,3 +345,36 @@ describe('bd-2476 — /training Start exam reaches a capstone', () => {
     expect(Capstone.handleCapstoneButton).toHaveBeenCalledWith(UID, 'capstone_start_18', PHONE);
   });
 });
+
+describe('bd-2477 — the schema permits a capstone attempt row', () => {
+  // The real defect was in the DATABASE, not the code: the kind_target CHECK
+  // constraint listed only 'grand' and 'training_module', so Postgres rejected
+  // every capstone insert. Zero attempts existed across 17,656 rows.
+  //
+  // A mocked supabase client cannot enforce a CHECK, so this asserts the
+  // canonical schema instead. Weaker than exercising the real constraint, but
+  // it is the thing that was missing — and it would have caught this.
+  const fs = require('fs');
+  const path = require('path');
+  const schema = () => fs.readFileSync(
+    path.resolve(__dirname, '../../infrastructure/supabase/00_complete-schema.sql'), 'utf8');
+
+  test('the kind_target constraint has a capstone branch', () => {
+    const block = schema().slice(schema().indexOf('training_assessment_attempts_kind_target_ck'));
+    expect(block.slice(0, 1400)).toMatch(/quiz_kind = 'capstone'/);
+  });
+
+  test('the capstone branch requires grand_quiz_id and forbids a module', () => {
+    // Matches what capstone-delivery actually inserts: the capstone lives in
+    // training_grand_quizzes, so it carries grand_quiz_id and no module.
+    const block = schema().slice(schema().indexOf('training_assessment_attempts_kind_target_ck'));
+    expect(block.slice(0, 1400)).toMatch(
+      /quiz_kind = 'capstone'\s+AND grand_quiz_id IS NOT NULL AND training_module_id IS NULL/);
+  });
+
+  test('the two pre-existing branches are untouched', () => {
+    const block = schema().slice(schema().indexOf('training_assessment_attempts_kind_target_ck'));
+    expect(block.slice(0, 1400)).toMatch(/quiz_kind = 'grand'/);
+    expect(block.slice(0, 1400)).toMatch(/quiz_kind = 'training_module'/);
+  });
+});

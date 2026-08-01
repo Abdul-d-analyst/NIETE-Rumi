@@ -3892,7 +3892,7 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS last_message_at TIMESTAMPTZ;
 -- in addition to per-level grand quizzes. Grand quizzes are blocking + 100%
 -- pass + 24h cooldown; training-module quizzes are non-blocking, feedback-only,
 -- no cooldown, and fire after every module that has questions.
---   * quiz_kind        — 'grand' (default) or 'training_module'
+--   * quiz_kind        — 'grand' (default), 'training_module', or 'capstone'
 --   * training_module_id — populated only for kind='training_module'
 --   * grand_quiz_id      — NOT NULL relaxed so training-module attempts can
 --                          leave it null (the CHECK constraint below enforces
@@ -3912,6 +3912,13 @@ DO $$ BEGIN
                 (quiz_kind = 'grand' AND grand_quiz_id IS NOT NULL AND training_module_id IS NULL)
                 OR
                 (quiz_kind = 'training_module' AND training_module_id IS NOT NULL)
+                OR
+                -- bd-2477 — the Beacon House capstone. Its questions hang off a
+                -- training_grand_quizzes row (quiz_type='capstone'), so it carries
+                -- a grand_quiz_id and no module, exactly like a grand quiz.
+                -- Omitting this made EVERY capstone insert fail: zero attempts
+                -- existed across 17,656 rows because the feature could not write.
+                (quiz_kind = 'capstone' AND grand_quiz_id IS NOT NULL AND training_module_id IS NULL)
             );
     END IF;
 END $$;
