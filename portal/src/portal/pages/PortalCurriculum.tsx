@@ -180,9 +180,12 @@ const PortalCurriculum = () => {
         toast({ title: 'Already ready', description: 'Opening the PDF now.' });
         openPdf(lang);
       } else if (data.queued) {
+        // bd-2461 — "about 2 minutes" was optimistic. Measured pickup latency on
+        // completed requests: median 6.8s, p90 17.9s, max 618s — and that is
+        // before the render itself. Promise the channel, not a clock.
         toast({
           title: 'Preparing your lesson plan',
-          description: 'Ready in about 2 minutes — refresh the page to check. You\'ll also get it on WhatsApp.',
+          description: 'This can take a few minutes. We\'ll send it to you on WhatsApp as soon as it\'s ready — you don\'t need to keep this page open.',
         });
       }
     } catch {
@@ -301,7 +304,8 @@ const PortalCurriculum = () => {
                     <span>{lp.topic}</span>
                     <span className="text-xs ml-2">
                       {lp.available_en && <span className="text-green-600 mr-1">[EN]</span>}
-                      {lp.available_ur && <span className="text-green-600">[UR]</span>}
+                      {/* bd-2461 — no [UR] badge while Urdu is hidden, so the
+                          picker can't advertise a language with no button. */}
                     </span>
                   </SelectItem>
                 ))}
@@ -323,7 +327,7 @@ const PortalCurriculum = () => {
             </div>
 
             {/* Available languages — cached PDFs */}
-            {(chosenLp.available_en || chosenLp.available_ur) ? (
+            {chosenLp.available_en ? (
               <div className="flex flex-wrap gap-3">
                 {chosenLp.available_en && (
                   <Button onClick={() => openPdf('en')} disabled={opening} className="flex items-center gap-2">
@@ -331,31 +335,22 @@ const PortalCurriculum = () => {
                     View PDF (English)
                   </Button>
                 )}
-                {chosenLp.available_ur && (
-                  <Button onClick={() => openPdf('ur')} disabled={opening} variant="outline" className="flex items-center gap-2">
-                    {opening ? <Loader2 className="w-4 h-4 animate-spin" /> : <ExternalLink className="w-4 h-4" />}
-                    View PDF (اردو)
-                  </Button>
-                )}
-                {/* Optional: offer the other language if only one is cached */}
-                {chosenLp.available_en && !chosenLp.available_ur && (
-                  <Button onClick={() => requestRender('ur')} disabled={rendering} variant="ghost" size="sm">
-                    {rendering ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Sparkles className="w-4 h-4 mr-1" />}
-                    Prepare Urdu version
-                  </Button>
-                )}
-                {!chosenLp.available_en && chosenLp.available_ur && (
-                  <Button onClick={() => requestRender('en')} disabled={rendering} variant="ghost" size="sm">
-                    {rendering ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Sparkles className="w-4 h-4 mr-1" />}
-                    Prepare English version
-                  </Button>
-                )}
+                {/* bd-2461 — Urdu is HIDDEN, deliberately.
+                    Zero Urdu PDFs exist across all 1,269 lesson plans, and Urdu
+                    is a separate render rather than a translation of the cached
+                    English file. Worse, "Prepare Urdu version" was reachable on
+                    Rumi LPs (pre_generated_lps), which /render cannot see at all
+                    — so it 404s rather than queueing.
+                    We have not decided what Urdu coverage should be: all LPs,
+                    some, or on demand. Until that call is made, offering the
+                    button promises something nothing can deliver. Restore both
+                    blocks once the decision is taken. */}
               </div>
             ) : (
               <div>
                 <p className="text-sm text-muted-foreground mb-3">
-                  This lesson plan hasn't been prepared yet. Tap the button below and we'll get it ready in about 2 minutes.
-                  You'll also receive it on WhatsApp.
+                  This lesson plan hasn't been prepared yet. Tap below and we'll start preparing it —
+                  it can take a few minutes, and we'll send it to you on WhatsApp when it's ready.
                 </p>
                 <Button onClick={() => requestRender('en')} disabled={rendering} className="flex items-center gap-2">
                   {rendering ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
