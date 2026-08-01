@@ -112,6 +112,11 @@ async function handleTeacherTrainingDataExchange(userId, screen, screenData /*, 
     const action = screenData._action;
     const vendorKey = String(screenData._vendor_key || '').trim() || null;
     if (action === 'open_module') {
+      // bd-2448 — the gate. Without this the dropdown was a free jump to any
+      // module in the level, bypassing the sequential order the bot's own
+      // deliverNextModule enforces.
+      const gate = await checkModuleUnlocked(userId, screenData.module_id);
+      if (!gate.ok) return errorScreen(gate.message);
       return buildSuccessScreen('Opening module…', {
         trainingAction: 'open_module',
         moduleId: screenData.module_id,
@@ -344,10 +349,15 @@ async function buildLevelDetail(userId, levelOrder, opts = {}) {
       // data_exchange keeps the vendor scope. Falls back to '' for single-
       // vendor teachers whose level rows don't carry a resolved key.
       vendor_key:     String(lvl.vendor_key || ''),
+      // bd-2448 — the description carries the lock state. It is advisory: the
+      // published item schema has no `enabled` field, so the row stays
+      // tappable and checkModuleUnlocked does the actual refusing.
+      // "Passed" replaces the old "✓ Watched", which read as "you opened the
+      // video" when since bd-2390 it means the quick check was passed.
       module_list:    modules.map(m => ({
         id:          String(m.id),
         title:       m.title.length > 40 ? `${m.title.slice(0, 37)}…` : m.title,
-        description: `${m.course_title} · ${m.done ? '✓ Watched' : 'Not started'}`,
+        description: `${m.course_title} · ${moduleLockLabel(m)}`,
       })),
       grand_quiz_body:      grandQuiz.body,
       grand_quiz_caption:   grandQuiz.caption,
@@ -377,12 +387,85 @@ async function loadModulesWithProgress(userId, levelId) {
     if (ca !== cb) return ca - cb;
     return (a.order_index || 0) - (b.order_index || 0);
   });
-  return levelModules.map(m => ({
+  return annotateModuleLocks(levelModules.map(m => ({
     id: m.id,
     title: m.title,
     course_title: courseById.get(m.course_id).title,
     done: doneIds.has(m.id),
-  }));
+  })));
+}
+
+/**
+ * bd-2448 — mark each module in level order as passed / next / locked.
+ *
+ * The bot's delivery path has always been sequential (deliverNextModule takes
+ * the lowest order_index module without a progress row), but the Flow's module
+ * dropdown drove around it: every module was listed and `open_module` handed
+ * the id straight to deliverModuleById. A teacher could open the last module
+ * of the last course on day one.
+ *
+ * The rule — already-passed modules stay open for review, exactly one unpassed
+ * module ("next up") is open, everything after it is locked — lives HERE and
+ * nowhere else. Both the picker that renders the list and the gate that
+ * refuses the tap call this one function; two copies of "which module is next"
+ * is exactly how a label and its handler drift apart (bd-2446).
+ *
+ * @param {Array<{id:number,title:string,course_title:string,done:boolean}>} orderedModules
+ *        modules in level order (course order_index, then module order_index)
+ * @returns {Array<object>} the same rows, each with `lock`: 'passed'|'next'|'locked'
+ */
+function annotateModuleLocks(orderedModules) {
+  let nextTaken = false;
+  return orderedModules.map(m => {
+    if (m.done) return { ...m, lock: 'passed' };
+    if (!nextTaken) {
+      nextTaken = true;
+      return { ...m, lock: 'next' };
+    }
+    return { ...m, lock: 'locked' };
+  });
+}
+
+/**
+ * bd-2448 — may this teacher open this module right now?
+ *
+ * The gate, not the label. The published Flow's module_list item schema is
+ * {id, title, description} with no `enabled` field, and per
+ * .claude/skills/whatsapp-flows a published Flow's JSON cannot be edited in
+ * place — so a locked row is still tappable on the client and the server has
+ * to be the thing that says no.
+ *
+ * @returns {Promise<{ok: boolean, message?: string}>}
+ */
+async function checkModuleUnlocked(userId, moduleId) {
+  const moduleIdNum = parseInt(String(moduleId), 10);
+  if (!Number.isFinite(moduleIdNum)) return { ok: false, message: 'That module could not be found.' };
+
+  const { data: mod } = await supabase
+    .from('training_modules').select('id, course_id').eq('id', moduleIdNum).maybeSingle();
+  if (!mod?.course_id) {
+    logToFile('⚠️ open_module for an unknown module', { userId, moduleId });
+    return { ok: false, message: 'That module is not part of your training.' };
+  }
+  const { data: course } = await supabase
+    .from('training_courses').select('id, level_id').eq('id', mod.course_id).maybeSingle();
+  if (!course?.level_id) return { ok: false, message: 'That module is not part of your training.' };
+
+  const modules = await loadModulesWithProgress(userId, course.level_id);
+  const target = modules.find(m => m.id === moduleIdNum);
+  if (!target) return { ok: false, message: 'That module is not part of your training.' };
+  if (target.lock !== 'locked') return { ok: true };
+
+  const nextUp = modules.find(m => m.lock === 'next');
+  logToFile('🎓 Refused a locked module', {
+    userId, moduleId: moduleIdNum, nextUp: nextUp?.id || null,
+  });
+  return {
+    ok: false,
+    message: nextUp
+      ? `Finish "${nextUp.title}" first — modules open one at a time.`
+      : 'That module is locked until you finish the ones before it.',
+  };
 }
 
 // ─── Data loaders ──────────────────────────────────────────────────────────
@@ -760,6 +843,13 @@ function ctaForLevel(lv) {
   return 'Start';
 }
 
+// bd-2448 — the teacher-facing name for each lock state.
+function moduleLockLabel(m) {
+  if (m.lock === 'passed') return '✓ Passed';
+  if (m.lock === 'next') return '▶ Next up';
+  return '🔒 Locked';
+}
+
 function courseProgressLabel(c) {
   if (c.modules_total === 0) return 'no modules';
   if (c.modules_done === c.modules_total) return `${c.modules_done}/${c.modules_total} modules ✓`;
@@ -844,4 +934,9 @@ module.exports = {
   // certify the level" contract can be asserted directly.
   loadVisibleLevelsWithProgress,
   loadGrandQuizState,
+  // bd-2448 — the module sequencing rule. annotateModuleLocks is pure; export
+  // it so the "exactly one unpassed module is open" contract can be asserted
+  // without a DB fixture.
+  annotateModuleLocks,
+  checkModuleUnlocked,
 };
