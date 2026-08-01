@@ -5,10 +5,11 @@
  * bot/shared/services/coaching/report-renderers/renderer-registry.js.
  *
  * Default: ALL FIVE frameworks (OECD/HOTS/TEACH/FICO/MEWAKA) render via the
- * unified celebration ("hero") design. Unknown frameworks fall back to
- * PDFKit. The legacy htmlRenderer stays defined as a documented escape hatch
- * for cloners that want the older MEWAKA-PDF format; no framework currently
- * dispatches to it.
+ * unified celebration ("hero") design. FICO routes through a brand-injecting
+ * hero variant (`hero-niete`, bd-2452) — same hero pipeline, NIETE palette.
+ * Unknown frameworks fall back to PDFKit. The legacy htmlRenderer stays
+ * defined as a documented escape hatch for cloners that want the older
+ * MEWAKA-PDF format; no framework currently dispatches to it.
  *
  * These tests lock the seam in place: if someone reintroduces a hardcoded
  * framework equality check in pdf-report.service.js, the grep assertion
@@ -39,19 +40,24 @@ describe('Report Renderer Registry — getReportRenderer()', () => {
   });
 
   describe('Hero renderer is the default for ALL five frameworks', () => {
-    for (const framework of ['oecd', 'hots', 'teach', 'fico', 'mewaka']) {
+    for (const framework of ['oecd', 'hots', 'teach', 'mewaka']) {
       test(`"${framework}" maps to the hero renderer`, () => {
         const renderer = getReportRenderer(framework);
         expect(renderer.key).toBe('hero');
       });
     }
 
-    test('all five frameworks share ONE hero renderer instance', () => {
+    test('"fico" maps to the NIETE-branded hero renderer (bd-2452)', () => {
+      expect(getReportRenderer('fico').key).toBe('hero-niete');
+    });
+
+    test('oecd/hots/teach/mewaka share ONE hero renderer instance; fico is the brand variant', () => {
       const oecd = getReportRenderer('oecd');
       expect(getReportRenderer('hots')).toBe(oecd);
       expect(getReportRenderer('teach')).toBe(oecd);
-      expect(getReportRenderer('fico')).toBe(oecd);
       expect(getReportRenderer('mewaka')).toBe(oecd);
+      expect(getReportRenderer('fico')).not.toBe(oecd);
+      expect(typeof getReportRenderer('fico').render).toBe('function');
     });
   });
 
