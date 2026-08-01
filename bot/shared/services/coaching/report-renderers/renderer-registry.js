@@ -70,8 +70,19 @@ const heroRenderer = makeHeroRenderer();
  * NIETE brand (Green #47BA7D + Charcoal #32373C, bd-2452) instead of the
  * default palette. Branding is an opts-level concern: the renderer injects
  * `brand: 'niete'` and the hero template picks the matching palette.
+ *
+ * bd-2453: HERO_BRANDS is the single source of truth for framework → brand.
+ * `heroBrandFor()` is exported for callers that render the hero report
+ * DIRECTLY (the observe teacher-report path bypasses the registry), so the
+ * same session can never be branded on one surface and unbranded on another.
  */
-const ficoNieteHeroRenderer = makeHeroRenderer('niete');
+const HERO_BRANDS = { fico: 'niete' };
+
+function heroBrandFor(frameworkKey) {
+  return HERO_BRANDS[String(frameworkKey || '').toLowerCase()];
+}
+
+const ficoNieteHeroRenderer = makeHeroRenderer(HERO_BRANDS.fico);
 
 /**
  * Default renderer (fallback): the existing PDFKit layout. Wraps the PDFKit-only
@@ -123,4 +134,4 @@ function getReportRenderer(frameworkKey) {
   return renderer;
 }
 
-module.exports = { getReportRenderer };
+module.exports = { getReportRenderer, heroBrandFor };

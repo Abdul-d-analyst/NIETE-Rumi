@@ -38,7 +38,7 @@ async function promptIntent({ sessionId, from, language, captionAlreadyHasIntent
   }
 
   const body = isUrdu
-    ? '📚 یہ کتاب کا صفحہ لگ رہا ہے۔ آپ کیا کرنا چاہیں گی؟'
+    ? '📚 یہ کتاب کا صفحہ لگ رہا ہے۔ آگے کیا کرنا ہے؟'
     : '📚 Looks like a textbook page — what would you like to do with it?';
 
   await WhatsAppService.sendInteractiveButtons(from, {
@@ -144,7 +144,7 @@ async function sendPageReceivedPrompt({ sessionId, from, language, pageCount }) 
   const isUrdu = language === 'ur';
   await WhatsAppService.sendInteractiveButtons(from, {
     body: isUrdu
-      ? `📚 صفحہ ${pageCount} موصول۔ کیا آپ ایک اور صفحہ بھیجنا چاہیں گی؟`
+      ? `📚 صفحہ ${pageCount} موصول۔ کیا ایک اور صفحہ بھیجنا ہے؟`
       : `📚 Page ${pageCount} received. Would you like to send another page?`,
     buttons: [
       { id: `pic_more_${sessionId}`, title: isUrdu ? 'مزید صفحہ' : 'Add another page' },
