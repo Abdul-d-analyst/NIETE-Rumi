@@ -259,7 +259,13 @@ async function handleTextMessage(message, from, messageBody, user = null) {
   // ============================================================
   // FEATURE-BASED REGISTRATION: Check if waiting for name
   // ============================================================
-  if (user) {
+  // bd-2447: `/register` is exempt from the pending-name intercept below —
+  // otherwise the literal text "/register" gets swallowed as a name answer.
+  // It falls through to the /register command branch, which always opens the
+  // registration Flow.
+  const isRegisterCommand = (messageBody || '').trim().toLowerCase() === '/register';
+
+  if (user && !isRegisterCommand) {
     try {
       const isPendingName = await FeatureRegistrationService.isPendingName(user.id);
       if (isPendingName) {
@@ -1458,6 +1464,34 @@ async function handleTextMessage(message, from, messageBody, user = null) {
     if (user?.first_name) {
       await WhatsAppService.sendMessage(from, `✅ You're already registered, ${user.first_name}! What would you like to do next?`);
       return;
+    }
+
+    // bd-2447: conversational/deferred registration is DEPRECATED (matches the
+    // main Rumi bot). /register ALWAYS opens the registration Flow when one is
+    // configured — regardless of feature count, registration_pending_name, or
+    // any onboarding gate, and even when the users row doesn't exist yet.
+    // The legacy recovery/guide paths below only remain as fallbacks for
+    // deployments with no REGISTRATION_FLOW_ID (or a failed Flow send).
+    const REGISTRATION_FLOW_ID = process.env.REGISTRATION_FLOW_ID || '';
+    if (REGISTRATION_FLOW_ID) {
+      try {
+        await WhatsAppService.sendFlow(from, {
+          flowId: REGISTRATION_FLOW_ID,
+          flowToken: user?.id || from,
+          header: 'Welcome',
+          body: 'Quick setup — tell us a little about you.',
+          footer: 'Powered by NIETE',
+          buttonText: 'Get started',
+        });
+        logToFile('📝 Registration flow sent from /register command', { userId: user?.id, phoneNumber: from });
+        return;
+      } catch (error) {
+        logToFile('⚠️ Registration flow send failed from /register — falling back to legacy paths', {
+          userId: user?.id,
+          error: error.message,
+        });
+        // fall through to the legacy recovery/guide paths below
+      }
     }
 
     // Check if user has features but missed registration (recovery path)
