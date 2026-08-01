@@ -17,8 +17,8 @@ All colors MUST be HSL.
     --popover: 0 0% 100%;
     --popover-foreground: 220 13% 13%;
 
-    /* NIETE brand: primary = charcoal #32373c, accent = green #47ba7d (from infrastructure/branding/BRANDING.md) */
-    --primary: 214 9% 22%;
+    /* NIETE brand (wrt. book, bd-2457): primary = navy-slate #333748, accent = green #47ba7d */
+    --primary: 229 17% 24%;
     --primary-foreground: 0 0% 100%;
 
     --secondary: 220 10% 96%;
@@ -39,7 +39,7 @@ All colors MUST be HSL.
 
     --radius: 1rem;
 
-    --gradient-hero: linear-gradient(135deg, hsl(214 9% 22%) 0%, hsl(146 44% 51%) 100%);
+    --gradient-hero: linear-gradient(135deg, hsl(229 17% 24%) 0%, hsl(146 44% 51%) 100%);
     --gradient-subtle: linear-gradient(180deg, hsl(0 0% 100%) 0%, hsl(220 20% 98%) 100%);
     --shadow-soft: 0 4px 24px -4px hsl(220 13% 13% / 0.06);
     --shadow-medium: 0 12px 48px -8px hsl(220 13% 13% / 0.10);
@@ -97,7 +97,7 @@ All colors MUST be HSL.
     --input: 220 13% 18%;
     --ring: 146 44% 60%;
 
-    --gradient-hero: linear-gradient(135deg, hsl(214 9% 22%) 0%, hsl(146 44% 51%) 100%);
+    --gradient-hero: linear-gradient(135deg, hsl(229 17% 24%) 0%, hsl(146 44% 51%) 100%);
     --gradient-subtle: linear-gradient(180deg, hsl(220 13% 13%) 0%, hsl(220 13% 16%) 100%);
     --sidebar-background: 240 5.9% 10%;
     --sidebar-foreground: 240 4.8% 95.9%;
@@ -230,4 +230,12 @@ All colors MUST be HSL.
   [dir="rtl"] .grid > * {
     direction: rtl;
   }
+}
+
+/* bd-2457 — the official NIETE diamond-lattice texture (brand book pp9-11):
+   thin green line-only diamonds on the navy ground. Login/hero surfaces only —
+   never over photography, never filled (niete-brand skill, Pattern section). */
+.niete-lattice {
+  background-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='280' height='280'><g fill='none' stroke='%2347BA7D' stroke-opacity='0.16' stroke-width='1.3'><rect x='90' y='90' width='100' height='100' transform='rotate(45 140 140)'/><rect x='-30' y='-30' width='60' height='60' transform='rotate(45 0 0)'/><rect x='250' y='-30' width='60' height='60' transform='rotate(45 280 0)'/><rect x='-30' y='250' width='60' height='60' transform='rotate(45 0 280)'/><rect x='250' y='250' width='60' height='60' transform='rotate(45 280 280)'/><rect x='57' y='197' width='26' height='26' transform='rotate(45 70 210)'/><rect x='83' y='197' width='26' height='26' transform='rotate(45 96 210)'/><rect x='197' y='57' width='26' height='26' transform='rotate(45 210 70)'/></g></svg>");
+  background-size: 280px 280px;
 }
