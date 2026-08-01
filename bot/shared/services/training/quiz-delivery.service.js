@@ -7,10 +7,12 @@
  *                                        training_vendors.passing_pct (NIETE
  *                                        80%, Beacon House 70%), 24h cooldown
  *                                        on failure.
- *   2. Training-module quiz (kind='training_module') — per-Module,
- *                                        NON-BLOCKING (feedback-only, no
- *                                        cooldown), fired automatically after
- *                                        a teacher finishes a module.
+ *   2. Training-module quiz (kind='training_module') — per-Module, BLOCKING
+ *                                        since bd-2390: it GATES module
+ *                                        completion. Bar from
+ *                                        training_vendors.module_passing_pct
+ *                                        (NIETE 100%, BH/Oxbridge 70%). No
+ *                                        cooldown — retry is immediate.
  *
  * State lives entirely in DB:
  *   - training_assessment_attempts (id, user_id, quiz_kind, grand_quiz_id,
@@ -28,8 +30,10 @@
  *   startTrainingQuiz(userId, moduleId)
  *     → creates attempt (kind='training_module')
  *     → sends Q1 as an interactive list message
- *     → completion = friendly feedback only (no cert, no cooldown, next
- *       module already delivered in parallel by content-delivery.service)
+ *     → pass → gradeAttempt writes the progress row AND calls
+ *       content-delivery.deliverNextModule (the module is released here, not
+ *       on the button tap)
+ *     → fail → no progress row, no next module, immediate retry offered
  *
  * Shared:
  *   sendQuestion(attemptId)             — renders current Q, or grades if done
@@ -231,9 +235,9 @@ async function startGrandQuiz(userId, levelOrder, phoneNumber) {
 /**
  * Start a fresh training-module quiz attempt.
  *
- * Non-blocking: no enrollment/cooldown check (module completion is proof of
- * enrollment) and no gating of the next module. The caller (content-delivery
- * service) is free to send Q1 and continue with the next module in parallel.
+ * No cooldown check — a missed check can be retried immediately. But this
+ * quiz DOES gate the module (bd-2390): the caller must send Q1 and stop, and
+ * let gradeAttempt release the next module once the teacher passes.
  *
  * Returns:
  *   true  — quiz was started (Q1 sent) OR gracefully skipped because there
@@ -351,10 +355,17 @@ async function startTrainingQuiz(userId, moduleId, phoneNumber) {
   };
   logEvent('training_quiz_started', startedPayload);
 
+  // bd-2446 — this used to read "just a self-check — your progress isn't
+  // blocked either way", which was true before bd-2390 and false after it.
+  // The check IS the gate: the next module is released by gradeAttempt only
+  // on a pass. Quote the same bar gradeAttempt marks against, and say the
+  // one thing that takes the sting out of it — retries are immediate.
+  const introPct = await getVendorPassingPct(moduleIdNum, 'module');
   await WhatsAppService.sendMessage(
     phoneNumber,
-    `📝 *Quick check — "${mod.title}"*\n\n` +
-    `${totalQuestions} question${totalQuestions === 1 ? '' : 's'}. This is just a self-check — your progress isn't blocked either way.`
+    `📝 *Module check — "${mod.title}"*\n\n` +
+    `${totalQuestions} question${totalQuestions === 1 ? '' : 's'}. ` +
+    `You need *${introPct}%* to unlock the next module — if you miss it you can retry straight away.`
   );
 
   return await sendQuestion(attempt.id, phoneNumber);
@@ -435,7 +446,10 @@ async function sendQuestion(attemptId, phoneNumber) {
   // marking policy for any vendor's level exam (NIETE 80, BH 70).
   let footer;
   if (attempt.quiz_kind === KIND_TRAINING_MODULE) {
-    footer = 'Self-check · tap an option';
+    // bd-2446 — "Self-check" undersold a gate. Quote the module bar, the way
+    // the exam branch below quotes the exam bar.
+    const modulePct = await getVendorPassingPct(attempt.training_module_id, 'module');
+    footer = `${modulePct}% required · tap an option`;
   } else {
     const footerPct = await getVendorPassingPctByLevel(attempt.level_id, 'exam');
     footer = `${footerPct}% required to pass · tap an option`;
@@ -644,9 +658,10 @@ async function getVendorPassingPctByLevel(levelId, kind = 'exam') {
 /**
  * Grade a completed attempt. Branches on quiz_kind:
  *   - grand              → pass/fail, cert or cooldown message
- *   - training_module    → feedback-only ("You got X/Y"), no cooldown,
- *                          no cert, next module is already scheduled
- *                          in parallel by content-delivery.service.
+ *   - training_module    → pass/fail against module_passing_pct. A pass
+ *                          writes the progress row and delivers the next
+ *                          module; a fail holds the teacher here with an
+ *                          immediate retry. No cooldown either way.
  */
 async function gradeAttempt(attemptId, phoneNumber) {
   const { data: attempt } = await supabase
@@ -701,12 +716,12 @@ async function gradeAttempt(attemptId, phoneNumber) {
       const pctRounded = Math.round(pct);
       await WhatsAppService.sendMessage(
         phoneNumber,
-        `📝 *Quick check — not quite.*\n\n` +
+        `📝 *Module check — not quite.*\n\n` +
         `You got *${score}/${total}* (${pctRounded}%). You need ${passingPct}% to move on.\n\n` +
         `Give it another go — you can retry right away.`
       );
       await WhatsAppService.sendInteractiveButtons(phoneNumber, {
-        body: 'Ready to try the quick check again?',
+        body: 'Ready to try the module check again?',
         buttons: [
           { id: `training_quiz_retry_${attempt.training_module_id}`, title: '🔄 Try again' },
           { id: 'training_pause', title: '⏸ Pause' },
@@ -741,7 +756,12 @@ async function gradeAttempt(attemptId, phoneNumber) {
     const line = score === total
       ? `Nice — *${score}/${total}* correct. Perfect score! ✨`
       : `You got *${score}/${total}* (${pctRounded}%) — that clears the ${passingPct}% bar.`;
-    await WhatsAppService.sendMessage(phoneNumber, `📝 *Quick check — passed.*\n\n${line}`);
+    // bd-2446 — say the module is unlocked, since that is what the teacher was
+    // promised when they tapped "📝 Take quiz".
+    await WhatsAppService.sendMessage(
+      phoneNumber,
+      `📝 *Module check — passed.*\n\n${line}\n\nLoading the next module…`
+    );
 
     // bd-2234 — Oxbridge-style levels certify on quiz scores (all modules
     // complete, best score >= 70% each). Cheap early-outs inside; capstone
