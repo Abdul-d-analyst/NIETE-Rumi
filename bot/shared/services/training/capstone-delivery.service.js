@@ -154,87 +154,115 @@ async function maybeOfferCapstone(userId, moduleId, phoneNumber) {
 // ─── 2. start ───────────────────────────────────────────────────────────────
 
 async function handleCapstoneButton(userId, buttonId, phoneNumber) {
-  const m = new RegExp(`^${BUTTON_PREFIX}(\\d+)$`).exec(buttonId || '');
-  if (!m) return false;
-  const levelId = parseInt(m[1], 10);
+  try {
+    // bd-2476 — this function had FOUR paths that returned false without a word
+    // to the teacher and, in two cases, without a log line either. A tester
+    // tapped "Start Grand Quiz", saw a typing indicator, and got nothing back;
+    // by the time we looked, Railway had already rolled the logs (~3 minutes of
+    // retention on this service) and there was no evidence left to read.
+    // Every exit now logs, and anything unexpected also tells the teacher.
+    logToFile('🎓 Capstone button tapped', { userId, buttonId, phoneNumber });
 
-  const quiz = await loadCapstoneQuiz(levelId);
-  if (!quiz) {
-    logToFile('⚠️ Capstone start for level without capstone', { userId, levelId });
-    return false;
-  }
-  const questions = await loadCapstoneQuestions(quiz.id);
-  if (questions.length === 0) return false;
+    const m = new RegExp(`^${BUTTON_PREFIX}(\\d+)$`).exec(buttonId || '');
+    if (!m) {
+      logToFile('⚠️ Capstone button id did not match the expected shape', { userId, buttonId, expected: `${BUTTON_PREFIX}<levelId>` });
+      return false;
+    }
+    const levelId = parseInt(m[1], 10);
 
-  // bd-2454 — re-check the SAME preconditions maybeOfferCapstone checks before
-  // offering. WhatsApp interactive buttons live in chat history forever, so a
-  // button offered months ago (or offered legitimately and then tapped after
-  // the teacher's progress changed) would otherwise start a capstone with the
-  // level unfinished, or a second one on a level already passed. The offer
-  // being gated is not the same as the start being gated.
-  const { data: alreadyPassed } = await supabase
-    .from('training_assessment_attempts')
-    .select('id')
-    .eq('user_id', userId)
-    .eq('level_id', levelId)
-    .eq('quiz_kind', KIND_CAPSTONE)
-    .eq('is_passed', true)
-    .maybeSingle();
-  if (alreadyPassed) {
-    logToFile('🎓 Capstone start refused — already passed', { userId, levelId });
-    await WhatsAppService.sendMessage(
-      phoneNumber,
-      'You have already passed this level\'s Grand Quiz — your certificate is in your records.'
-    );
+    const quiz = await loadCapstoneQuiz(levelId);
+    if (!quiz) {
+      logToFile('⚠️ Capstone start for level without capstone', { userId, levelId });
+      await WhatsAppService.sendMessage(phoneNumber, 'This level has no written exam set up yet. Please contact NIETE support.');
+      return true;
+    }
+    const questions = await loadCapstoneQuestions(quiz.id);
+    logToFile('🎓 Capstone resolved', { userId, levelId, quizId: quiz.id, questions: questions.length });
+    if (questions.length === 0) {
+      logToFile('⚠️ Capstone has no active questions', { userId, levelId, quizId: quiz.id });
+      await WhatsAppService.sendMessage(phoneNumber, 'This exam has no questions set up yet. Please contact NIETE support.');
+      return true;
+    }
+
+    // bd-2454 — re-check the SAME preconditions maybeOfferCapstone checks before
+    // offering. WhatsApp interactive buttons live in chat history forever, so a
+    // button offered months ago (or offered legitimately and then tapped after
+    // the teacher's progress changed) would otherwise start a capstone with the
+    // level unfinished, or a second one on a level already passed. The offer
+    // being gated is not the same as the start being gated.
+    const { data: alreadyPassed } = await supabase
+      .from('training_assessment_attempts')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('level_id', levelId)
+      .eq('quiz_kind', KIND_CAPSTONE)
+      .eq('is_passed', true)
+      .maybeSingle();
+    if (alreadyPassed) {
+      logToFile('🎓 Capstone start refused — already passed', { userId, levelId });
+      await WhatsAppService.sendMessage(
+        phoneNumber,
+        'You have already passed this level\'s Grand Quiz — your certificate is in your records.'
+      );
+      return true;
+    }
+    if (!(await levelFullyComplete(userId, levelId))) {
+      logToFile('🎓 Capstone start refused — level incomplete', { userId, levelId });
+      await WhatsAppService.sendMessage(
+        phoneNumber,
+        'Finish every module in this level first — the Grand Quiz unlocks once the level is complete.'
+      );
+      return true;
+    }
+
+    const { data: assignment } = await supabase
+      .from('teacher_training_assignments')
+      .select('program_id')
+      .eq('user_id', userId)
+      .eq('is_active', true)
+      .limit(1)
+      .maybeSingle();
+    if (!assignment) {
+      await WhatsAppService.sendMessage(phoneNumber, 'No training assignment found — please contact NIETE support.');
+      return true;
+    }
+
+    const now = new Date().toISOString();
+    const { data: attempt, error } = await supabase
+      .from('training_assessment_attempts')
+      .insert({
+        user_id: userId,
+        program_id: assignment.program_id,
+        quiz_kind: KIND_CAPSTONE,
+        grand_quiz_id: quiz.id,
+        level_id: levelId,
+        current_question_index: 0,
+        total_questions: questions.length,
+        total_score: questions.length * POINTS_PER_QUESTION,
+        status: 'in_progress',
+        started_at: now,
+        last_activity_at: now,
+      })
+      .select('id')
+      .single();
+    if (error || !attempt) {
+      logToFile('❌ Capstone attempt insert failed', { userId, levelId, error: error?.message });
+      return true;
+    }
+
+    logToFile('🎓 Capstone attempt created — sending Q1', { userId, levelId, attemptId: attempt.id, total: questions.length });
+    logEvent('training_capstone_started', { user_uuid: userId, level_row_id: levelId, attempt_uuid: attempt.id });
+    await WhatsAppService.sendMessage(phoneNumber, questionMessage(0, questions.length, questions[0].question_text));
+    return true;
+  } catch (error) {
+    // Never let this present as silence again. The teacher tapped a button;
+    // they get an answer either way, and we get a stack in the logs.
+    logToFile('❌ handleCapstoneButton threw', { userId, buttonId, error: error?.message, stack: String(error?.stack || '').slice(0, 500) });
+    try {
+      await WhatsAppService.sendMessage(phoneNumber, 'Something went wrong starting your exam. Please try again in a moment.');
+    } catch (_) { /* the send itself failed — the log above is what matters */ }
     return true;
   }
-  if (!(await levelFullyComplete(userId, levelId))) {
-    logToFile('🎓 Capstone start refused — level incomplete', { userId, levelId });
-    await WhatsAppService.sendMessage(
-      phoneNumber,
-      'Finish every module in this level first — the Grand Quiz unlocks once the level is complete.'
-    );
-    return true;
-  }
-
-  const { data: assignment } = await supabase
-    .from('teacher_training_assignments')
-    .select('program_id')
-    .eq('user_id', userId)
-    .eq('is_active', true)
-    .limit(1)
-    .maybeSingle();
-  if (!assignment) {
-    await WhatsAppService.sendMessage(phoneNumber, 'No training assignment found — please contact NIETE support.');
-    return true;
-  }
-
-  const now = new Date().toISOString();
-  const { data: attempt, error } = await supabase
-    .from('training_assessment_attempts')
-    .insert({
-      user_id: userId,
-      program_id: assignment.program_id,
-      quiz_kind: KIND_CAPSTONE,
-      grand_quiz_id: quiz.id,
-      level_id: levelId,
-      current_question_index: 0,
-      total_questions: questions.length,
-      total_score: questions.length * POINTS_PER_QUESTION,
-      status: 'in_progress',
-      started_at: now,
-      last_activity_at: now,
-    })
-    .select('id')
-    .single();
-  if (error || !attempt) {
-    logToFile('❌ Capstone attempt insert failed', { userId, levelId, error: error?.message });
-    return true;
-  }
-
-  logEvent('training_capstone_started', { user_uuid: userId, level_row_id: levelId, attempt_uuid: attempt.id });
-  await WhatsAppService.sendMessage(phoneNumber, questionMessage(0, questions.length, questions[0].question_text));
-  return true;
 }
 
 // ─── 3. answers ─────────────────────────────────────────────────────────────

@@ -126,18 +126,34 @@ async function startGrandQuiz(userId, levelOrder, phoneNumber) {
     userId, levelOrder, levelId: level.id, name: level.name, vendor: level.vendor_key,
   });
 
-  // 2. Grand quiz for the level
+  // 2. The level's exam. bd-2476 — this used to filter quiz_type='grand_quiz'
+  // only, so a Beacon House level (whose exam is a 'capstone') hit
+  // "No grand quiz configured for this level yet" even though capstones 29-32
+  // are active. bd-2474 widened the DISPLAY lookups but not this one, so the
+  // Flow correctly offered an exam and then refused to start it — confirmed in
+  // production: "❌ Grand quiz lookup failed levelId=18".
+  //
+  // One entry point, two engines: resolve by level, then route on type. The
+  // capstone starter owns its own preconditions (bd-2454), so we delegate
+  // rather than reimplementing them here.
   const { data: quiz, error: qErr } = await supabase
     .from('training_grand_quizzes')
-    .select('id, level_id')
+    .select('id, level_id, quiz_type')
     .eq('level_id', level.id)
-    .eq('quiz_type', 'grand_quiz')
+    .in('quiz_type', ['grand_quiz', 'capstone'])
     .eq('is_active', true)
     .maybeSingle();
   if (qErr || !quiz) {
-    logToFile('❌ Grand quiz lookup failed', { levelId: level.id, error: qErr?.message });
-    await WhatsAppService.sendMessage(phoneNumber, 'No grand quiz configured for this level yet. Please contact NIETE support.');
+    logToFile('❌ Level exam lookup failed', { levelId: level.id, error: qErr?.message });
+    await WhatsAppService.sendMessage(phoneNumber, 'No exam is configured for this level yet. Please contact NIETE support.');
     return false;
+  }
+  if (quiz.quiz_type === 'capstone') {
+    logToFile('🎓 Level exam is a capstone — delegating to the capstone starter', {
+      userId, levelId: level.id, quizId: quiz.id,
+    });
+    const CapstoneDelivery = require('./capstone-delivery.service');
+    return CapstoneDelivery.handleCapstoneButton(userId, `capstone_start_${level.id}`, phoneNumber);
   }
 
   // 3. Program from assignment (needed for attempt row)

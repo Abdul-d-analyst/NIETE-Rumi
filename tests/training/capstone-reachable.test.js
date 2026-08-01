@@ -321,3 +321,27 @@ describe('bd-2474 — a Beacon House level has an exam', () => {
     expect(JSON.stringify(gate)).toMatch(/no level exam/i);
   });
 });
+
+describe('bd-2476 — /training Start exam reaches a capstone', () => {
+  test('the reported bug: a capstone level no longer answers "No grand quiz configured"', async () => {
+    // Confirmed in production: "❌ Grand quiz lookup failed levelId=18".
+    // bd-2474 widened the display lookups; startGrandQuiz's own was missed, so
+    // the Flow offered an exam it then refused to start.
+    seedLevel({ quizType: 'capstone', done: [101, 102, 201, 202] });
+    const Capstone = require('../../bot/shared/services/training/capstone-delivery.service');
+    Capstone.handleCapstoneButton = jest.fn().mockResolvedValue(true);
+
+    await QuizDelivery.startGrandQuiz(UID, 2, PHONE);   // level 18 is order_index 1
+
+    expect(said()).not.toMatch(/No grand quiz configured/i);
+  });
+
+  test('it delegates to the capstone starter rather than reimplementing it', async () => {
+    seedLevel({ quizType: 'capstone', done: [101, 102, 201, 202] });
+    const Capstone = require('../../bot/shared/services/training/capstone-delivery.service');
+
+    await QuizDelivery.startGrandQuiz(UID, 2, PHONE);
+
+    expect(Capstone.handleCapstoneButton).toHaveBeenCalledWith(UID, 'capstone_start_18', PHONE);
+  });
+});
