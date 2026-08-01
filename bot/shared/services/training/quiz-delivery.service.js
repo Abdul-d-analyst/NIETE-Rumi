@@ -740,7 +740,7 @@ async function gradeAttempt(attemptId, phoneNumber) {
     // markModuleComplete comes from progress.service (not content-delivery) to
     // keep this file off the content-delivery ↔ quiz-delivery cycle.
     const { markModuleComplete } = require('./progress.service');
-    const { deliverNextModule } = require('./content-delivery.service');
+    const { onModuleCompleted } = require('./content-delivery.service');
     await markModuleComplete(attempt.user_id, attempt.training_module_id);
 
     const pctRounded = Math.round(pct);
@@ -774,19 +774,12 @@ async function gradeAttempt(attemptId, phoneNumber) {
     }
 
     // bd-2390 — the next module is released here, not on the button tap.
-    // Resolve the course from the module we just passed.
-    const { data: passedMod } = await supabase
-      .from('training_modules')
-      .select('course_id')
-      .eq('id', attempt.training_module_id)
-      .maybeSingle();
-    if (passedMod?.course_id) {
-      await deliverNextModule(attempt.user_id, passedMod.course_id, phoneNumber);
-    } else {
-      logToFile('⚠️ Passed module has no course_id — cannot advance', {
-        moduleId: attempt.training_module_id,
-      });
-    }
+    // bd-2472/2473 — via the SHARED post-completion step, not a course-scoped
+    // deliverNextModule. Two things were wrong with going direct: the capstone
+    // offer only existed on the other completion branch (so Beacon House was
+    // never offered an exam, ever), and course-scoped advancement re-sent
+    // module 1 of a finished course instead of moving on.
+    await onModuleCompleted(attempt.user_id, attempt.training_module_id, phoneNumber);
     return true;
   }
 

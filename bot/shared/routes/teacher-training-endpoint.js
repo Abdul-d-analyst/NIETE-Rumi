@@ -31,6 +31,14 @@ const { logToFile } = require('../utils/logger');
 const supabase = require('../config/supabase');
 
 const SUPABASE_URL = process.env.SUPABASE_URL || '';
+
+// bd-2474 — the two shapes a LEVEL EXAM takes. Chain vendors (NIETE) sit an
+// MCQ 'grand_quiz'; all_modules vendors (Beacon House) sit a written,
+// LLM-scored 'capstone'. Both certify a level, so both must be recognised
+// wherever "does this level have an exam / did they pass it" is asked.
+// 'diagnostic' rows live in the same table and are NOT an exam.
+const EXAM_QUIZ_TYPES = ['grand_quiz', 'capstone'];
+const EXAM_QUIZ_KINDS = ['grand', 'capstone'];
 const BADGES_BUCKET = 'training-assets';
 
 function badgeUrl(name) {
@@ -517,7 +525,9 @@ async function loadTeacher(userId) {
  */
 function isGrandPass(a) {
   if (!a || a.is_passed !== true) return false;
-  return (a.quiz_kind || 'grand') === 'grand';
+  // bd-2474 — a capstone IS the level exam for all_modules vendors. Rows with
+  // no quiz_kind predate the column, when the table held level exams only.
+  return EXAM_QUIZ_KINDS.includes(a.quiz_kind || 'grand');
 }
 
 async function loadVisibleLevelsWithProgress(userId) {
@@ -579,7 +589,7 @@ async function loadVisibleLevelsWithProgress(userId) {
     // read makes one 9-question module quiz certify the whole level (hiding the
     // real exam behind a "Review" CTA and chain-unlocking the next level).
     supabase.from('training_assessment_attempts').select('level_id, status, is_passed, cooldown_until, completed_at').eq('user_id', userId).eq('quiz_kind', 'grand').in('level_id', levelIds),
-    supabase.from('training_grand_quizzes').select('id, level_id, quiz_type').in('level_id', levelIds).eq('quiz_type', 'grand_quiz'),
+    supabase.from('training_grand_quizzes').select('id, level_id, quiz_type').in('level_id', levelIds).in('quiz_type', EXAM_QUIZ_TYPES).eq('is_active', true),
   ]);
 
   // bd-2447 — a course is complete when EVERY active module under it is done.
@@ -767,11 +777,16 @@ async function loadCoursesWithProgress(userId, levelId) {
 
 async function loadGrandQuizState(userId, levelId) {
   const [{ data: catalog }, { data: attempts }, { data: courses }, { data: modules }, { data: progressRows }] = await Promise.all([
-    supabase.from('training_grand_quizzes').select('id, quiz_type').eq('level_id', levelId).eq('quiz_type', 'grand_quiz').eq('is_active', true).maybeSingle(),
-    // bd-2391 — GRAND attempts only (see isGrandPass). Without this a passed
-    // module quiz rendered "🏆 You passed this level exam" on LEVEL_DETAIL and
-    // replaced the "Take exam" CTA with "✓ Passed".
-    supabase.from('training_assessment_attempts').select('status, is_passed, cooldown_until, quiz_kind').eq('user_id', userId).eq('quiz_kind', 'grand').eq('level_id', levelId),
+    // bd-2474 — resolve the level's exam by LEVEL, not by type. Beacon House
+    // levels carry quiz_type='capstone'; filtering to 'grand_quiz' meant every
+    // BH level reported "No level exam" even though capstones 29-32 are active.
+    // 'diagnostic' rows are NOT an exam and stay excluded.
+    supabase.from('training_grand_quizzes').select('id, quiz_type').eq('level_id', levelId).in('quiz_type', EXAM_QUIZ_TYPES).eq('is_active', true).maybeSingle(),
+    // bd-2391 — EXAM attempts only (see isGrandPass). Without this a passed
+    // module quick check rendered "🏆 You passed this level exam" and replaced
+    // the CTA with "✓ Passed". bd-2474 widens 'grand' to both exam kinds so a
+    // passed capstone is recognised the same way.
+    supabase.from('training_assessment_attempts').select('status, is_passed, cooldown_until, quiz_kind').eq('user_id', userId).in('quiz_kind', EXAM_QUIZ_KINDS).eq('level_id', levelId),
     supabase.from('training_courses').select('id').eq('level_id', levelId).eq('is_active', true),
     supabase.from('training_modules').select('id, course_id').eq('is_active', true),
     supabase.from('teacher_training_progress').select('module_id').eq('user_id', userId),
