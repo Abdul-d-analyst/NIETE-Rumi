@@ -42,13 +42,14 @@ const { logToFile } = require('../../../utils/logger');
  * `reportData._heroInput` (the side-channel used by report-generator so the
  * PDFKit / HTML renderers can keep their reportData contract unchanged).
  */
-const heroRenderer = {
-  key: 'hero',
+const makeHeroRenderer = (brand) => ({
+  key: brand ? `hero-${brand}` : 'hero',
   async render(input) {
     const { generateHeroReport } = require('../report-v2/hero-report.service');
     const hero = (input && input._heroInput) || input;
+    const opts = brand ? { ...(hero.opts || {}), brand } : (hero.opts || {});
     try {
-      return await generateHeroReport(hero.session, hero.analysis, hero.opts || {});
+      return await generateHeroReport(hero.session, hero.analysis, opts);
     } catch (err) {
       logToFile('[renderer-registry] hero render failed → PDFKit fallback', {
         framework: hero.analysis && hero.analysis.framework,
@@ -60,7 +61,17 @@ const heroRenderer = {
       return pdfkitRenderer.render(input);
     }
   },
-};
+});
+
+const heroRenderer = makeHeroRenderer();
+
+/**
+ * FICO = the NIETE/ICT deployment's framework, so its hero report carries the
+ * NIETE brand (Green #47BA7D + Charcoal #32373C, bd-2452) instead of the
+ * default palette. Branding is an opts-level concern: the renderer injects
+ * `brand: 'niete'` and the hero template picks the matching palette.
+ */
+const ficoNieteHeroRenderer = makeHeroRenderer('niete');
 
 /**
  * Default renderer (fallback): the existing PDFKit layout. Wraps the PDFKit-only
@@ -92,7 +103,7 @@ const renderers = {
   oecd:   heroRenderer,
   hots:   heroRenderer,
   teach:  heroRenderer,
-  fico:   heroRenderer,
+  fico:   ficoNieteHeroRenderer,
   mewaka: heroRenderer,
 };
 

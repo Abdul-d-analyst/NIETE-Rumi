@@ -19,11 +19,13 @@ const { logToFile } = require('../../../utils/logger');
 /**
  * @param {object} session - coaching_sessions row (transcript_text, user_id, created_at, classroom_photos)
  * @param {object} analysis - enhancedAnalysis (framework, scores, domains, reflective_corpus, …)
- * @param {object} opts - { teacherName, commitmentAction, language }
+ * @param {object} opts - { teacherName, commitmentAction, language, brand }
+ *   `brand` selects the template palette ('niete' for the FICO/NIETE path,
+ *   injected by renderer-registry; omitted = default palette). bd-2452.
  * @returns {Promise<{png:Buffer, caption:string}>}
  */
 async function generateHeroReport(session, analysis, opts = {}) {
-  const { teacherName = 'Teacher', commitmentAction = '', language } = opts;
+  const { teacherName = 'Teacher', commitmentAction = '', language, brand } = opts;
   const lang = language || analysis.language || session.transcript_language || 'en';
   const framework = (analysis.framework || 'oecd').toLowerCase();
 
@@ -52,6 +54,7 @@ async function generateHeroReport(session, analysis, opts = {}) {
 
   const vm = {
     language: lang,
+    brand,
     teacherName,
     topic: (narrative && narrative.topic) || analysis.topic || '',
     date: String(session.created_at || '').slice(0, 10),
