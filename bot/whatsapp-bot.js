@@ -43,6 +43,11 @@ app.use(express.json());
 app.use('/api/flows', flowEndpointRoutes);
 // Async result callbacks from external services (UG_EG assessment generator, …)
 app.use('/webhooks', assessmentGenCallbackRoutes);
+// bd-2461 — service-to-service API (portal → bot). Shared-secret auth lives
+// inside the router. Mounted before the inline /api/internal/send-password-reset
+// route below; Express falls through when no route in the router matches.
+const internalApiRoutes = require('./shared/routes/internal-api.routes');
+app.use('/api/internal', internalApiRoutes);
 
 // Create temp directory if it doesn't exist
 if (!fs.existsSync(constants.TEMP_DIR)) {

@@ -31,6 +31,7 @@ const router = express.Router();
 const supabase = require('../config/supabase');
 const { S3Client, GetObjectCommand } = require('@aws-sdk/client-s3');
 const { generatePresignedUrl, generatePresignedUrls, isValidR2Url } = require('../services/r2.service');
+const axios = require('axios');
 const { fetchAllPaged } = require('../lib/fetch-all-paged');
 // bd-2460 — Assessment Generator availability. Fail-closed, shared with the
 // bot via one app_settings row (see dashboard/lib/feature-flags.js).
@@ -1410,44 +1411,61 @@ router.post('/curriculum/lp/:source_lp_uuid/render', requirePortalAuth, async (r
     const langKey = lang === 'ur' ? lp.pdf_r2_key_ur : lp.pdf_r2_key_en;
     if (langKey) return res.json({ success: true, alreadyAvailable: true, language: lang });
 
-    // Queue via the same service the bot uses. This is the sole coupling
-    // between portal and bot code — everything else in this endpoint is
-    // portal-owned. If the queue service isn't reachable from the dashboard
-    // process (different Railway service), we fall back to a direct
-    // Supabase insert + SQS queue call so the worker still picks it up.
-    let LessonPlanQueueService;
-    try {
-      LessonPlanQueueService = require('../../bot/shared/services/lesson-plan-queue.service');
-    } catch (_) { /* not co-located; use inline path below */ }
-
-    if (LessonPlanQueueService) {
-      const requestId = await LessonPlanQueueService.createAndQueueGrounded({
-        userId: userDbId,
-        phoneNumber: user.phone_number,
-        sourceLpUuid: lp.source_lp_uuid,
-        topic: lp.topic,
-        chapterTitle: lp.chapter_title,
-        language: lang,
+    // bd-2461 — enqueue via the bot's internal API, not by requiring bot code.
+    //
+    // This used to `require('../../bot/shared/services/lesson-plan-queue.service')`
+    // inside a bare catch. That require THROWS in this process: the queue driver
+    // does `require('aws-sdk')` (v2, a bot/ dependency) and the dashboard carries
+    // only the v3 @aws-sdk/* packages. The throw was swallowed, we wrote a
+    // `pending` row nothing consumes, and still answered `queued: true`. The UI
+    // turned that into "Ready in about 2 minutes." 21 orphan rows in two days.
+    //
+    // Same pattern as password-reset: MAIN_BOT_URL + INTERNAL_API_KEY are already
+    // provisioned on this service and the keys match the bot's.
+    const MAIN_BOT_URL = process.env.MAIN_BOT_URL || '';
+    const INTERNAL_API_KEY = process.env.INTERNAL_API_KEY || '';
+    if (!MAIN_BOT_URL || !INTERNAL_API_KEY) {
+      console.error('curriculum/lp/:uuid/render: MAIN_BOT_URL or INTERNAL_API_KEY not configured');
+      return res.status(503).json({
+        success: false,
+        error: 'Lesson plan rendering is temporarily unavailable. Please try again later.',
       });
-      return res.status(202).json({ success: true, queued: true, requestId, language: lang });
     }
 
-    // Fallback: create the tracking row + rely on the worker's periodic
-    // stale-pending scan to pick it up (bot service normally handles this).
-    const { data: request, error: insertError } = await supabase
-      .from('lesson_plan_requests')
-      .insert({
-        user_id: userDbId,
-        phone_number: user.phone_number,
-        topic: lp.topic,
-        full_message: lp.topic,
-        language: lang,
-        content_type: 'lesson_plan',
-        status: 'pending',
-      })
-      .select('id').single();
-    if (insertError) throw insertError;
-    return res.status(202).json({ success: true, queued: true, requestId: request.id, language: lang, fallback: true });
+    let botResponse;
+    try {
+      botResponse = await axios.post(
+        `${MAIN_BOT_URL}/api/internal/queue-lesson-plan`,
+        {
+          userId: userDbId,
+          phoneNumber: user.phone_number,
+          sourceLpUuid: lp.source_lp_uuid,
+          topic: lp.topic,
+          chapterTitle: lp.chapter_title,
+          language: lang,
+        },
+        { headers: { 'Content-Type': 'application/json', 'x-api-key': INTERNAL_API_KEY }, timeout: 10000 },
+      );
+    } catch (err) {
+      // Report the failure. Do NOT write a tracking row — an orphan `pending`
+      // row that nothing will ever consume is what made this invisible before.
+      console.error('curriculum/lp/:uuid/render: bot enqueue failed:', err?.message);
+      return res.status(502).json({
+        success: false,
+        error: 'Could not start this lesson plan. Please try again in a moment.',
+      });
+    }
+
+    const requestId = botResponse?.data?.requestId;
+    if (!botResponse?.data?.success || !requestId) {
+      console.error('curriculum/lp/:uuid/render: bot returned no requestId', { data: botResponse?.data });
+      return res.status(502).json({
+        success: false,
+        error: 'Could not start this lesson plan. Please try again in a moment.',
+      });
+    }
+
+    return res.status(202).json({ success: true, queued: true, requestId, language: lang });
   } catch (error) {
     console.error('curriculum/lp/:uuid/render error:', error);
     res.status(500).json({ success: false, error: 'Failed to queue render' });
