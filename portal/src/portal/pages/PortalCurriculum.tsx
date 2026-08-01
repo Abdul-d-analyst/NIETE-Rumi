@@ -28,8 +28,9 @@ import {
 } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
-import api from '../services/api';
+import api, { portal } from '../services/api';
 import AssessmentGeneratorPanel from '../components/AssessmentGeneratorPanel';
+import AssessmentGeneratorComingSoon from '../components/AssessmentGeneratorComingSoon';
 
 type Grade = { grade: number; label: string; count: number };
 type Subject = { subject: string; label: string; count: number };
@@ -48,6 +49,9 @@ type LessonPlan = {
 const PortalCurriculum = () => {
   const { toast } = useToast();
 
+  // bd-2460 — null while loading, so the tab never flashes a form that is off.
+  const [assessmentEnabled, setAssessmentEnabled] = useState<boolean | null>(null);
+  const [assessmentMessage, setAssessmentMessage] = useState<string | null>(null);
   const [grades, setGrades] = useState<Grade[]>([]);
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [chapters, setChapters] = useState<Chapter[]>([]);
@@ -69,6 +73,16 @@ const PortalCurriculum = () => {
   const [rendering, setRendering] = useState(false);
 
   // ─── Fetch grades on mount ────────────────────────────────────────────
+  useEffect(() => {
+    let cancelled = false;
+    portal.getConfig().then((cfg) => {
+      if (cancelled) return;
+      setAssessmentEnabled(!!cfg?.features?.assessmentGenerator);
+      setAssessmentMessage(cfg?.features?.assessmentGeneratorMessage ?? null);
+    });
+    return () => { cancelled = true; };
+  }, []);
+
   useEffect(() => {
     (async () => {
       try {
@@ -354,7 +368,14 @@ const PortalCurriculum = () => {
           </TabsContent>
 
           <TabsContent value="assessment">
-            <AssessmentGeneratorPanel />
+            {/* bd-2460 — the tab stays visible on purpose: a teacher who has heard
+                about the feature and cannot find it just asks support. The
+                message matches what the bot says, and the API refuses too. */}
+            {assessmentEnabled === null
+              ? null
+              : assessmentEnabled
+                ? <AssessmentGeneratorPanel />
+                : <AssessmentGeneratorComingSoon message={assessmentMessage} />}
           </TabsContent>
         </Tabs>
       </div>

@@ -162,6 +162,25 @@ export const portal = {
     return response.data;
   },
 
+  // bd-2460 — what this deployment currently offers. Fail-closed on the server,
+  // and fail-closed here too: if the call fails we assume the feature is off
+  // rather than rendering a form that would 503 on submit.
+  getConfig: async (): Promise<PortalConfig> => {
+    try {
+      const response = await api.get('/config');
+      return response.data;
+    } catch {
+      return {
+        success: true,
+        features: {
+          assessmentGenerator: false,
+          assessmentGeneratorMessage:
+            "The assessment generator is being prepared for you. We'll notify you when it's live.",
+        },
+      };
+    }
+  },
+
   // Assessment Generator (browser surface for the UG_EG-backed engine).
   // generate → { jobId }; then poll getAssessmentStatus until completed/failed.
   generateAssessment: async (
@@ -178,6 +197,15 @@ export const portal = {
     const response = await api.get(`/assessment/status/${jobId}`, { params: { format } });
     return response.data;
   },
+};
+
+// ── Portal config ─────────────────────────────────────────────────────────
+export type PortalConfig = {
+  success: boolean;
+  features: {
+    assessmentGenerator: boolean;
+    assessmentGeneratorMessage: string | null;
+  };
 };
 
 // ── Assessment Generator types ────────────────────────────────────────────
