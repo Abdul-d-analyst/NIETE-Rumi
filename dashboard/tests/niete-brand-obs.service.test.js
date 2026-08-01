@@ -47,6 +47,12 @@ describe('NIETE brand — observability dashboard (bd-2458)', () => {
     expect(read('views/login.ejs')).toContain('NIETE Observability Portal');
   });
 
+  test('the login page carries the official diamond-lattice (green-on-white colorway)', () => {
+    expect(read('public/css/input.css')).toContain('niete-lattice');
+    expect(read('public/css/main.css')).toContain('niete-lattice');
+    expect(read('views/login.ejs')).toContain('niete-lattice');
+  });
+
   test('the transcript pages carry the NIETE navy, not Rumi #001F3F', () => {
     for (const v of ['views/transcript-enhanced.ejs', 'views/loading-transcript.ejs']) {
       const s = read(v);
