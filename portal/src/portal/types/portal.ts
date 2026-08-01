@@ -176,6 +176,35 @@ export interface LeaderOverview {
   focus: LeaderPatchTeacher[];
 }
 
+/** The coach's /observe world (GET /leader/observations) — bd-2455. */
+export interface LeaderScheduledObservation {
+  id: string;
+  teacherName: string | null;
+  schoolName: string | null;
+  schoolExtId: string | null;
+  teacherExtId: string | null;
+  scheduledFor: string | null;   // YYYY-MM-DD
+  scheduledSlot: string | null;  // e.g. "09:30"
+  overdue: boolean;
+}
+
+export interface LeaderObservationSession {
+  id: string;
+  createdAt: string | null;
+  teacherName: string | null;    // null for legacy unbound captures
+  teacherUserId: string | null;
+  status: string;
+  debriefStatus: string | null;
+  score: number | null;          // framework-agnostic %
+  reportPdfUrl: string | null;
+}
+
+export interface LeaderObservationsData {
+  upcoming: LeaderScheduledObservation[];
+  pendingDebriefs: LeaderObservationSession[];
+  completed: LeaderObservationSession[];
+}
+
 /** Single teacher detail (GET /leader/teacher/:id) — patch-membership guarded. */
 export interface LeaderTeacherDetail {
   teacher: { rumiUserId: string; name: string; phone: string; onRumi: boolean };

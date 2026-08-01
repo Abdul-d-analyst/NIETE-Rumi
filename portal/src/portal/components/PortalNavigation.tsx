@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'react-router-dom';
-import { Home, BookOpen, Library, GraduationCap, MessageSquare, TrendingUp, LogOut, Users } from 'lucide-react';
+import { Home, BookOpen, Library, GraduationCap, MessageSquare, TrendingUp, LogOut, Users, CalendarDays } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { isLeader } from '../lib/leaderRole';
 import { cn } from '@/lib/utils';
@@ -16,6 +16,8 @@ const PortalNavigation = () => {
   const leaderNav = [
     { title: 'My Patch', path: '/portal/leader', icon: Home },
     { title: 'Teachers', path: '/portal/leader/teachers', icon: Users },
+    // bd-2455 — schedule + debriefs + completed observations.
+    { title: 'Observations', path: '/portal/leader/observations', icon: CalendarDays },
   ];
   const teacherNav = [
     { title: 'Dashboard', path: '/portal/dashboard', icon: Home },

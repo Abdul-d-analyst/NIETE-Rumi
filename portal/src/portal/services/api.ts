@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { getApiBaseUrl } from '@/lib/runtime';
-import type { User, DashboardStats, LessonPlan, CoachingSession, SessionDetail, CoachingAnalytics, Pagination, VideoRequest, VideoDetail, LeaderOverview, LeaderPatchTeacher, LeaderTeacherDetail } from '../types/portal';
+import type { User, DashboardStats, LessonPlan, CoachingSession, SessionDetail, CoachingAnalytics, Pagination, VideoRequest, VideoDetail, LeaderOverview, LeaderPatchTeacher, LeaderTeacherDetail, LeaderObservationsData } from '../types/portal';
 import type { ReadingAssessment, ReadingAssessmentDetail, ReadingStats } from '../types/readingAssessment';
 
 // On the web, frontend and backend share a domain, so a relative URL avoids
@@ -248,6 +248,12 @@ export const leader = {
 
   getTeacher: async (id: string): Promise<{ success: boolean } & LeaderTeacherDetail> => {
     const response = await api.get(`/leader/teacher/${id}`);
+    return response.data;
+  },
+
+  // bd-2455 — upcoming schedules + pending debriefs + completed observations.
+  getObservations: async (): Promise<{ success: boolean; observations: LeaderObservationsData }> => {
+    const response = await api.get('/leader/observations');
     return response.data;
   }
 };

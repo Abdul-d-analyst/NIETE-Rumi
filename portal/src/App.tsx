@@ -23,6 +23,7 @@ import PortalCoachingDetail from "./portal/pages/PortalCoachingDetail";
 import LeaderHome from "./portal/pages/LeaderHome";
 import LeaderTeachers from "./portal/pages/LeaderTeachers";
 import LeaderTeacherDetail from "./portal/pages/LeaderTeacherDetail";
+import LeaderObservations from "./portal/pages/LeaderObservations";
 /* Reading assessments + video library are not part of NIETE's launch scope. Routes + imports
  * removed so the URLs 404 rather than expose unfinished screens. Restore by re-adding both
  * imports and the /portal/reading-* + /portal/video* routes below. */
@@ -82,6 +83,7 @@ const App = () => {
                 nav + My Patch only render for the school-leader family. */}
             <Route path="/portal/leader" element={<LeaderHome />} />
             <Route path="/portal/leader/teachers" element={<LeaderTeachers />} />
+            <Route path="/portal/leader/observations" element={<LeaderObservations />} />
             <Route path="/portal/leader/teacher/:id" element={<LeaderTeacherDetail />} />
 
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}

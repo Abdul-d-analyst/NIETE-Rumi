@@ -50,6 +50,9 @@ const { getPatchTeachers } = require('../services/leader-patch.service');
 const { summarizePatch } = require('../services/leader-overview.service');
 // Single teacher detail (patch-membership guarded).
 const { getPatchTeacherDetail } = require('../services/leader-teacher-detail.service');
+// The coach's /observe world (upcoming schedules + pending debriefs + past
+// observations) — bd-2455.
+const { getLeaderObservations } = require('../services/leader-observations.service');
 
 // Configure R2 S3 client for private PDF access. Lazy — resolved on first
 // use, not at module load, so mounting these routes never depends on R2 env
@@ -923,6 +926,26 @@ router.get('/leader/teacher/:id', requirePortalAuth, requireLeaderRole, async (r
   } catch (error) {
     console.error('leader/teacher/:id error:', error);
     res.status(500).json({ success: false, error: 'Failed to load teacher detail.' });
+  }
+});
+
+/**
+ * GET /api/portal/leader/observations
+ * The coach's /observe world in one payload — upcoming scheduled observations
+ * (overdue-flagged), pending debriefs (the bot's listPendingDebriefs
+ * semantics), and completed past observations. The resolver degrades to empty
+ * lists on failure, so this route only 500s on unexpected throw.
+ */
+router.get('/leader/observations', requirePortalAuth, requireLeaderRole, async (req, res) => {
+  try {
+    const observations = await getLeaderObservations(
+      (sql, params) => pool.query(sql, params),
+      req.session.portalUserId
+    );
+    res.json({ success: true, observations });
+  } catch (error) {
+    console.error('leader/observations error:', error);
+    res.status(500).json({ success: false, error: 'Failed to load your observations.' });
   }
 });
 
