@@ -146,7 +146,9 @@ const GOAL_TO_AREA = {
 function _slotRatio(d) {
   if (!d || typeof d !== 'object') return null;
   const max = Number(d.area_max ?? d.domain_max);
-  const score = Number(d.area_score ?? d.total);
+  // bd-2456: the LIVE FICO analyzer writes domain_score (not area_score) —
+  // without it every real NIETE teacher's per-area ratios came back empty.
+  const score = Number(d.area_score ?? d.domain_score ?? d.total);
   if (!Number.isFinite(max) || max <= 0 || !Number.isFinite(score)) return null;
   return score / max;
 }
