@@ -992,7 +992,71 @@ router.get('/lesson-plans', requirePortalAuth, async (req, res) => {
 // A POST endpoint queues an async Gamma render for an unavailable LP.
 //
 // All queries run against `curriculum_lp_ast` with `is_enabled = true`.
+//
+// FEAT-109 extension: `pre_generated_lps` rows (Rumi Moonshot corpus, tagged
+// `curriculum='pakistan'` + `prompt_version='v3.1_moonshot_feat109'`) are
+// UNION-ed into every endpoint below via `fetchPgenRowsShaped()`. Rows are
+// normalized into the curriculum_lp_ast row shape so the frontend needs no
+// change; the fetch is wrapped in try/catch so a pgen-side failure never
+// breaks the primary curriculum path.
 // ═══════════════════════════════════════════════════════════════════════════
+
+// Subject-name normalization between pre_generated_lps (spaced/capitalized:
+// "English", "Math", "General Knowledge") and curriculum_lp_ast (lowercase
+// snake_case: "english", "maths", "waqfiyat_amaa"). Both directions.
+const PGEN_TO_CANONICAL_SUBJECT = {
+  'English': 'english',
+  'Math': 'maths',
+  'Urdu': 'urdu',
+  'Islamiyat': 'islamiyat',
+  'General Knowledge': 'waqfiyat_amaa',
+  'Science': 'science',
+  'Social Studies': 'social_studies',
+};
+const CANONICAL_TO_PGEN_SUBJECT = Object.fromEntries(
+  Object.entries(PGEN_TO_CANONICAL_SUBJECT).map(([k, v]) => [v, k])
+);
+
+async function fetchPgenRowsShaped(filter = {}) {
+  try {
+    let q = supabase.from('pre_generated_lps')
+      .select('id, grade, subject, chapter_number, chapter_title, pdf_r2_key_en, pdf_r2_key_ur, generation_status, created_at')
+      .eq('is_current', true)
+      .eq('curriculum', 'pakistan')
+      .eq('prompt_version', 'v3.1_moonshot_feat109');
+    if (filter.grade != null) q = q.eq('grade', filter.grade);
+    if (filter.subject) {
+      const pgenSubject = CANONICAL_TO_PGEN_SUBJECT[filter.subject] || filter.subject;
+      q = q.eq('subject', pgenSubject);
+    }
+    if (filter.chapter_number != null) q = q.eq('chapter_number', filter.chapter_number);
+    const { data, error } = await q;
+    if (error) { console.error('pgen fetch error:', error.message); return []; }
+    return (data || [])
+      .filter(r => r.generation_status === 'completed' && (r.pdf_r2_key_en || r.pdf_r2_key_ur))
+      .map(r => ({
+        source_lp_uuid: r.id,
+        grade: r.grade,
+        grade_label: `Grade ${r.grade}`,
+        subject: PGEN_TO_CANONICAL_SUBJECT[r.subject] || String(r.subject).toLowerCase(),
+        subject_label: r.subject,
+        chapter_number: r.chapter_number,
+        chapter_title: r.chapter_title,
+        lp_index: null,
+        topic: r.chapter_title,
+        publisher: 'Rumi',
+        pdf_r2_key_en: r.pdf_r2_key_en,
+        pdf_r2_key_ur: r.pdf_r2_key_ur,
+        voicenote_mp3_r2_key: null,
+        demo_video_r2_key: null,
+        review_status: 'unreviewed',
+        rendered_at: r.created_at,
+      }));
+  } catch (e) {
+    console.error('pgen fetch threw:', e.message);
+    return [];
+  }
+}
 
 /**
  * GET /api/portal/curriculum/grades
@@ -1049,6 +1113,13 @@ router.get('/curriculum/subjects', requirePortalAuth, async (req, res) => {
       if (!bySubject.has(key)) bySubject.set(key, { subject: r.subject, label: r.subject_label || r.subject, count: 0 });
       bySubject.get(key).count += 1;
     }
+    // FEAT-109: merge pre_generated_lps subjects for the same grade.
+    const pgenRows = await fetchPgenRowsShaped({ grade });
+    for (const r of pgenRows) {
+      const key = r.subject;
+      if (!bySubject.has(key)) bySubject.set(key, { subject: r.subject, label: r.subject_label || r.subject, count: 0 });
+      bySubject.get(key).count += 1;
+    }
     const subjects = [...bySubject.values()].sort((a, b) => String(a.label).localeCompare(String(b.label)));
     res.json({ success: true, subjects });
   } catch (error) {
@@ -1079,6 +1150,20 @@ router.get('/curriculum/chapters', requirePortalAuth, async (req, res) => {
 
     const byChapter = new Map();
     for (const r of data || []) {
+      const key = `${r.publisher}::${r.chapter_number}::${r.chapter_title}`;
+      if (!byChapter.has(key)) {
+        byChapter.set(key, {
+          publisher: r.publisher,
+          chapter_number: r.chapter_number,
+          chapter_title: r.chapter_title,
+          lp_count: 0,
+        });
+      }
+      byChapter.get(key).lp_count += 1;
+    }
+    // FEAT-109: merge pre_generated_lps chapters (publisher='Rumi').
+    const pgenRows = await fetchPgenRowsShaped({ grade, subject });
+    for (const r of pgenRows) {
       const key = `${r.publisher}::${r.chapter_number}::${r.chapter_title}`;
       if (!byChapter.has(key)) {
         byChapter.set(key, {
@@ -1148,6 +1233,26 @@ router.get('/curriculum/lps', requirePortalAuth, async (req, res) => {
       review_status: r.review_status || 'unreviewed',
       rendered_at: r.rendered_at,
     }));
+    // FEAT-109: merge pre_generated_lps for this chapter (publisher-scoped).
+    if (!publisher || publisher === 'Rumi') {
+      const pgenRows = await fetchPgenRowsShaped({ grade, subject, chapter_number: chapterNumber });
+      let idx = 1;
+      for (const r of pgenRows) {
+        lps.push({
+          source_lp_uuid: r.source_lp_uuid,
+          lp_index: idx++,
+          topic: r.topic,
+          publisher: r.publisher,
+          chapter_title: r.chapter_title,
+          available_en: !!r.pdf_r2_key_en,
+          available_ur: !!r.pdf_r2_key_ur,
+          has_voicenote: false,
+          has_video: false,
+          review_status: 'unreviewed',
+          rendered_at: r.rendered_at,
+        });
+      }
+    }
     res.json({ success: true, lps });
   } catch (error) {
     console.error('curriculum/lps error:', error);
@@ -1166,13 +1271,36 @@ router.get('/curriculum/lp/:source_lp_uuid/pdf', requirePortalAuth, async (req, 
     const uuid = req.params.source_lp_uuid;
     const lang = String(req.query.lang || 'en').toLowerCase() === 'ur' ? 'ur' : 'en';
 
-    const { data: lp, error } = await supabase
+    let { data: lp, error } = await supabase
       .from('curriculum_lp_ast')
       .select('source_lp_uuid, chapter_title, topic, publisher, pdf_r2_key_en, pdf_r2_key_ur, voicenote_mp3_r2_key, demo_video_r2_key, review_status, review_notes')
       .eq('source_lp_uuid', uuid)
       .eq('is_enabled', true)
       .maybeSingle();
     if (error) throw error;
+    // FEAT-109: fall back to pre_generated_lps lookup (uuid is pgen row id).
+    if (!lp) {
+      const { data: pgen } = await supabase
+        .from('pre_generated_lps')
+        .select('id, chapter_title, subject, pdf_r2_key_en, pdf_r2_key_ur')
+        .eq('id', uuid)
+        .eq('is_current', true)
+        .maybeSingle();
+      if (pgen) {
+        lp = {
+          source_lp_uuid: pgen.id,
+          chapter_title: pgen.chapter_title,
+          topic: pgen.chapter_title,
+          publisher: 'Rumi',
+          pdf_r2_key_en: pgen.pdf_r2_key_en,
+          pdf_r2_key_ur: pgen.pdf_r2_key_ur,
+          voicenote_mp3_r2_key: null,
+          demo_video_r2_key: null,
+          review_status: 'unreviewed',
+          review_notes: null,
+        };
+      }
+    }
     if (!lp) return res.status(404).json({ success: false, error: 'Lesson plan not found' });
 
     // The helper's generatePresignedUrl expects a FULL R2 URL (it validates
