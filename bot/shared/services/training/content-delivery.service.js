@@ -296,6 +296,85 @@ async function deliverNextModule(userId, courseId, phoneNumber) {
   return true;
 }
 
+
+/**
+ * bd-2472/bd-2473 — the single post-completion step.
+ *
+ * A module can complete on either of two paths: the tap, for a module with no
+ * quiz, or gradeAttempt, once the quick check is passed. Everything that must
+ * happen AFTER a module is credited belongs here so it cannot be stranded on
+ * one branch — which is exactly what happened to the capstone offer. It lived
+ * only in the no-quiz branch, and since every Beacon House module has a quiz,
+ * no capstone was ever offered to anyone: 0 attempts in the entire database.
+ *
+ * @param {string} userId
+ * @param {number} moduleId the module just credited
+ * @param {string} phoneNumber
+ */
+async function onModuleCompleted(userId, moduleId, phoneNumber) {
+  // Capstone offer — fire-and-forget, never blocks forward progress. The
+  // service itself checks vendor type, capstone existence, full completion and
+  // prior passes, so calling it after every completion is safe and cheap.
+  {
+    const CapstoneDelivery = require('./capstone-delivery.service');
+    Promise.resolve(CapstoneDelivery.maybeOfferCapstone(userId, moduleId, phoneNumber))
+      .catch((err) => logToFile('⚠️ Non-blocking capstone offer failed', { moduleId, error: err?.message }));
+  }
+  return advanceAfterModule(userId, moduleId, phoneNumber);
+}
+
+/**
+ * bd-2473 — advance within the LEVEL, not the course.
+ *
+ * gradeAttempt used to call deliverNextModule(course_id). Finish the last
+ * module of a course and nothing in that course is incomplete, so it fell into
+ * review mode and re-sent module 1 — a teacher who had just passed the final
+ * module of Beacon House English was shown "Review · 1 of 11".
+ *
+ * Order matches what the Flow renders (course order_index, then module
+ * order_index) so "next" means the same thing in both surfaces.
+ */
+async function advanceAfterModule(userId, moduleId, phoneNumber) {
+  const { data: mod } = await supabase
+    .from('training_modules').select('id, course_id').eq('id', moduleId).maybeSingle();
+  if (!mod?.course_id) {
+    logToFile('⚠️ Completed module has no course_id — cannot advance', { moduleId });
+    return true;
+  }
+  const { data: course } = await supabase
+    .from('training_courses').select('id, level_id').eq('id', mod.course_id).maybeSingle();
+  if (!course?.level_id) return deliverNextModule(userId, mod.course_id, phoneNumber);
+
+  const { data: courses } = await supabase
+    .from('training_courses').select('id, order_index')
+    .eq('level_id', course.level_id).eq('is_active', true);
+  const courseIds = (courses || []).map(c => c.id);
+  const { data: levelModules } = courseIds.length
+    ? await supabase.from('training_modules').select('id, course_id, order_index')
+        .in('course_id', courseIds).eq('is_active', true)
+    : { data: [] };
+  const { data: progress } = await supabase
+    .from('teacher_training_progress').select('module_id').eq('user_id', userId);
+  const done = new Set((progress || []).map(p => p.module_id));
+  const orderOf = new Map((courses || []).map(c => [c.id, c.order_index ?? 0]));
+  const ordered = (levelModules || []).slice().sort((a, b) =>
+    (orderOf.get(a.course_id) - orderOf.get(b.course_id))
+    || (a.course_id - b.course_id)                       // stable across duplicate course order_index
+    || ((a.order_index || 0) - (b.order_index || 0)));
+
+  const next = ordered.find(m => !done.has(m.id));
+  if (next) return deliverModuleById(next.id, phoneNumber, { userId, courseId: next.course_id, reviewMode: false });
+
+  // Level complete. Do NOT loop back to module 1 — say so and let the exam
+  // surface take over (the capstone offer above, or the Flow's exam CTA).
+  logToFile('🎓 Level complete after module', { userId, moduleId, levelId: course.level_id });
+  await WhatsAppService.sendMessage(
+    phoneNumber,
+    "🎉 That's every module in this level complete.\n\nSend /training to take the level exam."
+  );
+  return true;
+}
+
 /**
  * Mark a module complete and deliver the next one (or completion message).
  * Called from the button-reply handler.
@@ -366,52 +445,8 @@ async function handleModuleDone(userId, moduleId, phoneNumber) {
   await markModuleComplete(userId, moduleIdNum);
   logToFile('🎓 Module marked done (no quiz)', { userId, moduleId: moduleIdNum, courseId: mod.course_id, title: mod.title });
 
-  // BH open-ended capstone offer (bd-2233) — when this module completes the
-  // level for an all_modules vendor, offer the level's Grand Quiz. Fire-and-
-  // forget; never blocks forward progress. The service itself checks vendor
-  // type, capstone existence, full completion, and prior passes.
-  {
-    const CapstoneDelivery = require('./capstone-delivery.service');
-    Promise.resolve(CapstoneDelivery.maybeOfferCapstone(userId, moduleIdNum, phoneNumber))
-      .catch((err) => logToFile('⚠️ Non-blocking capstone offer failed', { moduleId: moduleIdNum, error: err?.message }));
-  }
-
-  // If the teacher is REVIEWING an already-fully-complete course (all modules
-  // had progress rows before this tap), advance to the next module by
-  // order_index instead of falling back to `deliverNextModule` which would
-  // loop back to the first module. When we hit the end, tell them politely.
-  const { data: allMods } = await supabase
-    .from('training_modules')
-    .select('id, order_index')
-    .eq('course_id', mod.course_id)
-    .eq('is_active', true)
-    .order('order_index', { ascending: true });
-  const { data: progressRows } = await supabase
-    .from('teacher_training_progress')
-    .select('module_id')
-    .eq('user_id', userId)
-    .in('module_id', (allMods || []).map(m => m.id));
-  const doneIds = new Set((progressRows || []).map(p => p.module_id));
-  const allDone = (allMods || []).every(m => doneIds.has(m.id));
-
-  if (allDone) {
-    // Review mode: pick the module with order_index strictly greater than
-    // the one we just watched. If none, we've reached the end.
-    const next = (allMods || []).find(m => m.order_index > mod.order_index);
-    if (!next) {
-      await WhatsAppService.sendMessage(
-        phoneNumber,
-        `📘 You've reviewed the whole course. Send /training to pick a different course or check your next level.`
-      );
-      return true;
-    }
-    // Deliver the next module (bypass "find uncompleted" logic — just send it).
-    return await deliverModuleById(next.id, phoneNumber, { reviewMode: true, courseId: mod.course_id });
-  }
-
-  // Normal path — advance through uncompleted modules.
-  await WhatsAppService.sendMessage(phoneNumber, `✅ *${mod.title}* — marked done. Loading next module…`);
-  return await deliverNextModule(userId, mod.course_id, phoneNumber);
+  // bd-2472/2473 — one shared post-completion step for BOTH paths.
+  return onModuleCompleted(userId, moduleIdNum, phoneNumber);
 }
 
 /**
@@ -489,4 +524,4 @@ async function deliverModuleById(moduleId, phoneNumber, opts = {}) {
 
 // markModuleComplete is re-exported for the existing callers/tests that reach
 // for it here; progress.service.js is the definition.
-module.exports = { deliverNextModule, handleModuleDone, deliverModuleById, deliverPdfModule, isPdfModule, markModuleComplete };
+module.exports = { deliverNextModule, handleModuleDone, onModuleCompleted, advanceAfterModule, deliverModuleById, deliverPdfModule, isPdfModule, markModuleComplete };
