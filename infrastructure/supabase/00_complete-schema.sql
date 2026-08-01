@@ -3770,8 +3770,21 @@ CREATE TABLE IF NOT EXISTS training_assessment_answers (
     attempt_id                UUID NOT NULL REFERENCES training_assessment_attempts(id) ON DELETE CASCADE,
     question_index            INTEGER NOT NULL,
     question_id               BIGINT NOT NULL REFERENCES training_questions(id),
-    chosen_option             VARCHAR(16) NOT NULL,
-    is_correct                BOOLEAN NOT NULL,
+    -- bd-2478 — chosen_option/is_correct are MCQ-specific and NULLABLE. A
+    -- capstone answer is free text graded 0-5, with no chosen option and no
+    -- binary correctness. They were NOT NULL until 2026-08-02, which rejected
+    -- every capstone answer row ever written: the first real attempt scored
+    -- 2/40 because none of its eight answers persisted. Placeholders were
+    -- considered and rejected — is_correct=false on a 5/5 written answer is
+    -- untrue, and gradeAttempt counts is_correct for MCQ scoring.
+    chosen_option             VARCHAR(32),
+    is_correct                BOOLEAN,
+    -- Written-answer columns (added to prod by 2026-07-21-capstone-import.sql
+    -- and only folded in here on 2026-08-02 — a fresh bootstrap had no capstone
+    -- storage at all until now).
+    answer_text               TEXT,
+    answer_score              SMALLINT,
+    feedback_text             TEXT,
     answered_at               TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (attempt_id, question_index)
 );

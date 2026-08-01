@@ -337,7 +337,12 @@ async function routeTextAnswer(phoneNumber, text) {
   }
 
   const { score, feedback } = await scoreAnswer(q, trimmed);
-  await supabase.from('training_assessment_answers').upsert(
+  // bd-2478 — CHECK the write. This upsert silently failed for every capstone
+  // answer ever submitted: is_correct was NOT NULL and a written answer has no
+  // binary correctness, so Postgres rejected all eight rows of the first real
+  // attempt. Nothing checked the error, finalizeAttempt then summed an empty
+  // set, and a teacher who answered well scored 2/40.
+  const { error: answerErr } = await supabase.from('training_assessment_answers').upsert(
     {
       attempt_id: attempt.id,
       question_index: attempt.current_question_index,
@@ -351,6 +356,18 @@ async function routeTextAnswer(phoneNumber, text) {
     },
     { onConflict: 'attempt_id,question_index' }
   );
+  if (answerErr) {
+    // Do not let the teacher keep writing into a void. Their work is not being
+    // recorded and the final score would be wrong; stop here and say so.
+    logToFile('❌ Capstone answer failed to save — aborting the attempt', {
+      attemptId: attempt.id, questionIndex: attempt.current_question_index, error: answerErr.message,
+    });
+    await WhatsAppService.sendMessage(
+      phoneNumber,
+      'Sorry — your answer could not be saved, so I have stopped the exam here rather than score it wrongly. Please contact NIETE support.'
+    );
+    return true;
+  }
   await WhatsAppService.sendMessage(phoneNumber, `📝 *${score}/5* — ${feedback}`);
 
   const nextIdx = attempt.current_question_index + 1;
@@ -377,6 +394,23 @@ async function finalizeAttempt(attempt, user, phoneNumber, { lastScore } = {}) {
   const byIdx = new Map((answers || []).map(a => [a.question_index, a.answer_score || 0]));
   if (lastScore !== undefined && !byIdx.has(attempt.current_question_index - 1)) {
     byIdx.set(attempt.current_question_index - 1, lastScore);
+  }
+  // bd-2478 — a short answer set means rows did not persist, and scoring it
+  // anyway is how a teacher who answered eight questions well was told they
+  // scored 2/40. The lastScore fallback above is for ONE row that may not be
+  // readable yet in the same tick; anything more missing is a fault, not a lag.
+  if (byIdx.size < attempt.total_questions) {
+    logToFile('❌ Capstone finalize: answers missing — refusing to score', {
+      attemptId: attempt.id, found: byIdx.size, expected: attempt.total_questions,
+    });
+    await supabase.from('training_assessment_attempts')
+      .update({ status: 'in_progress', last_activity_at: new Date().toISOString() })
+      .eq('id', attempt.id);
+    await WhatsAppService.sendMessage(
+      phoneNumber,
+      'Sorry — some of your answers were not saved, so I cannot score this fairly. Your attempt is still open. Please contact NIETE support.'
+    );
+    return true;
   }
   const score = [...byIdx.values()].reduce((s, v) => s + (v || 0), 0);
   const passBar = Math.ceil(attempt.total_score * PASS_PCT);
