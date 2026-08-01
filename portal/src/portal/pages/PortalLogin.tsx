@@ -43,7 +43,7 @@ const PortalLogin = () => {
   };
 
   return (
-    <div className="min-h-screen bg-primary flex items-center justify-center p-6">
+    <div className="min-h-screen bg-primary niete-lattice flex items-center justify-center p-6">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
           <div className="flex items-center justify-center gap-3 mb-4">
