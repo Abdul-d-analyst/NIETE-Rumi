@@ -754,8 +754,14 @@ async function handleTextMessage(message, from, messageBody, user = null) {
       );
       return;
     }
+    // bd-2460 — the Assessment Generator is held OFF until it is ready on BOTH
+    // surfaces. The switch is one app_settings row shared with the portal, so
+    // neither side can claim the feature is live while the other says it isn't.
+    // Fail-closed: an absent row or a failed lookup reads as off.
+    const { isAssessmentGeneratorEnabled } = require('../config/feature-flags');
+    const assessmentLive = await isAssessmentGeneratorEnabled();
     const ASSESSMENT_GEN_FLOW_ID = process.env.ASSESSMENT_GEN_FLOW_ID || '';
-    if (ASSESSMENT_GEN_FLOW_ID) {
+    if (assessmentLive && ASSESSMENT_GEN_FLOW_ID) {
       typingController.stop();
       const flowToken = `${user.id}:assessment-gen:${Date.now()}`;
       const responseLanguage = await getUserLanguage(from) || 'en';

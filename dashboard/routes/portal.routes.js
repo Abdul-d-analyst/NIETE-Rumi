@@ -32,6 +32,12 @@ const supabase = require('../config/supabase');
 const { S3Client, GetObjectCommand } = require('@aws-sdk/client-s3');
 const { generatePresignedUrl, generatePresignedUrls, isValidR2Url } = require('../services/r2.service');
 const { fetchAllPaged } = require('../lib/fetch-all-paged');
+// bd-2460 — Assessment Generator availability. Fail-closed, shared with the
+// bot via one app_settings row (see dashboard/lib/feature-flags.js).
+const {
+  isAssessmentGeneratorEnabled,
+  ASSESSMENT_GENERATOR_OFF_MESSAGE,
+} = require('../lib/feature-flags');
 // bd-2434 — Leader Portal (NIETE port of upstream bd-2385..2388):
 // role gate (school-leader family only) + framework-agnostic overall score.
 const { publicUserPayload, makeRequireLeaderRole } = require('../lib/leader-role');
@@ -4336,8 +4342,47 @@ function _assessmentCallbackUrl(req) {
  * Submits the job to UG_EG (poll path) and stores the Redis job link.
  * Returns { success: true, jobId }.
  */
+/**
+ * GET /api/portal/config
+ *
+ * bd-2460 — what this deployment currently offers, so the browser can render an
+ * honest surface instead of a form that would 503 on submit. Public (no auth):
+ * it exposes nothing but feature availability, and the login screen may need it.
+ *
+ * Availability is fail-closed and shared with the bot through one app_settings
+ * row, so the portal and WhatsApp can never disagree about whether a feature is
+ * live. The message ships with the flag so both surfaces read identically.
+ */
+router.get('/config', async (req, res) => {
+  try {
+    const assessmentGenerator = await isAssessmentGeneratorEnabled(supabase);
+    return res.json({
+      success: true,
+      features: {
+        assessmentGenerator,
+        assessmentGeneratorMessage: assessmentGenerator ? null : ASSESSMENT_GENERATOR_OFF_MESSAGE,
+      },
+    });
+  } catch (error) {
+    console.error('portal/config error:', error);
+    // Fail closed here too — a broken config read must not imply "everything on".
+    return res.json({
+      success: true,
+      features: {
+        assessmentGenerator: false,
+        assessmentGeneratorMessage: ASSESSMENT_GENERATOR_OFF_MESSAGE,
+      },
+    });
+  }
+});
+
 router.post('/assessment/generate', requirePortalAuth, async (req, res) => {
   try {
+    // bd-2460 — THE gate. Hiding the Curriculum tab is advisory; without this a
+    // session cookie still drives the generator.
+    if (!(await isAssessmentGeneratorEnabled(supabase))) {
+      return res.status(503).json({ success: false, error: ASSESSMENT_GENERATOR_OFF_MESSAGE });
+    }
     const userId = req.session.portalUserId;
     const { spec, filename, error } = _normalizeAssessmentSpec(req.body);
     if (error) return res.status(400).json({ success: false, error });
@@ -4379,6 +4424,11 @@ router.post('/assessment/generate', requirePortalAuth, async (req, res) => {
  */
 router.get('/assessment/status/:jobId', requirePortalAuth, async (req, res) => {
   try {
+    // bd-2460 — gated too: gating only the submit would leave a job that was
+    // queued before the switch flipped still pollable.
+    if (!(await isAssessmentGeneratorEnabled(supabase))) {
+      return res.status(503).json({ success: false, error: ASSESSMENT_GENERATOR_OFF_MESSAGE });
+    }
     const userId = req.session.portalUserId;
     const jobId = req.params.jobId;
 
