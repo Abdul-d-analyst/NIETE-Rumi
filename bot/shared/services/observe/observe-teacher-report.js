@@ -49,6 +49,7 @@ HARD RULES (the teacher's trust depends on these):
 - NEVER anything accusatory or a verdict about the teacher as a person.
 - "discussed_sw": 1–2 warm sentences on what the two of them actually discussed (teaching moves, not judgements), in ${langName}.
 - "commitment_sw": the commitment THE TEACHER THEMSELVES SPOKE, in their own words, in ${langName} — IF AND ONLY IF they clearly made one. IF NO COMMITMENT WAS SPOKEN: commitment_sw = null. NEVER invent one — putting words in a teacher's mouth is a lie that breaks the trust this tool runs on.
+- GENDER (mandatory): the teacher may be a man or a woman (مرد بھی ہو سکتے ہیں اور خاتون بھی) — we do NOT know which, so every sentence must stay gender-neutral. In Urdu: use the respectful plural (کرتے ہیں، چاہتے ہیں) or past with نے (آپ نے بتایا) when referring to the teacher, and the respectful آپ-imperative (کریں، دیں) for anything addressed to them. NEVER feminine singular stems (کرتی ہیں، چاہتی ہیں، کریں گی) and never gendered third-person guesses.
 
 Return JSON EXACTLY: { "discussed_sw": "...", "commitment_sw": "..." | null }
 

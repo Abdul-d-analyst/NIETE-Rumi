@@ -18,7 +18,7 @@ const FRAMEWORK_COLORS = {
   oecd: '#2563EB',   // Blue
   hots: '#059669',   // Green
   teach: '#D97706',  // Amber
-  fico: '#7C3AED',   // Purple
+  fico: '#47BA7D',   // NIETE Green (bd-2453 — was purple; brand book via niete-brand skill)
 };
 
 const FRAMEWORK_LABELS = {

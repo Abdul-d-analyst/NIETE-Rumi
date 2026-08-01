@@ -55,10 +55,10 @@ const BRIEF_STRINGS = {
     en: 'During your visit:', ur: 'اپنے دورے کے دوران:', sw: 'Wakati wa ziara yako:', ar: 'أثناء زيارتك:',
   },
   debrief_reminder: {
-    en: 'In the debrief, pick just ONE thing to work on with her — and open with a genuine strength.',
+    en: 'In the debrief, pick just ONE thing to work on with them — and open with a genuine strength.',
     ur: 'ڈی بریف میں صرف ایک چیز پر کام کے لیے چنیں — اور آغاز کسی حقیقی خوبی سے کریں۔',
     sw: 'Katika maongezi, chagua jambo MOJA tu la kufanyia kazi naye — na anza na nguvu ya kweli.',
-    ar: 'في جلسة النقاش، اختر أمراً واحداً فقط للعمل عليه معها — وابدأ بقوة حقيقية.',
+    ar: 'في جلسة النقاش، اختر أمراً واحداً فقط للعمل عليه مع المعلم — وابدأ بقوة حقيقية.',
   },
   nodata_line: {
     en: 'ℹ️ No coaching data for this teacher yet — use this visit to spot it.',

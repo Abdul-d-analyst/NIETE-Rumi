@@ -61,7 +61,7 @@ const MOVE_LIBRARY = {
       grade: null,
       text: {
         en: 'Watch one worked example on the board: does she model the thinking step by step before students try? If not, suggest "I do → we do → you do" for one topic.',
-        ur: 'بورڈ پر ایک حل شدہ مثال دیکھیں: کیا وہ بچوں کے خود کرنے سے پہلے سوچ کے مراحل دکھاتی ہیں؟ اگر نہیں، تو ایک موضوع کے لیے «میں کروں → ہم کریں → تم کرو» کا مشورہ دیں۔',
+        ur: 'بورڈ پر ایک حل شدہ مثال دیکھیں: کیا بچوں کے خود کرنے سے پہلے سوچ کے مراحل دکھائے جاتے ہیں؟ اگر نہیں، تو ایک موضوع کے لیے «میں کروں → ہم کریں → تم کرو» کا مشورہ دیں۔',
       },
     },
   ],
@@ -115,7 +115,7 @@ const OPENING_TIPS = [
   },
   {
     en: 'Ask the teacher what SHE wants help with — her answer usually points at the real gap.',
-    ur: 'استاد سے پوچھیں کہ وہ خود کس چیز میں مدد چاہتی ہیں — ان کا جواب اکثر اصل کمی کی نشاندہی کرتا ہے۔',
+    ur: 'استاد سے پوچھیں کہ انہیں خود کس چیز میں مدد چاہیے — ان کا جواب اکثر اصل کمی کی نشاندہی کرتا ہے۔',
   },
 ];
 

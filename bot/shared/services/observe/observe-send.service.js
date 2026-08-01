@@ -567,16 +567,22 @@ async function processTeacherReport(sessionId, payload = {}) {
   if (phase === 'preview') {
     const { buildCompanionText } = require('./observe-teacher-report');
     const { generateHeroReport } = require('../coaching/report-v2/hero-report.service');
+    const { heroBrandFor } = require('../coaching/report-renderers/renderer-registry');
     const { uploadImageBuffer } = require('../../storage/r2');
 
     const notes = await _extractNotes(session, foName);
     const v2 = session.analysis_data || {};
     // D32: the OFFICIAL hero report, design unchanged — teacherName is what
     // the FO entered; commitmentAction is the teacher's debrief commitment.
+    // bd-2453: this path calls generateHeroReport DIRECTLY (not via the
+    // renderer registry), so the framework brand must be injected here too —
+    // otherwise a FICO/NIETE observe report renders the default Rumi palette
+    // while the same teacher's coaching-pipeline report renders NIETE.
     const { png, caption } = await generateHeroReport(session, v2, {
       teacherName: delivery.teacher_name,
       commitmentAction: (notes && notes.commitment_sw) || '',
       language: teacherLang,   // bd-2405 — the teacher's market language drives the report
+      brand: heroBrandFor(v2.framework),
     });
     const companionText = notes ? buildCompanionText(notes, { foName }, teacherS) : null;
     const teacherCaption = teacherS.report_caption_teacher.replace('{fo}', foName);

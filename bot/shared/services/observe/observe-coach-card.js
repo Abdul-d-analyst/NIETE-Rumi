@@ -50,6 +50,32 @@ function normalizeCoachValue(v) {
   return Object.prototype.hasOwnProperty.call(COACH_VALUES, key) ? key : null;
 }
 
+/**
+ * bd-2453 — brand palettes, same tokenization pattern as the hero template
+ * (bd-2452). `default` keeps the original Rumi navy byte-for-byte; `niete` =
+ * NIETE Green #47BA7D + Navy Slate #333748 (brand book, via niete-brand
+ * skill). The green tick / try-block / amber praise-accent colours are
+ * semantic and stay identical across brands.
+ */
+const CARD_PALETTES = {
+  default: {
+    deep: '#0c1a4e',                       // header bg + footer wordmark
+    shadow: 'rgba(12,26,78,.12)',
+    eyebrow: '#9db1e8', sub: '#b9c6e6',
+    praiseBg: '#f4f6fb', praiseText: '#1c2749',
+    sec: '#8b97b8', winTitle: '#123a8a', winQuote: '#3f4c6e',
+    lock: '#67729b',
+  },
+  niete: {
+    deep: '#333748',
+    shadow: 'rgba(51,55,72,.12)',
+    eyebrow: '#a9e3c4', sub: '#c6e9d5',
+    praiseBg: '#f3faf6', praiseText: '#2b3040',
+    sec: '#8a92a0', winTitle: '#2f7d55', winQuote: '#3f4a5e',
+    lock: '#6a7284',
+  },
+};
+
 /** Celebration cards are for coaching worth celebrating — never for harm. */
 function shouldRenderCard(fb) {
   return !isHarmfulDebrief(fb && fb.rubric);
@@ -66,9 +92,10 @@ function esc(s) {
  * Lexend-ish system stack, soft panels. Rendered by htmlToImage (Playwright)
  * on the SQS worker, exactly like the hero report.
  */
-function buildCoachCardHtml(fb, { lang = 'sw' } = {}) {
+function buildCoachCardHtml(fb, { lang = 'sw', brand } = {}) {
   const { observeStrings } = require('./observe-strings');
   const S = observeStrings(lang);
+  const P = CARD_PALETTES[brand] || CARD_PALETTES.default;   // bd-2453
   const rtl = lang === 'ur';   // FEAT-093 bd-53 — Urdu renders right-to-left
   const valueKey = normalizeCoachValue(fb.value);
   const header = valueKey ? (COACH_VALUES[valueKey][lang] || COACH_VALUES[valueKey].en) : S.coach_card_title;
@@ -101,20 +128,20 @@ function buildCoachCardHtml(fb, { lang = 'sw' } = {}) {
 @font-face{font-family:'NastaliqUrdu';font-weight:400;src:url(data:font/ttf;base64,${A.nastR})}
 @font-face{font-family:'NastaliqUrdu';font-weight:700;src:url(data:font/ttf;base64,${A.nastB})}
 *{margin:0;padding:0;box-sizing:border-box;font-family:${urFont}'Lexend','Segoe UI',-apple-system,sans-serif}
-.card{width:760px;background:#fff;border-radius:18px;overflow:hidden;box-shadow:0 1px 3px rgba(12,26,78,.12)}
-.hd{background:#0c1a4e;color:#fff;padding:30px 38px 28px}
+.card{width:760px;background:#fff;border-radius:18px;overflow:hidden;box-shadow:0 1px 3px ${P.shadow}}
+.hd{background:${P.deep};color:#fff;padding:30px 38px 28px}
 .hd .top{display:flex;align-items:center;gap:14px;margin-bottom:18px}
 .hd .top img{width:64px;height:auto;display:block}
-.hd .eb{font-size:13px;letter-spacing:${rtl ? '0' : '.16em'};${rtl ? '' : 'text-transform:uppercase;'}color:#9db1e8;font-weight:700;line-height:1.8}
+.hd .eb{font-size:13px;letter-spacing:${rtl ? '0' : '.16em'};${rtl ? '' : 'text-transform:uppercase;'}color:${P.eyebrow};font-weight:700;line-height:1.8}
 .hd h1{font-size:${rtl ? '36px' : '44px'};font-weight:700;line-height:${rtl ? '2' : '1.6'};letter-spacing:0}
-.hd .sub{font-size:16px;color:#b9c6e6;margin-top:6px;line-height:${rtl ? '2.3' : '1.9'}}
+.hd .sub{font-size:16px;color:${P.sub};margin-top:6px;line-height:${rtl ? '2.3' : '1.9'}}
 .bd{padding:26px 38px 6px}
-.praise{background:#f4f6fb;border-${rtl ? 'right' : 'left'}:4px solid #f2a65a;border-radius:10px;padding:16px 20px;font-size:${rtl ? '16.5px' : '17.5px'};line-height:${rtl ? '2.4' : '2'};color:#1c2749}
-.sec{font-size:13px;color:#8b97b8;font-weight:700;margin:26px 0 14px;letter-spacing:${rtl ? '0' : '.14em'};${rtl ? '' : 'text-transform:uppercase;'}}
+.praise{background:${P.praiseBg};border-${rtl ? 'right' : 'left'}:4px solid #f2a65a;border-radius:10px;padding:16px 20px;font-size:${rtl ? '16.5px' : '17.5px'};line-height:${rtl ? '2.4' : '2'};color:${P.praiseText}}
+.sec{font-size:13px;color:${P.sec};font-weight:700;margin:26px 0 14px;letter-spacing:${rtl ? '0' : '.14em'};${rtl ? '' : 'text-transform:uppercase;'}}
 .win{display:flex;gap:14px;margin-bottom:18px;align-items:flex-start}
 .win .tick{flex:none;width:28px;height:28px;border-radius:50%;background:#e7f3ec;color:#1d7a46;font-weight:700;display:flex;align-items:center;justify-content:center;font-size:15px;margin-top:4px}
-.win .wt{font-size:${rtl ? '16.5px' : '17.5px'};font-weight:700;color:#123a8a;line-height:${rtl ? '2.2' : '1.9'}}
-.win .wq{font-size:${rtl ? '15px' : '15.5px'};color:#3f4c6e;margin-top:6px;line-height:${rtl ? '2.4' : '2'};background:#fafbfd;border-radius:8px;padding:10px 14px}
+.win .wt{font-size:${rtl ? '16.5px' : '17.5px'};font-weight:700;color:${P.winTitle};line-height:${rtl ? '2.2' : '1.9'}}
+.win .wq{font-size:${rtl ? '15px' : '15.5px'};color:${P.winQuote};margin-top:6px;line-height:${rtl ? '2.4' : '2'};background:#fafbfd;border-radius:8px;padding:10px 14px}
 .try{background:#eef7f0;border-radius:14px;padding:20px 22px;margin:8px 0 24px}
 .try .tl{font-size:13px;color:#1d7a46;font-weight:700;letter-spacing:${rtl ? '0' : '.14em'};${rtl ? '' : 'text-transform:uppercase;'}}
 .try h2{font-size:${rtl ? '19px' : '22px'};color:#14532d;font-weight:700;margin:8px 0 6px;line-height:${rtl ? '2.3' : '1.9'}}
@@ -122,8 +149,8 @@ function buildCoachCardHtml(fb, { lang = 'sw' } = {}) {
 .ft{border-top:1px solid #e7ebf4;padding:16px 38px;display:flex;justify-content:space-between;align-items:center;gap:12px}
 .ft .brand{display:flex;align-items:center;gap:9px}
 .ft .brand img{width:30px;height:auto}
-.ft .brand span{font-weight:700;color:#0c1a4e;font-size:16px;font-family:'Lexend',sans-serif}
-.ft .lock{font-size:14px;color:#67729b;line-height:${rtl ? '2.2' : '1.9'}}
+.ft .brand span{font-weight:700;color:${P.deep};font-size:16px;font-family:'Lexend',sans-serif}
+.ft .lock{font-size:14px;color:${P.lock};line-height:${rtl ? '2.2' : '1.9'}}
 </style></head><body><div class="card">
   <div class="hd">
     <div class="top">
@@ -156,11 +183,11 @@ function buildCoachCardHtml(fb, { lang = 'sw' } = {}) {
  * or cannot be rendered — the caller falls back to the text card, so a
  * Playwright hiccup can never cost an officer their feedback.
  */
-async function renderCoachCard(fb, { lang = 'sw' } = {}) {
+async function renderCoachCard(fb, { lang = 'sw', brand } = {}) {
   if (!shouldRenderCard(fb)) return null;
   try {
     const { htmlToImage } = require('../../utils/html-to-pdf');
-    const html = buildCoachCardHtml(fb, { lang });
+    const html = buildCoachCardHtml(fb, { lang, brand });
     return await htmlToImage(html, { selector: '.card', width: 800, deviceScaleFactor: 2 });
   } catch (err) {
     const { logToFile } = require('../../utils/logger');

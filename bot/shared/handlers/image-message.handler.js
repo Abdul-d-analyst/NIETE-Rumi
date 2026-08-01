@@ -135,7 +135,7 @@ async function handleImageMessage(message, from, user = null) {
             await WhatsAppService.sendMessage(
               from,
               userLang === 'ur'
-                ? '📸 آپ زیادہ سے زیادہ 3 تصاویر بھیج سکتی ہیں۔ اب تجزیہ شروع کیا جا رہا ہے۔'
+                ? '📸 زیادہ سے زیادہ 3 تصاویر بھیجی جا سکتی ہیں۔ اب تجزیہ شروع کیا جا رہا ہے۔'
                 : '📸 You can upload a maximum of 3 photos. Starting analysis now.'
             );
             const CoachingSessionService = require('../services/coaching/coaching-session.service');
@@ -181,7 +181,7 @@ async function handleImageMessage(message, from, user = null) {
             });
           } else {
             const confirmMsg = userLang === 'ur'
-              ? `📸 تصویر ${existingPhotos.length} موصول۔ کیا آپ ایک اور تصویر شامل کرنا چاہیں گی؟`
+              ? `📸 تصویر ${existingPhotos.length} موصول۔ کیا ایک اور تصویر شامل کرنی ہے؟`
               : `📸 Photo ${existingPhotos.length} received. Would you like to add another photo?`;
             await WhatsAppService.sendInteractiveButtons(from, {
               body: confirmMsg,
@@ -777,7 +777,7 @@ async function handleCoalescedBatch({ user, from, batch }) {
       });
       // Fall back to a polite single message if vision-feedback also failed.
       const fallback = isUrdu
-        ? '📷 آپ کی تصاویر مل گئیں۔ اگر آپ لیسن پلان چاہتی ہیں، براہ کرم کسی نصابی کتاب کے صفحے کی واضح تصویر بھیجیں۔ مدد کے لیے "menu" لکھیں۔'
+        ? '📷 آپ کی تصاویر مل گئیں۔ اگر آپ کو لیسن پلان چاہیے، براہ کرم کسی نصابی کتاب کے صفحے کی واضح تصویر بھیجیں۔ مدد کے لیے "menu" لکھیں۔'
         : "📷 Got your image(s). For a lesson plan, please send a clear photo of a textbook page. Type \"menu\" to see other things I can help with.";
       await WhatsAppService.sendMessage(from, fallback);
     }
