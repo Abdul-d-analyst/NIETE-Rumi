@@ -600,7 +600,7 @@ ${sectionJsonBlocks}
     "title": "<short headline, 3-6 words>",
     "rationale": "<1-2 sentences: why this ONE indicator is the highest-leverage next focus for this teacher>",
     "try_this_tomorrow": "<one concrete classroom move the teacher can try in their very next lesson>",
-    "lever_question": "<one reflective question that helps the teacher self-coach on this focus>"
+    "lever_question": "<ONE short, plain, open question the OBSERVER asks the TEACHER about her OWN lesson — inviting her to reflect on a real moment in this lesson (e.g. 'When you saw…', 'What made you…', 'When the pupils were asked…'). NOT a question about how to design questions, NOT pedagogy jargon, NOT a task. Max 15 words.>"
   },
   "recommendations": ["Actionable recommendation 1", "Actionable recommendation 2", "Actionable recommendation 3"]
 }
