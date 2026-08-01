@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { WHATSAPP_URL } from '@/lib/whatsapp';
 import { BookOpen, MessageSquare, TrendingUp, ExternalLink } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import Chart from 'react-apexcharts';
@@ -189,7 +190,7 @@ const PortalDashboard = () => {
                 title="No lesson plans yet"
                 description="Generate your first lesson plan using the WhatsApp bot"
                 actionLabel="Open WhatsApp"
-                actionHref="https://wa.me/message/WCYNS4DTDB2MD1"
+                actionHref={WHATSAPP_URL}
               />
             )}
           </div>
@@ -255,7 +256,7 @@ const PortalDashboard = () => {
           </p>
           <Button asChild className="bg-accent hover:bg-accent/90">
             <a 
-              href="https://wa.me/message/WCYNS4DTDB2MD1" 
+              href={WHATSAPP_URL} 
               target="_blank" 
               rel="noopener noreferrer"
             >
