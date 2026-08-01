@@ -378,3 +378,48 @@ describe('bd-2477 — the schema permits a capstone attempt row', () => {
     expect(block.slice(0, 1400)).toMatch(/quiz_kind = 'training_module'/);
   });
 });
+
+describe('bd-2478 — a written capstone answer can be stored and is scored honestly', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const schema = () => fs.readFileSync(
+    path.resolve(__dirname, '../../infrastructure/supabase/00_complete-schema.sql'), 'utf8');
+  const answersTable = () => {
+    const s = schema();
+    const i = s.indexOf('CREATE TABLE IF NOT EXISTS training_assessment_answers');
+    return s.slice(i, s.indexOf(');', i));
+  };
+
+  test('the MCQ-only columns are nullable', () => {
+    // is_correct NOT NULL rejected every capstone answer ever written: a free
+    // text answer graded 0-5 has no binary correctness, so the service sends
+    // null. The first real attempt scored 2/40 with zero rows persisted.
+    expect(answersTable()).toMatch(/chosen_option\s+VARCHAR\(32\),/);
+    expect(answersTable()).toMatch(/is_correct\s+BOOLEAN,/);
+  });
+
+  test('the written-answer columns exist in the canonical schema', () => {
+    // These were added to prod by 2026-07-21-capstone-import.sql and never
+    // folded back, so a fresh bootstrap had nowhere to store a capstone answer.
+    const t = answersTable();
+    expect(t).toMatch(/answer_text\s+TEXT/);
+    expect(t).toMatch(/answer_score\s+SMALLINT/);
+    expect(t).toMatch(/feedback_text\s+TEXT/);
+  });
+
+  test('the answer upsert checks its error instead of discarding it', () => {
+    const src = fs.readFileSync(
+      path.resolve(__dirname, '../../bot/shared/services/training/capstone-delivery.service.js'), 'utf8');
+    expect(src).toMatch(/const \{ error: answerErr \} = await supabase\.from\('training_assessment_answers'\)/);
+    expect(src).toMatch(/if \(answerErr\)/);
+  });
+
+  test('finalize refuses to score a partial answer set', () => {
+    // The bug was not just the failed write — it was scoring anyway. The
+    // lastScore fallback turned eight missing rows into a 2/40.
+    const src = fs.readFileSync(
+      path.resolve(__dirname, '../../bot/shared/services/training/capstone-delivery.service.js'), 'utf8');
+    expect(src).toMatch(/byIdx\.size < attempt\.total_questions/);
+    expect(src).toMatch(/refusing to score/);
+  });
+});
