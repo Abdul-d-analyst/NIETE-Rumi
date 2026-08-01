@@ -478,7 +478,7 @@ async function loadVisibleLevelsWithProgress(userId) {
   const levelIds = visibleLevels.map(l => l.id);
   const [{ data: courses }, { data: progressRows }, { data: attempts }, { data: quizzes }] = await Promise.all([
     supabase.from('training_courses').select('id, level_id, is_active').in('level_id', levelIds),
-    supabase.from('teacher_training_progress').select('module_id, module:training_modules(course_id)').eq('user_id', userId),
+    supabase.from('teacher_training_progress').select('module_id').eq('user_id', userId),
     // bd-2391 — GRAND attempts only. Per-module quick-check attempts also carry
     // a level_id and set is_passed=true on a perfect score, so an unfiltered
     // read makes one 9-question module quiz certify the whole level (hiding the
@@ -487,19 +487,46 @@ async function loadVisibleLevelsWithProgress(userId) {
     supabase.from('training_grand_quizzes').select('id, level_id, quiz_type').in('level_id', levelIds).eq('quiz_type', 'grand_quiz'),
   ]);
 
-  // Course completion = every active course under a level has ≥1 module completed
-  // Phase 1: simpler proxy — a course is "started" if any of its modules is in teacher_training_progress
-  const progressByCourse = new Map();
-  for (const p of progressRows || []) {
-    const cid = p?.module?.course_id;
-    if (cid) progressByCourse.set(cid, (progressByCourse.get(cid) || 0) + 1);
+  // bd-2447 — a course is complete when EVERY active module under it is done.
+  //
+  // This used to be a phase-1 proxy: "complete" meant ≥1 module had a progress
+  // row, and that count shipped out as `courses_completed`. One module done in
+  // each of five courses rendered "5/5 courses ✓ · Ready for exam" off five
+  // modules out of sixty, and offered the level exam to a teacher who had
+  // barely started. The proxy's own note said it stood in "until the
+  // module-completion path is wired" — bd-2390 wired it. A
+  // teacher_training_progress row now means the module's quick check was
+  // PASSED (or the module had no quiz), so "all modules have rows" is exactly
+  // "all modules passed".
+  const activeCourseIds = (courses || []).filter(c => c.is_active).map(c => c.id);
+  const { data: levelModules } = activeCourseIds.length
+    ? await supabase
+      .from('training_modules')
+      .select('id, course_id')
+      .in('course_id', activeCourseIds)
+      .eq('is_active', true)
+    : { data: [] };
+  const modulesByCourse = new Map();
+  for (const m of levelModules || []) {
+    if (!modulesByCourse.has(m.course_id)) modulesByCourse.set(m.course_id, []);
+    modulesByCourse.get(m.course_id).push(m.id);
   }
+  const doneModuleIds = new Set((progressRows || []).map(p => p.module_id));
 
   return visibleLevels.map(lv => {
-    const lvCourses = (courses || []).filter(c => c.level_id === lv.id && c.is_active);
-    const coursesStarted = lvCourses.filter(c => (progressByCourse.get(c.id) || 0) > 0);
-    // NOTE: full "course completed" requires all modules of the course to be in progress; phase 1
-    // uses "started" as a proxy until the module-completion path is wired.
+    // A course with no active modules is excluded from the denominator
+    // entirely: counting it as incomplete would strand the level forever,
+    // counting it as complete would hand out a free pass to the exam.
+    const lvCourses = (courses || []).filter(c =>
+      c.level_id === lv.id && c.is_active && (modulesByCourse.get(c.id) || []).length > 0);
+    const lvModuleIds = lvCourses.flatMap(c => modulesByCourse.get(c.id) || []);
+    const coursesCompleted = lvCourses.filter(c =>
+      (modulesByCourse.get(c.id) || []).every(id => doneModuleIds.has(id)));
+    // "Touched" only decides in_progress vs not_started — it must never gate
+    // the exam. Keeping it separate from coursesCompleted is what stops the
+    // two meanings collapsing back into one number.
+    const coursesTouched = lvCourses.filter(c =>
+      (modulesByCourse.get(c.id) || []).some(id => doneModuleIds.has(id)));
     // bd-2391 — `isGrandPass` also guards in memory, not just in the query, so
     // the "only a level exam certifies a level" rule survives a caller that
     // hands us unfiltered rows.
@@ -517,8 +544,8 @@ async function loadVisibleLevelsWithProgress(userId) {
     let state;
     if (chainLocked && !prevPassed && !isFirst) state = 'locked';
     else if (passedAttempt) state = 'certified';
-    else if (coursesStarted.length === lvCourses.length && lvCourses.length > 0) state = 'ready_for_quiz';
-    else if (coursesStarted.length > 0) state = 'in_progress';
+    else if (coursesCompleted.length === lvCourses.length && lvCourses.length > 0) state = 'ready_for_quiz';
+    else if (coursesTouched.length > 0) state = 'in_progress';
     else state = 'not_started';
 
     return {
@@ -533,8 +560,12 @@ async function loadVisibleLevelsWithProgress(userId) {
       unlock_logic: vendor?.unlock_logic || 'chain',
       state,
       courses_total: lvCourses.length,
-      courses_completed: coursesStarted.length,
-      pct_complete: lvCourses.length === 0 ? 0 : Math.round((coursesStarted.length / lvCourses.length) * 100),
+      courses_completed: coursesCompleted.length,
+      // Module-based, so a teacher part-way through every course still sees
+      // movement ("0/5 courses · 25% done") instead of a flat 0%.
+      pct_complete: lvModuleIds.length === 0
+        ? 0
+        : Math.round((lvModuleIds.filter(id => doneModuleIds.has(id)).length / lvModuleIds.length) * 100),
       passed_at: passedAttempt?.completed_at || null,
       cooldown_until: cooldownAttempt?.cooldown_until || null,
       grand_quiz_id: grand?.id || null,
@@ -578,14 +609,17 @@ async function loadGrandQuizState(userId, levelId) {
   const cooldown = (attempts || []).find(a => a.status === 'failed' && a.cooldown_until && new Date(a.cooldown_until) > new Date());
   const doneIds = new Set((progressRows || []).map(r => r.module_id));
   const courseIds = new Set((courses || []).map(c => c.id));
-  // Match the "ready_for_quiz" criterion in loadVisibleLevelsWithProgress: a level is
-  // ready when every course has ≥1 module completed (not every module in the level).
-  // Keeping these two checks aligned prevents the "HOME says ready, LEVEL_DETAIL says
-  // locked" mismatch seen with imported historical progress.
-  const startedCourseIds = new Set(
-    (modules || []).filter(m => courseIds.has(m.course_id) && doneIds.has(m.id)).map(m => m.course_id)
-  );
-  const allDone = courseIds.size > 0 && startedCourseIds.size === courseIds.size;
+  // Match the "ready_for_quiz" criterion in loadVisibleLevelsWithProgress —
+  // bd-2447 tightened both together, from "every course has ≥1 module done" to
+  // "every module in the level is done". Keeping these two checks aligned is
+  // what prevents the "HOME says ready, LEVEL_DETAIL says locked" mismatch, so
+  // they must never be changed apart. tests/training/
+  // level-ready-requires-all-modules.test.js asserts the alignment directly.
+  const levelModules = (modules || []).filter(m => courseIds.has(m.course_id));
+  // Courses with no active modules are excluded on both sides; a level whose
+  // courses are all empty is not "done", it is unbuilt.
+  const coursesWithModules = new Set(levelModules.map(m => m.course_id));
+  const allDone = coursesWithModules.size > 0 && levelModules.every(m => doneIds.has(m.id));
 
   if (passed) return { badge: 'badge_quiz_passed', body: '🏆 Grand Quiz — You passed this level exam.', caption: 'Certificate available in your records.', cta: '✓ Passed' };
   if (cooldown) {
