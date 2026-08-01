@@ -891,7 +891,21 @@ async function handleTeacherTrainingFlow(message, phoneNumber, userId) {
     const QuizDelivery = require('../services/training/quiz-delivery.service');
     return await QuizDelivery.startGrandQuiz(userId, levelOrder, phoneNumber);
   }
-  // Default: teacher just closed the flow, or hit an error screen.
+  // bd-2451 — a refusal used to land here and fall through to `return true`,
+  // so the bot said nothing at all. The Flow's SUCCESS screen is terminal, so
+  // from the teacher's side the Flow just closed and the chat stayed silent —
+  // reported as "I tapped the locked one and it never replied to me". The
+  // endpoint now sends the reason out with the closure; relay it.
+  if (trainingAction === 'error') {
+    const reason = payload.error_message;
+    if (reason) {
+      await WhatsAppService.sendMessage(phoneNumber, String(reason));
+    } else {
+      logToFile('⚠️ Training flow closed on error with no error_message', { phoneNumber, userId });
+    }
+    return true;
+  }
+  // Default: teacher just closed the flow.
   return true;
 }
 

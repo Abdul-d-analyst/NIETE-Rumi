@@ -103,34 +103,25 @@ async function startGrandQuiz(userId, levelOrder, phoneNumber) {
     return false;
   }
 
-  // 1. Level from order_index — WITHIN THE TEACHER'S OWN SCOPED CATALOG.
+  // bd-2452/2453 — ONE gate, shared with the Flow's start_grand_quiz branch.
   //
-  // bd-2392: order_index is per-vendor, so it is NOT unique. NIETE Skilled
-  // Practitioner and Beacon House Mathematics are both order_index 2; the old
-  // `.eq('order_index', n).maybeSingle()` matched two rows, errored, and told
-  // the teacher "Could not find that level" — every NIETE level exam except
-  // Aspiring Teacher (order_index 0) was unreachable.
+  // This used to resolve the level itself and start the exam unconditionally.
+  // The Flow's "🔒 Locked" / "✓ Passed" CTAs are tappable EmbeddedLinks with no
+  // disabled state, so an ungated start meant a teacher could sit a level exam
+  // with the level unfinished (reproduced live at 38/40 modules), or re-sit an
+  // already-certified level and mint a duplicate certificate.
   //
-  // Resolving through loadVisibleLevelsWithProgress() also means we can only
-  // ever start an exam on a level the teacher is actually scoped to.
-  const { loadVisibleLevelsWithProgress } = require('../../routes/teacher-training-endpoint');
-  const catalog = await loadVisibleLevelsWithProgress(userId);
-  const candidates = (catalog || []).filter(l => l.order_index === levelOrderIdx);
-  // Prefer a level whose vendor actually has a grand quiz; among ties prefer
-  // the one the teacher is ready to sit. Chain vendors (NIETE) are the only
-  // ones with a real grand_quiz, so this resolves the collision cleanly.
-  const level =
-    candidates.find(l => l.state === 'ready_for_quiz' && l.grand_quiz_id) ||
-    candidates.find(l => l.grand_quiz_id) ||
-    candidates[0] ||
-    null;
-  if (!level) {
-    logToFile('❌ Level lookup failed — not in the teacher\'s scoped catalog', {
-      userId, levelOrder, levelOrderIdx, candidates: (catalog || []).map(l => l.order_index),
-    });
-    await WhatsAppService.sendMessage(phoneNumber, 'Could not find that level. Send /training to try again.');
+  // assertCanStartGrandQuiz resolves the level from the teacher's own scoped
+  // catalog (bd-2392: order_index is per-vendor and not unique) AND checks
+  // locked / no-exam / already-passed / cooldown / incomplete in one place.
+  const { assertCanStartGrandQuiz } = require('../../routes/teacher-training-endpoint');
+  const gate = await assertCanStartGrandQuiz(userId, levelOrder);
+  if (!gate.ok) {
+    logToFile('🎓 startGrandQuiz refused', { userId, levelOrder, reason: gate.reason });
+    await WhatsAppService.sendMessage(phoneNumber, gate.message);
     return false;
   }
+  const level = gate.level;
   logToFile('🎓 Resolved grand-quiz level', {
     userId, levelOrder, levelId: level.id, name: level.name, vendor: level.vendor_key,
   });
