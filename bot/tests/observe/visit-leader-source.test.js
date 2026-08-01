@@ -98,6 +98,35 @@ describe('FICO analysis shape (the bd-2300 regression class)', () => {
     expect(s).toBeLessThan(0.8);
   });
 
+  // bd-2456 — the LIVE FICO analyzer writes domain_score/domain_max (verified
+  // against prod rows), NOT area_score/area_max as the fixture above assumed.
+  // _slotRatio must resolve this shape too, or every real NIETE teacher's
+  // growth/strength degrades to noData and the score survives only via the
+  // overall_percentage fallback.
+  const LIVE_FICO_ANALYSIS = {
+    framework: 'fico',
+    domains: {
+      student_engagement: { domain_score: 21, domain_max: 28 },
+      lesson_plan_fidelity: { domain_score: 24, domain_max: 40 },
+      high_leverage_practices: { domain_score: 28, domain_max: 48 },
+      teacher_subject_knowledge: { domain_score: 19, domain_max: 32 },
+    },
+    scores: { overall_percentage: 62.2 },
+  };
+
+  test('LIVE FICO shape (domain_score/domain_max) resolves weakest/strongest (bd-2456)', () => {
+    expect(weakestAreaFromAnalysis(LIVE_FICO_ANALYSIS)).toBe('high_leverage_practices'); // 28/48 = .58
+    expect(strongestAreaFromAnalysis(LIVE_FICO_ANALYSIS)).toBe('student_engagement');    // 21/28 = .75
+  });
+
+  test('LIVE FICO shape yields a per-area mean score, not just the percentage fallback (bd-2456)', () => {
+    const s = overallScoreFromAnalysis(LIVE_FICO_ANALYSIS);
+    // mean of .75, .60, .583, .594 ≈ .632 — distinct from the .622 fallback,
+    // proving the ratios (not overall_percentage) produced it.
+    expect(s).toBeGreaterThan(0.625);
+    expect(s).toBeLessThan(0.64);
+  });
+
   test('falls back to scores.overall_percentage when domains malformed', () => {
     expect(overallScoreFromAnalysis({ scores: { overall_percentage: 65 } })).toBeCloseTo(0.65);
     expect(overallScoreFromAnalysis({})).toBeNull();
