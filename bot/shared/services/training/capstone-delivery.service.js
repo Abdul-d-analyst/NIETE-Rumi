@@ -166,6 +166,37 @@ async function handleCapstoneButton(userId, buttonId, phoneNumber) {
   const questions = await loadCapstoneQuestions(quiz.id);
   if (questions.length === 0) return false;
 
+  // bd-2454 — re-check the SAME preconditions maybeOfferCapstone checks before
+  // offering. WhatsApp interactive buttons live in chat history forever, so a
+  // button offered months ago (or offered legitimately and then tapped after
+  // the teacher's progress changed) would otherwise start a capstone with the
+  // level unfinished, or a second one on a level already passed. The offer
+  // being gated is not the same as the start being gated.
+  const { data: alreadyPassed } = await supabase
+    .from('training_assessment_attempts')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('level_id', levelId)
+    .eq('quiz_kind', KIND_CAPSTONE)
+    .eq('is_passed', true)
+    .maybeSingle();
+  if (alreadyPassed) {
+    logToFile('🎓 Capstone start refused — already passed', { userId, levelId });
+    await WhatsAppService.sendMessage(
+      phoneNumber,
+      'You have already passed this level\'s Grand Quiz — your certificate is in your records.'
+    );
+    return true;
+  }
+  if (!(await levelFullyComplete(userId, levelId))) {
+    logToFile('🎓 Capstone start refused — level incomplete', { userId, levelId });
+    await WhatsAppService.sendMessage(
+      phoneNumber,
+      'Finish every module in this level first — the Grand Quiz unlocks once the level is complete.'
+    );
+    return true;
+  }
+
   const { data: assignment } = await supabase
     .from('teacher_training_assignments')
     .select('program_id')

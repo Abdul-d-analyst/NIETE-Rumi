@@ -130,14 +130,14 @@ async function handleTeacherTrainingDataExchange(userId, screen, screenData /*, 
       });
     }
     if (action === 'start_grand_quiz') {
-      // WhatsApp Flow's on-click-action.payload doesn't interpolate ${data.*} —
-      // only literals and ${form.*} — so LEVEL_DETAIL can't pass level_order back
-      // through the button. Infer it from server state (scoped to the current
-      // vendor when we know it) instead: only ONE level can be in
-      // 'ready_for_quiz' at a time within a chain-locked vendor, so lookup is
-      // unambiguous.
-      let levelOrder = screenData._level_order;
-      if (!levelOrder) {
+      // bd-2452 — `if (!levelOrder)` was the wrong guard. If ${data.level_order}
+      // ever failed to interpolate, the LITERAL string "${data.level_order}" is
+      // truthy, so the fallback never fired and the literal sailed through to
+      // parseInt -> NaN. Only an actual number may be trusted; anything else
+      // falls through to inference.
+      const rawOrder = String(screenData._level_order ?? '').trim();
+      let levelOrder = /^\d+$/.test(rawOrder) ? parseInt(rawOrder, 10) : null;
+      if (levelOrder === null) {
         const catalog = await loadVisibleLevelsWithProgress(userId);
         const scoped = vendorKey
           ? (catalog || []).filter(l => l.vendor_key === vendorKey)
@@ -146,12 +146,24 @@ async function handleTeacherTrainingDataExchange(userId, screen, screenData /*, 
         if (readyLevels.length === 1) {
           levelOrder = readyLevels[0].order_index + 1;
           logToFile('🎓 Inferred levelOrder from ready state', { userId, vendorKey, levelOrder });
+        } else if (scoped.length === 1) {
+          // No level is ready, but the scope is unambiguous — resolve to it so
+          // assertCanStartGrandQuiz can explain WHY rather than dead-ending on
+          // "open the level again", which just loops the teacher.
+          levelOrder = scoped[0].order_index + 1;
         } else {
           logToFile('❌ Cannot infer levelOrder for start_grand_quiz', {
-            userId, vendorKey, readyCount: readyLevels.length,
+            userId, vendorKey, rawOrder, readyCount: readyLevels.length, scopedCount: scoped.length,
           });
           return errorScreen('Please open the level again and tap Take exam.');
         }
+      }
+      // bd-2452 — THE GATE. The "🔒 Locked" / "✓ Passed" / blank CTA are all
+      // tappable links; this is what actually refuses them.
+      const gate = await assertCanStartGrandQuiz(userId, levelOrder, vendorKey);
+      if (!gate.ok) {
+        logToFile('🎓 Refused grand-quiz start', { userId, levelOrder, reason: gate.reason });
+        return errorScreen(gate.message);
       }
       return buildSuccessScreen('Starting your exam…', {
         trainingAction: 'start_grand_quiz',
@@ -656,6 +668,84 @@ async function loadVisibleLevelsWithProgress(userId) {
   });
 }
 
+/**
+ * bd-2452/2453 — the ONE precondition check for starting a level exam.
+ *
+ * Every "locked" state in this Flow used to live only in the CTA text. A
+ * WhatsApp Flow `EmbeddedLink` has no disabled state and the published item
+ * schema can't add one, so "🔒 Locked" was always tappable — and the
+ * start_grand_quiz branch had no check at all. Reproduced live: a level at
+ * 38/40 modules rendered "🔒 Locked", the teacher tapped it, and the exam
+ * started and recorded an answer.
+ *
+ * The rule this encodes: the label is advisory, the handler is the gate.
+ *
+ * Reasons are derived from the SAME level state the UI renders
+ * (loadVisibleLevelsWithProgress), so the refusal can never disagree with the
+ * badge the teacher is looking at.
+ *
+ * @param {string} userId
+ * @param {number} levelOrder 1-based level order as sent by the Flow
+ * @param {string|null} vendorKey scope, when known
+ * @returns {Promise<{ok: boolean, level?: object, reason?: string, message?: string}>}
+ */
+async function assertCanStartGrandQuiz(userId, levelOrder, vendorKey = null) {
+  const idx = (typeof levelOrder === 'number' ? levelOrder : parseInt(levelOrder, 10)) - 1;
+  if (!Number.isFinite(idx) || idx < 0) {
+    return { ok: false, reason: 'bad_level', message: 'Please open the level again and tap Take exam.' };
+  }
+  const catalog = await loadVisibleLevelsWithProgress(userId);
+  const scoped = vendorKey ? (catalog || []).filter(l => l.vendor_key === vendorKey) : (catalog || []);
+  const candidates = scoped.filter(l => l.order_index === idx);
+  // bd-2392 — order_index is per-vendor and therefore not unique. Prefer a
+  // level the teacher is actually ready to sit, then one that has an exam.
+  const level =
+    candidates.find(l => l.state === 'ready_for_quiz' && l.grand_quiz_id) ||
+    candidates.find(l => l.grand_quiz_id) ||
+    candidates[0] || null;
+
+  if (!level) {
+    return { ok: false, reason: 'not_in_program', message: 'That level is not part of your program.' };
+  }
+  if (level.state === 'locked') {
+    return {
+      ok: false, reason: 'level_locked', level,
+      // Display numbers are 0-based for ladder vendors (bd-2235), so the
+      // previous level reads as order_index - 1.
+      message: `You need to pass Level ${level.order_index - 1}'s exam before this level opens.`,
+    };
+  }
+  if (!level.grand_quiz_id) {
+    return {
+      ok: false, reason: 'no_exam', level,
+      message: 'There is no level exam set up for this level yet. Please contact NIETE support.',
+    };
+  }
+  // bd-2453 — a pass closes the exam for good. Re-sitting created a second
+  // attempt, and issueCertificate dedupes per attempt_id (not per level), so
+  // re-passing minted a duplicate certificate for an already-certified level.
+  if (level.state === 'certified') {
+    return {
+      ok: false, reason: 'already_passed', level,
+      message: 'You have already passed this level exam — your certificate is in your records.',
+    };
+  }
+  if (level.cooldown_until && new Date(level.cooldown_until) > new Date()) {
+    const hours = Math.max(1, Math.round((new Date(level.cooldown_until) - Date.now()) / 3_600_000));
+    return {
+      ok: false, reason: 'cooldown', level,
+      message: `You attempted this exam recently. Please try again in about ${hours} hours.`,
+    };
+  }
+  if (level.state !== 'ready_for_quiz') {
+    return {
+      ok: false, reason: 'incomplete', level,
+      message: `Finish every module in this level first — the exam unlocks once all ${level.courses_total} courses are complete.`,
+    };
+  }
+  return { ok: true, level };
+}
+
 async function loadCoursesWithProgress(userId, levelId) {
   const [{ data: courses }, { data: progressRows }, { data: modules }] = await Promise.all([
     supabase.from('training_courses').select('id, title, order_index').eq('level_id', levelId).eq('is_active', true).order('order_index'),
@@ -885,7 +975,19 @@ function buildSuccessScreen(message, extras = {}) {
 function errorScreen(message) {
   return {
     screen: 'SUCCESS',
-    data: { message, extension_message_response: { params: { training_action: 'error' } } },
+    data: {
+      message,
+      extension_message_response: {
+        params: {
+          training_action: 'error',
+          // bd-2451 — carry the reason out with the Flow closure. SUCCESS is a
+          // terminal screen, so a refusal ends the Flow; without this the bot's
+          // handler had nothing to say and returned silently, which is what a
+          // teacher experiences as "it just never replied to me".
+          error_message: String(message || ''),
+        },
+      },
+    },
   };
 }
 
@@ -939,4 +1041,7 @@ module.exports = {
   // without a DB fixture.
   annotateModuleLocks,
   checkModuleUnlocked,
+  // bd-2452/2453 — the single precondition check for starting a level exam,
+  // shared by the Flow branch and quiz-delivery.startGrandQuiz.
+  assertCanStartGrandQuiz,
 };
