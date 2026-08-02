@@ -966,6 +966,11 @@ async function buildMsqFlowScreenData(userId, attemptId, questionIndex) {
     // longer on display is dropped — an init-value with no matching option is
     // how a CheckboxGroup renders empty.
     selected: [...stored].filter(s => r.displayOrder.includes(Number(s))).map(String),
+    // bd-2502 — the ceiling travels with the question. This was frozen at 10 in
+    // the Flow JSON, so a 5-option question told the teacher "Select 1-10".
+    // Bound to what is actually rendered: the displayed set after bd-2495's cap
+    // and shuffle, never the raw bank and never a constant.
+    max_selected: options.length,
     attempt_ref: `${r.attempt.id}:${r.index}`,
     training_msq_action: 'submit',
   };
