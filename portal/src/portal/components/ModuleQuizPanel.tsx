@@ -210,8 +210,14 @@ const ModuleQuizPanel = ({
           Quiz result: {result.score} / {result.max_score} ({pct}%)
         </div>
         <p className="text-sm text-muted-foreground">
+          {/* bd-2489 — `is_passed` means "cleared the vendor's
+              module_passing_pct" (bd-2483), not "got everything right". Beacon
+              House and Oxbridge pass at 70%, so this congratulated a 7/10 as a
+              perfect score. Only claim perfect when it actually is. */}
           {result.is_passed
-            ? 'Perfect score — great work!'
+            ? (result.score === result.max_score
+              ? 'Perfect score — great work!'
+              : 'Passed — nice work!')
             : 'This quiz is a self-check — your module still counts as complete. Review the content above and retake any time.'}
         </p>
         <Button variant="outline" size="sm" onClick={handleStart} data-testid="quiz-retake-button">

@@ -469,4 +469,9 @@ module.exports = {
   // exported for the certificate trigger tests
   levelFullyComplete,
   BUTTON_PREFIX,
+  // bd-2489 — the portal's capstone result card used to hardcode "70%". It is
+  // the same number as this constant, which made the copy correct by
+  // coincidence rather than by construction. Exported so the portal endpoint
+  // can send the bar it is ACTUALLY graded against, and the two cannot drift.
+  CAPSTONE_PASS_PCT: PASS_PCT,
 };
