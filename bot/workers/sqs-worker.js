@@ -40,6 +40,7 @@ const LessonPlanExtractionWorker = require('./lesson-plan-extraction.worker');
 const LessonPlanGenerationWorker = require('./lesson-plan-generation.worker');
 const VideoGenerationWorker = require('./video-generation.worker');
 const ExamGradingWorker = require('./exam-grading.worker');
+const { runSonioxCleanup } = require('../shared/services/soniox-cleanup.service');
 const os = require('os');
 
 // Configuration
@@ -978,6 +979,40 @@ function startWorker() {
     }, STALE_CHECK_INTERVAL_MS);
 
     logToFile('Periodic stale job recovery enabled (every 5 minutes)');
+
+    // bd-2378: NIETE has no Railway Cron for stale-session.worker.js, so the
+    // Soniox storage purge is driven from this always-on worker instead. Every
+    // 15 minutes, delete old (>2h) completed transcriptions + files so the
+    // Soniox account never fills up (~2000) and starts failing transcription.
+    const SONIOX_CLEANUP_INTERVAL_MS = 15 * 60 * 1000;
+    setInterval(async () => {
+      if (worker.isShuttingDown) return;
+      try {
+        const res = await runSonioxCleanup();
+        logToFile('🧹 Soniox periodic cleanup', res);
+      } catch (error) {
+        logToFile('Error in Soniox periodic cleanup (non-fatal)', { error: error.message });
+      }
+    }, SONIOX_CLEANUP_INTERVAL_MS);
+
+    logToFile('Periodic Soniox storage cleanup enabled (every 15 minutes)');
+
+    // bd-2417: NIETE has no Railway Cron, so drive stale-session recovery from
+    // this always-on worker too — auto-complete abandoned reflection sessions
+    // (send the report), and unfreeze sessions stuck at the confirmation gate.
+    const { runRecovery } = require('./stale-session.worker');
+    const STALE_RECOVERY_INTERVAL_MS = 15 * 60 * 1000;
+    setInterval(async () => {
+      if (worker.isShuttingDown) return;
+      try {
+        const res = await runRecovery();
+        logToFile('🔄 Stale-session recovery sweep', res);
+      } catch (error) {
+        logToFile('Error in stale-session recovery (non-fatal)', { error: error.message });
+      }
+    }, STALE_RECOVERY_INTERVAL_MS);
+
+    logToFile('Periodic stale-session recovery enabled (every 15 minutes)');
   });
 }
 

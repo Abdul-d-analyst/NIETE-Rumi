@@ -99,6 +99,23 @@ async function handleImageMessage(message, from, user = null) {
           .single();
 
         if (photoSession && (photoSession.conversation_state?.current_state === 'COLLECTING_PHOTOS' || photoSession.conversation_state?.current_state === 'AWAITING_PHOTO')) {
+          // bd-2371: de-dup at-least-once webhook redelivery for the classroom
+          // photo branch too — a redelivered copy must not append the same photo
+          // twice or re-fire the "photo N received" ack.
+          const photoImageId = message.image?.id;
+          const photoKey = `image:${user.id}:${photoImageId}`;
+          const photoClaimed = await redisService.setNX(
+            photoKey,
+            JSON.stringify({ status: 'classroom_photo_handled', startedAt: Date.now() }),
+            IDEMPOTENCY_TTL_SECONDS,
+          );
+          if (!photoClaimed) {
+            logToFile('🔁 Duplicate classroom-photo webhook — skipping', {
+              coachingSessionId: photoSession.id, userId: user.id, imageId: photoImageId,
+            });
+            typingController.stop();
+            return;
+          }
           logToFile('📸 Phase 3: Classroom photo received for coaching session', {
             coachingSessionId: photoSession.id,
             userId: user.id
@@ -118,7 +135,7 @@ async function handleImageMessage(message, from, user = null) {
             await WhatsAppService.sendMessage(
               from,
               userLang === 'ur'
-                ? '📸 آپ زیادہ سے زیادہ 3 تصاویر بھیج سکتی ہیں۔ اب تجزیہ شروع کیا جا رہا ہے۔'
+                ? '📸 زیادہ سے زیادہ 3 تصاویر بھیجی جا سکتی ہیں۔ اب تجزیہ شروع کیا جا رہا ہے۔'
                 : '📸 You can upload a maximum of 3 photos. Starting analysis now.'
             );
             const CoachingSessionService = require('../services/coaching/coaching-session.service');
@@ -164,7 +181,7 @@ async function handleImageMessage(message, from, user = null) {
             });
           } else {
             const confirmMsg = userLang === 'ur'
-              ? `📸 تصویر ${existingPhotos.length} موصول۔ کیا آپ ایک اور تصویر شامل کرنا چاہیں گی؟`
+              ? `📸 تصویر ${existingPhotos.length} موصول۔ کیا ایک اور تصویر شامل کرنی ہے؟`
               : `📸 Photo ${existingPhotos.length} received. Would you like to add another photo?`;
             await WhatsAppService.sendInteractiveButtons(from, {
               body: confirmMsg,
@@ -213,6 +230,23 @@ async function handleImageMessage(message, from, user = null) {
 
         if (lpSession) {
           const imageId = message.image?.id;
+          // bd-2371: de-dup at-least-once webhook redelivery. Claim the image
+          // key BEFORE processing so a redelivered copy is a silent no-op —
+          // otherwise the teacher gets duplicate "got your plan" acks and the
+          // analysis is double-queued (Sana Nawaz, ICT, 3× duplicate acks).
+          const lpImageKey = `image:${user.id}:${imageId}`;
+          const lpClaimed = await redisService.setNX(
+            lpImageKey,
+            JSON.stringify({ status: 'lp_image_handled', startedAt: Date.now() }),
+            IDEMPOTENCY_TTL_SECONDS,
+          );
+          if (!lpClaimed) {
+            logToFile('🔁 Duplicate lesson-plan image webhook — skipping', {
+              coachingSessionId: lpSession.id, userId: user.id, imageId,
+            });
+            typingController.stop();
+            return;
+          }
           logToFile('📄 Lesson plan received as image for coaching session', {
             coachingSessionId: lpSession.id, userId: user.id, imageId,
           });
@@ -743,7 +777,7 @@ async function handleCoalescedBatch({ user, from, batch }) {
       });
       // Fall back to a polite single message if vision-feedback also failed.
       const fallback = isUrdu
-        ? '📷 آپ کی تصاویر مل گئیں۔ اگر آپ لیسن پلان چاہتی ہیں، براہ کرم کسی نصابی کتاب کے صفحے کی واضح تصویر بھیجیں۔ مدد کے لیے "menu" لکھیں۔'
+        ? '📷 آپ کی تصاویر مل گئیں۔ اگر آپ کو لیسن پلان چاہیے، براہ کرم کسی نصابی کتاب کے صفحے کی واضح تصویر بھیجیں۔ مدد کے لیے "menu" لکھیں۔'
         : "📷 Got your image(s). For a lesson plan, please send a clear photo of a textbook page. Type \"menu\" to see other things I can help with.";
       await WhatsAppService.sendMessage(from, fallback);
     }

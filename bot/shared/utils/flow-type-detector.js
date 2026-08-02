@@ -5,6 +5,7 @@
  * Used by whatsapp-bot.js to route nfm_reply messages to the correct handler.
  *
  * Flow types:
+ * - training_msq: Training multi-answer question (training_msq_action)
  * - reading_assessment: Reading assessment flow (Student_Full_Name, Assessment_Mode)
  * - exam_generator: Exam generator flow (`:exam-generator:` in flow_token)
  * - attendance_setup: Class setup flow (class_name + student_list/students_text)
@@ -42,6 +43,17 @@ function detectFlowType(responseJson) {
     return 'teacher_training';
   }
 
+  // 0.05 Training multi-answer question — the select-all-that-apply
+  //      CheckboxGroup Flow. The screen echoes training_msq_action in its
+  //      completion payload; the field is unique to this flow, so the rule
+  //      cannot false-positive. MUST sit above the loose attendance_marking
+  //      fallback: the token `<userId>:training-msq:<attemptId>:<index>` is
+  //      full of colons and would otherwise be misrouted to attendance —
+  //      the same class of bug that hit the exam-generator and observe flows.
+  if (responseJson.training_msq_action !== undefined) {
+    return 'training_msq';
+  }
+
   // 0.1 Observe (FEAT-102) — the editable FICO observation form submission.
   //     The endpoint returns extension_message_response.params.observe_action.
   //     Unique field; MUST be detected before the loose attendance_marking
@@ -49,6 +61,21 @@ function detectFlowType(responseJson) {
   //     colon and would otherwise misroute to attendance.
   if (responseJson.observe_action !== undefined) {
     return 'observe';
+  }
+
+  // 0.2 Observe Visit picker (bd-2432, port of main-bot FEAT-116 bd-2301).
+  //     The "Start observation" completion carries teacher_ext_id + step —
+  //     teacher_ext_id is UNIQUE to this flow, so the rule is false-positive-
+  //     proof. MUST sit above the loose attendance_marking flow_token fallback
+  //     (any ':' in the token) — the exact misroute class that hit the
+  //     exam-generator on 2026-07-12 and observe (0.1) before it.
+  if (responseJson.teacher_ext_id !== undefined && responseJson.step !== undefined) {
+    return 'observe_visit';
+  }
+  // bd-2444: the scheduling UI's other exits (debrief tap, "I'm done") carry
+  // an explicit discriminator — same misroute-proofing as above.
+  if (responseJson.observe_visit_action !== undefined) {
+    return 'observe_visit';
   }
 
   // 1. Reading Assessment (highest priority - unique fields)

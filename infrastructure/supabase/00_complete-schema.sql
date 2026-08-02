@@ -3770,8 +3770,21 @@ CREATE TABLE IF NOT EXISTS training_assessment_answers (
     attempt_id                UUID NOT NULL REFERENCES training_assessment_attempts(id) ON DELETE CASCADE,
     question_index            INTEGER NOT NULL,
     question_id               BIGINT NOT NULL REFERENCES training_questions(id),
-    chosen_option             VARCHAR(16) NOT NULL,
-    is_correct                BOOLEAN NOT NULL,
+    -- bd-2478 — chosen_option/is_correct are MCQ-specific and NULLABLE. A
+    -- capstone answer is free text graded 0-5, with no chosen option and no
+    -- binary correctness. They were NOT NULL until 2026-08-02, which rejected
+    -- every capstone answer row ever written: the first real attempt scored
+    -- 2/40 because none of its eight answers persisted. Placeholders were
+    -- considered and rejected — is_correct=false on a 5/5 written answer is
+    -- untrue, and gradeAttempt counts is_correct for MCQ scoring.
+    chosen_option             VARCHAR(32),
+    is_correct                BOOLEAN,
+    -- Written-answer columns (added to prod by 2026-07-21-capstone-import.sql
+    -- and only folded in here on 2026-08-02 — a fresh bootstrap had no capstone
+    -- storage at all until now).
+    answer_text               TEXT,
+    answer_score              SMALLINT,
+    feedback_text             TEXT,
     answered_at               TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (attempt_id, question_index)
 );
@@ -3888,11 +3901,48 @@ ALTER TABLE dashboard_users ADD COLUMN IF NOT EXISTS phone_number VARCHAR(20);
 -- column. Populated on every inbound by bot-helpers.getOrCreateUser.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS last_message_at TIMESTAMPTZ;
 
+-- training_vendors: per-vendor QUIZ SERVING policy. How many questions an
+-- attempt is asked, and in what option order, is a property of the content
+-- authority — imported banks differ wildly in size and tagging — so it is
+-- configuration, not code. Defaults reproduce the original behaviour exactly
+-- (serve every question, in order_index order, options unshuffled), which is
+-- also the fail-open fallback when the vendor row cannot be resolved.
+--   * module_quiz_strategy — 'all' | 'one_per_bloom'. one_per_bloom serves one
+--                            question per distinct training_questions.bloom_level
+--                            on the module (floor of 2), turning a 9-question
+--                            median check into a 3-question one.
+--   * exam_question_cap    — max questions in a level exam, chosen at random per
+--                            attempt. NULL = no cap. Imported exams run to 72.
+--   * shuffle_options      — permute MCQ option order per (attempt, question),
+--                            so a re-sit does not present identical lettering.
+--                            Display only: chosen_option stays canonical.
+ALTER TABLE training_vendors ADD COLUMN IF NOT EXISTS module_quiz_strategy VARCHAR(32) NOT NULL DEFAULT 'all';
+ALTER TABLE training_vendors ADD COLUMN IF NOT EXISTS exam_question_cap INTEGER;
+ALTER TABLE training_vendors ADD COLUMN IF NOT EXISTS shuffle_options BOOLEAN NOT NULL DEFAULT FALSE;
+DO $$ BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.table_constraints
+        WHERE constraint_name = 'training_vendors_module_quiz_strategy_ck'
+    ) THEN
+        ALTER TABLE training_vendors
+            ADD CONSTRAINT training_vendors_module_quiz_strategy_ck
+            CHECK (module_quiz_strategy IN ('all', 'one_per_bloom'));
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.table_constraints
+        WHERE constraint_name = 'training_vendors_exam_question_cap_ck'
+    ) THEN
+        ALTER TABLE training_vendors
+            ADD CONSTRAINT training_vendors_exam_question_cap_ck
+            CHECK (exam_question_cap IS NULL OR exam_question_cap > 0);
+    END IF;
+END $$;
+
 -- training_assessment_attempts: extend to support per-module (training) quizzes
 -- in addition to per-level grand quizzes. Grand quizzes are blocking + 100%
 -- pass + 24h cooldown; training-module quizzes are non-blocking, feedback-only,
 -- no cooldown, and fire after every module that has questions.
---   * quiz_kind        — 'grand' (default) or 'training_module'
+--   * quiz_kind        — 'grand' (default), 'training_module', or 'capstone'
 --   * training_module_id — populated only for kind='training_module'
 --   * grand_quiz_id      — NOT NULL relaxed so training-module attempts can
 --                          leave it null (the CHECK constraint below enforces
@@ -3912,6 +3962,13 @@ DO $$ BEGIN
                 (quiz_kind = 'grand' AND grand_quiz_id IS NOT NULL AND training_module_id IS NULL)
                 OR
                 (quiz_kind = 'training_module' AND training_module_id IS NOT NULL)
+                OR
+                -- bd-2477 — the Beacon House capstone. Its questions hang off a
+                -- training_grand_quizzes row (quiz_type='capstone'), so it carries
+                -- a grand_quiz_id and no module, exactly like a grand quiz.
+                -- Omitting this made EVERY capstone insert fail: zero attempts
+                -- existed across 17,656 rows because the feature could not write.
+                (quiz_kind = 'capstone' AND grand_quiz_id IS NOT NULL AND training_module_id IS NULL)
             );
     END IF;
 END $$;

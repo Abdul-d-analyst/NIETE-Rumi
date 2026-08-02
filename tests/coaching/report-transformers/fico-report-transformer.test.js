@@ -162,7 +162,7 @@ describe('FICO Report Transformer (ICT canonical rubric)', () => {
   test('SCENARIO: Correct metadata fields', () => {
     const reportData = transformFICOToReportData(mockSession, 'Hassan', mockFICOAnalysis);
     expect(reportData.teacherName).toBe('Hassan');
-    expect(reportData.observerName).toBe('Rumi Digital Coach');
+    expect(reportData.observerName).toBe('NIETE Digital Coach'); // bd-2381: default flipped Rumi→NIETE
     expect(reportData.feedback).toContain('Hassan demonstrated');
   });
 

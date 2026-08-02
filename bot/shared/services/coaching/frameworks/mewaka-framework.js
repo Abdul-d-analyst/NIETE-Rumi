@@ -272,7 +272,7 @@ function buildAnalysisPrompt(transcript, metadata = {}, lessonPlanStructured = n
     "title_sw": "<short Swahili headline>",
     "rationale_sw": "<1-2 sentences>",
     "try_this_tomorrow_sw": "<concrete classroom move>",
-    "lever_question_sw": "<reflective question>"
+    "lever_question_sw": "<SWALI MOJA fupi, wazi, la kawaida ambalo AFISA anamuuliza MWALIMU kuhusu somo lake MWENYEWE — Kiswahili cha kawaida cha Kitanzania. Lianze kwa 'Ulipoona…', 'Nini kilikufanya…', au 'Wanafunzi walipoulizwa…' na limwalike kutafakari wakati halisi wa somo hili. SIYO swali kuhusu jinsi ya kuunda maswali, SIYO istilahi za kifundishaji, SIYO kazi. Neno moja hadi kumi na tano.>"
   },
   "executive_summary_sw": "<2-3 sentence Swahili summary>",
   "notable_moments": [ { "timestamp": "MM:SS", "quote": "<VERBATIM, in the language actually spoken — do NOT translate>", "significance_sw": "..." } ]

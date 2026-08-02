@@ -277,9 +277,10 @@ class ReportGeneratorService {
       // card here → response buttons → (optional follow-ups below).
       try {
         const { generateCommitmentCard } = require('./coaching-card/commitment-card.service');
-        const { renderCommitmentCardImage, generateCardImage } = require('./coaching-card/card-image.service');
         const { getCoachingCardCopy } = require('../../config/coaching-card.config');
-        const { uploadImageWithRetry } = require('../../storage/r2');
+        // card-image render + R2 upload are no longer needed here — the standalone
+        // commitment-card image is no longer sent (the action lives inside the hero
+        // feedback card, so shipping it again as its own image was a duplicate).
 
         // Language for card copy (same resolution used elsewhere).
         const cardLanguage = session.users?.preferred_language || session.transcript_language || 'en';
@@ -315,40 +316,13 @@ class ReportGeneratorService {
         }
 
         if (actionData) {
-          // LLM-path content → Playwright/HTML render (the v12 design).
-          // Fallback-path content → keep the legacy canvas card as a safety net
-          // so a clone that hasn't yet wired the v12 chain still gets a card.
-          let cardBuffer = null;
-          if (actionData._source === 'llm') {
-            cardBuffer = await renderCommitmentCardImage(actionData, actionData.language, teacherFirstName);
-          } else {
-            // Fallback shape carries .indicator + framework; legacy canvas path
-            // expects { action, example, indicator } — adapt minimally.
-            const legacy = {
-              action: actionData.commitment,
-              example: actionData.action,
-              indicator: actionData.indicator || '',
-            };
-            cardBuffer = generateCardImage(legacy, enhancedAnalysis.framework || 'oecd', cardLanguage, cardRegion);
-          }
-
-          if (cardBuffer) {
-            const cardUrl = await uploadImageWithRetry(
-              cardBuffer,
-              session.user_id,
-              `coaching-card-${coachingSessionId}`,
-              'image/png'
-            );
-            // bd-2219: send the card with NO caption. The action text is already
-            // drawn INSIDE the card (card-template renders `action`), so passing
-            // it again as the caption printed the same sentence twice — once in
-            // the image, once as text underneath. Qurat (ICT, 2026-07-21):
-            // "the Commitment Card is being displayed in both text and PNG
-            // formats. It should be displayed in only one format, not both."
-            // The commit prompt + buttons follow immediately, so the card is
-            // never left hanging without context.
-            await WhatsAppService.sendImageFromUrl(from, cardUrl);
-          }
+          // The "one thing to try next class" action already renders INSIDE the
+          // hero feedback card (hero-report.template `tryNext` callout). We used
+          // to ALSO ship it as a second, standalone commitment-card image here —
+          // the same action twice, once in the report card and once as its own
+          // message. The action belongs in the card ONLY, so that standalone
+          // render + send is removed. We KEEP the commit-prompt buttons and the
+          // prioritized_action DB write below — they drive the follow-up flow.
 
           // Response buttons follow regardless of which renderer ran.
           await WhatsAppService.sendInteractiveButtons(from, {
@@ -1003,7 +977,7 @@ class ReportGeneratorService {
         priorFeedback = {
           score: 0,
           maxScore: 0, // Indicates N/A
-          evidence: "This is the teacher's first classroom observation with Rumi. This section will be populated once the first observation is completed.",
+          evidence: "This is the teacher's first classroom observation with NIETE. This section will be populated once the first observation is completed.",
           timestamp: 'N/A',
           isFirstObservation: true
         };

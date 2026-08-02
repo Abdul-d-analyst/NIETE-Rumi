@@ -180,7 +180,7 @@ class VoiceFeedbackService {
       if (topErrors.length === 0) {
         // NO ERRORS - Fluency-focused prompts (prevent hallucination)
         prompts = {
-          en: `You are Rumi, a warm reading coach providing audio feedback to ${teacherName} ABOUT their student ${studentName}.
+          en: `You are the NIETE Teaching Assistant, a warm reading coach providing audio feedback to ${teacherName} ABOUT their student ${studentName}.
 
 **IMPORTANT**: You are speaking TO ${teacherName} (the teacher) ABOUT ${studentName} (the student). Never address the student directly!
 
@@ -207,7 +207,7 @@ ${hasComprehension ? '- Balance fluency and comprehension guidance' : '- Focus o
 - Natural speech, conversational tone
 - Remember: Speak TO the teacher ABOUT the student (not to the student!)`,
 
-          ur: `آپ رومی ہیں، ${teacherName} کے لیے آڈیو فیڈ بیک فراہم کر رہے ہیں۔
+          ur: `آپ NIETE ہیں، ${teacherName} کے لیے آڈیو فیڈ بیک فراہم کر رہے ہیں۔
 
 **خوشخبری**: ${studentName} نے ${accuracy}% درستگی سے پڑھا - بہترین تلفظ! کوئی غلطی نہیں ملی۔
 
@@ -253,7 +253,7 @@ ${hasComprehension ? '- وازن بين إرشادات الطلاقة والفه
 - استخدم علامات العاطفة: [warmly]، [enthusiastically]، [proudly]
 - كلام طبيعي، نبرة محادثة`,
 
-          es: `Eres Rumi, proporcionando retroalimentación en audio a ${teacherName}.
+          es: `Eres el Asistente de Enseñanza de NIETE, proporcionando retroalimentación en audio a ${teacherName}.
 
 **¡Excelentes noticias!**: ${studentName} leyó con ${accuracy}% de precisión - ¡pronunciación excelente! NO se detectaron errores de palabras.
 
@@ -279,7 +279,7 @@ ${hasComprehension ? '- Equilibra la orientación de fluidez y comprensión' : '
       } else {
         // HAS ERRORS - Error-focused prompts (original logic)
         prompts = {
-          en: `You are Rumi, a warm reading coach providing audio feedback to ${teacherName} ABOUT their student ${studentName}.
+          en: `You are the NIETE Teaching Assistant, a warm reading coach providing audio feedback to ${teacherName} ABOUT their student ${studentName}.
 
 **IMPORTANT**: You are speaking TO ${teacherName} (the teacher) ABOUT ${studentName} (the student). Never address the student directly!
 
@@ -309,7 +309,7 @@ ${hasComprehension ? '- Balance pronunciation errors and comprehension guidance 
 - Natural speech, conversational tone
 - Remember: Speak TO the teacher ABOUT the student (not to the student!)`,
 
-          ur: `آپ رومی ہیں، ${teacherName} کے لیے آڈیو فیڈ بیک فراہم کر رہے ہیں۔
+          ur: `آپ NIETE ہیں، ${teacherName} کے لیے آڈیو فیڈ بیک فراہم کر رہے ہیں۔
 
 **کارکردگی**: ${studentName} کا WCPM ${wcpm} (بینچ مارک: ${benchmarkMin}-${benchmarkMax}), درستگی ${accuracy}%, ${onTrack ? 'ٹریک پر' : 'مدد چاہیے'}
 
@@ -364,7 +364,7 @@ ${hasComprehension ? '- وازن بين أخطاء النطق وإرشادات �
 - استخدم علامات العاطفة: [warmly]، [enthusiastically]، [thoughtfully]
 - كلام طبيعي، نبرة محادثة`,
 
-          es: `Eres Rumi, proporcionando retroalimentación en audio a ${teacherName}.
+          es: `Eres el Asistente de Enseñanza de NIETE, proporcionando retroalimentación en audio a ${teacherName}.
 
 **Rendimiento**: WCPM de ${studentName} es ${wcpm} (referencia: ${benchmarkMin}-${benchmarkMax}), Precisión ${accuracy}%, ${onTrack ? 'En camino' : 'Necesita apoyo'}
 
@@ -408,7 +408,7 @@ ${hasComprehension ? '- ¡Equilibra errores de pronunciación y orientación de 
         messages: [
           {
             role: 'system',
-            content: `You are Rumi, a warm and encouraging reading coach. Generate concise, natural voice feedback scripts. MAXIMUM 60 seconds (150-180 words).
+            content: `You are the NIETE Teaching Assistant, a warm and encouraging reading coach. Generate concise, natural voice feedback scripts. MAXIMUM 60 seconds (150-180 words).
 
 **CRITICAL - Addressing Rules**:
 - You are speaking TO the teacher (${teacherName})

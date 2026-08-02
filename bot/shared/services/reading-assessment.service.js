@@ -92,7 +92,7 @@ If this is a concurrent session (student number > 1), mention this is for "${stu
             : 'What language should the reading passage be in?'
         },
         footer: {
-          text: 'Rumi Reading Assessment'
+          text: 'NIETE Reading Assessment'
         },
         action: {
           button: userLanguage === 'ur' ? 'زبانیں' : 'Languages',

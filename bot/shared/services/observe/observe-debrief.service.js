@@ -439,7 +439,7 @@ async function startDebriefFromAudio(user, from, audioId, observeState) {
 // and flipping 'done' after a silent failure would lose the feedback forever
 // (review fix). A throw here keeps status 'pending' and lets SQS retry;
 // the feedback is already persisted, so the retry is deliver-only.
-async function _deliverCoachFeedback(sessionId, from, feedback, S) {
+async function _deliverCoachFeedback(sessionId, from, feedback, S, framework) {
   const { renderCoachFeedbackMessages } = require('./observe-coach-feedback');
   const [praiseMsg, cardMsg] = renderCoachFeedbackMessages(feedback, S);
   const sentPraise = await WhatsAppService.sendMessage(from, praiseMsg);
@@ -448,11 +448,14 @@ async function _deliverCoachFeedback(sessionId, from, feedback, S) {
   // value-anchored). renderCoachCard returns null for harmful debriefs and on
   // any render failure — both fall back to the text card, so an officer can
   // never lose their feedback to a Playwright hiccup. Harm gate unchanged.
+  // bd-2453: the card carries the framework's brand (fico → niete), same
+  // routing as the hero report — one session, one brand, every surface.
   let sentCard = false;
   const { renderCoachCard } = require('./observe-coach-card');
+  const { heroBrandFor } = require('../coaching/report-renderers/renderer-registry');
   const lang = S && S.coach_card_wins_label === 'Ulichofanya vizuri' ? 'sw'
     : (S && S.coach_card_wins_label === 'آپ نے کیا اچھا کیا' ? 'ur' : 'en');
-  const png = await renderCoachCard(feedback, { lang });
+  const png = await renderCoachCard(feedback, { lang, brand: heroBrandFor(framework) });
   if (png) {
     sentCard = await WhatsAppService.sendImageFromBuffer(from, png, S.coach_card_closing);
   }
@@ -524,7 +527,8 @@ async function processDebriefRecording(sessionId, payload = {}) {
   }
   if (observerDebrief.feedback) {
     logToFile('🔭 observe debrief: feedback stored — deliver-only redelivery', { sessionId });
-    await _deliverCoachFeedback(sessionId, from, observerDebrief.feedback, S);
+    await _deliverCoachFeedback(sessionId, from, observerDebrief.feedback, S,
+      session.analysis_data && session.analysis_data.framework);
     return;
   }
 
@@ -595,7 +599,8 @@ async function processDebriefRecording(sessionId, payload = {}) {
     await _mergeObserverDebrief(sessionId, {
       feedback, completed_at: new Date().toISOString(),
     });
-    await _deliverCoachFeedback(sessionId, from, feedback, S);
+    await _deliverCoachFeedback(sessionId, from, feedback, S,
+      session.analysis_data && session.analysis_data.framework);
   } finally {
     try { if (fs.existsSync(tempAudioPath)) fs.unlinkSync(tempAudioPath); } catch (_) { /* temp cleanup */ }
   }

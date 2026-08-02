@@ -1899,7 +1899,7 @@ class WhatsAppService {
             text: "Here's what I can do!"
           },
           body: {
-            text: "I'm your Rumi assistant. I can help you with lesson plans, classroom coaching, reading assessments, and more. Choose a feature to get started:"
+            text: "I'm your NIETE Teaching Assistant. I can help you with lesson plans, classroom coaching, reading assessments, and more. Choose a feature to get started:"
           },
           footer: {
             text: 'Tap to see options'

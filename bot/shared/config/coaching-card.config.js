@@ -15,7 +15,7 @@
  *   focusAreaMessage: {action}, {example}
  *
  * NOTE: `cardFooter` is a per-language seed for the observer role label
- * (default "Rumi Digital Coach"). Callers who know the user's region should
+ * (default "NIETE Digital Coach"). Callers who know the user's region should
  * pass it to `getCoachingCardCopy(language, region)`; the footer is then
  * routed through `coachRoleLabelForRegion(region)` from region-config.js
  * so a region-specific label (e.g. "Human Coach" for the ICT / NIETE
@@ -27,7 +27,7 @@ const COACHING_CARD_COPY = {
   // English (seed + fallback) — wording preserved from prior hardcoded copy.
   en: {
     cardHeader: '🎯 Try This Next Class',
-    cardFooter: 'Rumi Digital Coach',
+    cardFooter: 'NIETE Digital Coach',
     focusAreaTitle: 'Your Focus Area',
     focusAreaMessage: '🎯 *Your Focus Area*\n\n{action}\n\n💡 _{example}_',
     commitPrompt: 'Will you commit to trying this in your next class?',
@@ -41,7 +41,7 @@ const COACHING_CARD_COPY = {
   // Urdu
   ur: {
     cardHeader: '🎯 اگلی کلاس میں یہ آزمائیں',
-    cardFooter: 'Rumi Digital Coach',
+    cardFooter: 'NIETE Digital Coach',
     focusAreaTitle: 'آپ کی توجہ کا شعبہ',
     focusAreaMessage: '🎯 *آپ کی توجہ کا شعبہ*\n\n{action}\n\n💡 _{example}_',
     commitPrompt: 'کیا آپ اگلی کلاس میں یہ آزمانے کا عہد کریں گے؟',
@@ -55,7 +55,7 @@ const COACHING_CARD_COPY = {
   // Arabic
   ar: {
     cardHeader: '🎯 جرّب هذا في الحصة القادمة',
-    cardFooter: 'Rumi Digital Coach',
+    cardFooter: 'NIETE Digital Coach',
     focusAreaTitle: 'مجال تركيزك',
     focusAreaMessage: '🎯 *مجال تركيزك*\n\n{action}\n\n💡 _{example}_',
     commitPrompt: 'هل تلتزم بتجربة هذا في حصتك القادمة؟',
@@ -69,7 +69,7 @@ const COACHING_CARD_COPY = {
   // Spanish
   es: {
     cardHeader: '🎯 Prueba esto en tu próxima clase',
-    cardFooter: 'Rumi Digital Coach',
+    cardFooter: 'NIETE Digital Coach',
     focusAreaTitle: 'Tu área de enfoque',
     focusAreaMessage: '🎯 *Tu área de enfoque*\n\n{action}\n\n💡 _{example}_',
     commitPrompt: '¿Te comprometes a probar esto en tu próxima clase?',

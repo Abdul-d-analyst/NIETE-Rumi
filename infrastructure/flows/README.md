@@ -13,6 +13,7 @@
 | Attendance setup | (pending) | — | `ATTENDANCE_SETUP_FLOW_ID` | ❌ Not yet ported |
 | Attendance marking | (pending) | — | `ATTENDANCE_MARKING_FLOW_ID` | ❌ Not yet ported |
 | Quiz | (pending) | — | `QUIZ_FLOW_ID` | ❌ Not yet ported |
+| Training multi-answer question | `docs/flows/training-msq-flow.json` | `1959631998050385` | `TRAINING_MSQ_FLOW_ID` | 🟡 DRAFT — endpoint set, **not published**. Publish only after the endpoint is deployed (Meta health-checks it first). Env var stays unset until then; unset = list + Done fallback. |
 
 ## Editing an existing Flow
 

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { WHATSAPP_URL } from '@/lib/whatsapp';
 import { ArrowLeft, TrendingUp, Target, Award, Calendar } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import Chart from 'react-apexcharts';
@@ -331,7 +332,7 @@ const PortalCoachingAnalytics = () => {
               </p>
               <Button asChild className="bg-accent hover:bg-accent/90">
                 <a 
-                  href="https://wa.me/message/WCYNS4DTDB2MD1" 
+                  href={WHATSAPP_URL} 
                   target="_blank" 
                   rel="noopener noreferrer"
                 >

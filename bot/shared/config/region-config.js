@@ -70,7 +70,11 @@ function defaultFrameworkForRegion(region) {
 // two-knob shape as the framework selector — one global default + one
 // optional per-region JSON map.
 
-const DEFAULT_COACH_ROLE_LABEL = process.env.DEFAULT_COACH_ROLE_LABEL || 'Rumi Digital Coach';
+// NIETE fork default (OPS-114, bd-2381) — this label is the teacher-facing
+// observerName on coaching-report footers, the coaching card, and the LP-selection
+// footer. Read-only Railway token means the code default is operative (see
+// branding.js). Still env-overridable via DEFAULT_COACH_ROLE_LABEL / the region map.
+const DEFAULT_COACH_ROLE_LABEL = process.env.DEFAULT_COACH_ROLE_LABEL || 'NIETE Digital Coach';
 
 function parseRegionCoachRoleLabelMap() {
   try {
@@ -97,7 +101,7 @@ function coachRoleLabelForRegion(region) {
   if (DEFAULT_COACH_ROLE_LABEL && DEFAULT_COACH_ROLE_LABEL.trim()) {
     return DEFAULT_COACH_ROLE_LABEL.trim();
   }
-  return 'Rumi Digital Coach';
+  return 'NIETE Digital Coach';
 }
 
 module.exports = {

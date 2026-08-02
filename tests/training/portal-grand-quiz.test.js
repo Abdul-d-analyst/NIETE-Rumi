@@ -156,7 +156,15 @@ function seedLevel({
   certificates = [],
 } = {}) {
   tableStates.training_levels = {
-    rows: [{ id: levelId, name: 'Foundations', order_index: 0, is_active: true }],
+    rows: [{ id: levelId, name: 'Foundations', order_index: 0, is_active: true, vendor_id: 'vendor-niete' }],
+  };
+  // bd-2469 — the bot's catalogue is program-scoped and vendor-aware; seed both
+  // so the exam gate can resolve this level (bd-2468).
+  tableStates.training_vendors = {
+    rows: [{ id: 'vendor-niete', key: 'NIETE', name: 'NIETE', unlock_logic: 'chain', has_grand_quiz: true, passing_pct: 80, module_passing_pct: 100 }],
+  };
+  tableStates.training_program_scopes = {
+    rows: [{ program_id: programId, vendor_id: 'vendor-niete', level_ids: null }],
   };
   tableStates.training_courses = {
     rows: [
@@ -197,6 +205,12 @@ function seedLevel({
 }
 
 beforeEach(() => {
+  // bd-2490 — the portal's assessment routes are gated to WhatsApp. This
+  // suite covers the grading logic behind them, which is RETAINED for when
+  // the surface comes back (bd-2488), so it opens the test seam. The
+  // production default stays blocked — see
+  // tests/portal/assessments-are-whatsapp-only.test.js.
+  process.env.PORTAL_ASSESSMENTS_TEST_ENABLE = '1';
   jest.resetModules();
   tableStates = {};
   inserts = [];
@@ -207,6 +221,8 @@ beforeEach(() => {
     from: supabaseFrom,
     rpc: jest.fn().mockResolvedValue({ error: null }),
   }));
+  const { installTrainingDelegation } = require('../fixtures/delegate-training-to-bot');
+  installTrainingDelegation(() => supabaseFrom);
   jest.doMock('../../dashboard/services/r2.service', () => ({
     generatePresignedUrl: jest.fn().mockResolvedValue(null),
     generatePresignedUrls: jest.fn().mockResolvedValue([]),
@@ -234,6 +250,7 @@ beforeEach(() => {
   }), { virtual: true });
 });
 
+afterEach(() => { delete process.env.PORTAL_ASSESSMENTS_TEST_ENABLE; });
 afterEach(() => jest.resetModules());
 
 // ─── GET gate ───────────────────────────────────────────────────────────────
@@ -244,13 +261,24 @@ describe('GET /api/portal/training/level/:id/grand-quiz', () => {
     expect(statusCode).toBe(401);
   });
 
-  it('state=ready when every course in the level has ≥1 completed module', async () => {
+  /**
+   * bd-2447 / bd-2393 — two corrections in one test.
+   *
+   * The title used to read ">=1 completed module": that was the eligibility
+   * PROXY bd-2447 replaced on the bot with "every module passed". The portal
+   * kept the proxy, so it offered the exam to teachers who had barely started.
+   *
+   * pass_mark_pct was also asserted as 100. It was hardcoded in the response,
+   * and bd-2393 ("the exam claimed 100% when the real bar is 80%") had only
+   * ever been fixed on WhatsApp. It is the vendor's bar now.
+   */
+  it('state=ready only when EVERY module in the level is passed', async () => {
     seedLevel({ completedModules: ['m1', 'm2'] });
     const { statusCode, payload } = await invoke({ method: 'get', path: GATE_PATH, userId: 'user-1', params: { id: '1' } });
     expect(statusCode).toBe(200);
     expect(payload.grand_quiz.state).toBe('ready');
     expect(payload.grand_quiz.question_count).toBe(3);
-    expect(payload.grand_quiz.pass_mark_pct).toBe(100);
+    expect(payload.grand_quiz.pass_mark_pct).toBe(80);
     expect(payload.grand_quiz.cooldown_hours).toBe(24);
   });
 

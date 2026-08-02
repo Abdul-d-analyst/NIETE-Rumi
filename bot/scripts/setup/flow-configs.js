@@ -108,6 +108,19 @@ const FLOW_CONFIGS = [
     categories: ['OTHER'],
   },
   {
+    // Multi-answer ("select all that apply") training quiz questions. ONE Flow
+    // serves every such question — the text, the options and the already-checked
+    // set come from the endpoint's INIT, keyed on the attempt in the flow token.
+    // Leaving TRAINING_MSQ_FLOW_ID unset falls those questions back to the
+    // interactive-list + Done delivery, which is the rollback lever.
+    name: 'Training Multi-Answer Question',
+    jsonPath: path.join(FLOWS_DIR, 'training-msq-flow.json'),
+    type: 'endpoint',
+    endpointPath: '/api/flows/training-msq',
+    envVar: 'TRAINING_MSQ_FLOW_ID',
+    categories: ['OTHER'],
+  },
+  {
     // Optional polished registration form. OSS registration also works
     // conversationally (name capture); this Flow is sent instead only when
     // REGISTRATION_FLOW_ID is set. The /registration endpoint already handles
@@ -147,13 +160,20 @@ const FLOW_CONFIGS = [
     categories: ['OTHER'],
   },
   {
-    // Pakistan LP picker (FEAT-059). Grade → Subject → Chapter dropdown
-    // over pre_generated_lps where curriculum='pakistan'. Populated by
-    // bot/scripts/seed-feat059-feat080-pakistan-lps.js. The `lp`/`lesson
-    // plan` keyword in text-message.handler.js sends this Flow when
-    // PAKISTAN_LP_FLOW_ID is set.
-    name: 'Pakistan LP',
-    jsonPath: path.join(FLOWS_DIR, 'pakistan-lp-flow-v1.json'),
+    // Pakistan LP picker (FEAT-109 v2). Grade → Subject → Chapter → Topic
+    // dropdown over pre_generated_lps where curriculum='pakistan'. Populated
+    // by bot/scripts/seed-feat059-feat080-pakistan-lps.js + the FEAT-109
+    // chapter-load pipeline. The `menu_lesson_plan` button in menu.service.js
+    // sends this Flow when PAKISTAN_LP_FLOW_ID is set (bypassing the Gamma
+    // topic-prompt path).
+    //
+    // v1 → v2 diff (2026-07-31): removed the SPEC welcome screen so INIT
+    // lands on SELECT_GRADE directly; added SELECT_CHAPTER between SUBJECT
+    // and TOPIC, so the picker is now 4 selections (Grade → Subject →
+    // Chapter → Topic) instead of 3. New Flow name so Meta creates a fresh
+    // Flow (published Flows are immutable per Meta).
+    name: 'Pakistan LP v2',
+    jsonPath: path.join(FLOWS_DIR, 'pakistan-lp-flow-v2.json'),
     type: 'endpoint',
     endpointPath: '/api/flows/pakistan-lp',
     envVar: 'PAKISTAN_LP_FLOW_ID',

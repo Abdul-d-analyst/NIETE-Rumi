@@ -31,7 +31,31 @@ const RATE_LIMIT_ENV_VARS = [
 ];
 
 /** All env vars touched by this test suite */
-const ALL_ENV_VARS = [...VOICE_ENV_VARS, ...RATE_LIMIT_ENV_VARS];
+const ALL_ENV_VARS = [...VOICE_ENV_VARS, ...RATE_LIMIT_ENV_VARS, 'RUMI_LOGO_R2_KEY'];
+
+// ---------------------------------------------------------------------------
+// bd-2374 / OPS-114: the LP-header logo R2 key must default to the NIETE mark.
+// This fork can't set the Railway env var (read-only token), and shipping the
+// default as the Rumi bitmap leaves the generated-LP header showing the Rumi
+// smile — the exact brand leak OPS-114 kills. The default IS the config here.
+// ---------------------------------------------------------------------------
+describe('LP-header logo R2 key defaults to the NIETE mark (bd-2374)', () => {
+  let saved;
+  beforeEach(() => { saved = process.env.RUMI_LOGO_R2_KEY; delete process.env.RUMI_LOGO_R2_KEY; jest.resetModules(); });
+  afterEach(() => { if (saved === undefined) delete process.env.RUMI_LOGO_R2_KEY; else process.env.RUMI_LOGO_R2_KEY = saved; jest.resetModules(); });
+
+  test('default (env unset) is the NIETE mark, never a Rumi bitmap', () => {
+    const constants = require('../../bot/shared/utils/constants');
+    expect(constants.RUMI_LOGO_R2_KEY).toBe('brand/niete-mark-ondark-v1.png');
+    expect(constants.RUMI_LOGO_R2_KEY).not.toMatch(/rumi/i);
+  });
+
+  test('still overridable via RUMI_LOGO_R2_KEY', () => {
+    process.env.RUMI_LOGO_R2_KEY = 'brand/custom.png';
+    const constants = require('../../bot/shared/utils/constants');
+    expect(constants.RUMI_LOGO_R2_KEY).toBe('brand/custom.png');
+  });
+});
 
 // ---------------------------------------------------------------------------
 // bd-332: Voice IDs should be env-var overridable
@@ -148,7 +172,9 @@ describe('Voice IDs should be env-var overridable (bd-332)', () => {
   test('VOICE_MODELS uses overridden voice IDs', () => {
     process.env.ELEVENLABS_VOICE_ID_ES = 'custom-es';
     process.env.ELEVENLABS_VOICE_ID_AR = 'custom-ar';
-    process.env.UPLIFT_VOICE_ID_UR = 'custom-ur';
+    // bd-2375: Urdu voice moved from Uplift to ElevenLabs (Sara) — its override
+    // env var is now ELEVENLABS_VOICE_ID_UR.
+    process.env.ELEVENLABS_VOICE_ID_UR = 'custom-ur';
     process.env.UPLIFT_VOICE_ID_SD = 'custom-sd';
     process.env.UPLIFT_VOICE_ID_BAL = 'custom-bal';
 

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { WHATSAPP_URL } from '@/lib/whatsapp';
 import { MessageSquare, TrendingUp } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import PortalLayout from '../components/PortalLayout';
@@ -151,7 +152,7 @@ const PortalCoaching = () => {
             title="No coaching sessions yet"
             description="Complete your first coaching session using the WhatsApp bot"
             actionLabel="Open WhatsApp"
-            actionHref="https://wa.me/message/WCYNS4DTDB2MD1"
+            actionHref={WHATSAPP_URL}
           />
         )}
       </div>

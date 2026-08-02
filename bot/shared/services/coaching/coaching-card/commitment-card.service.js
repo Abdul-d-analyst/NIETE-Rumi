@@ -19,6 +19,20 @@
 const GPT5MiniService = require('../../gpt5-mini.service');
 const { logToFile } = require('../../../utils/logger');
 const { generatePrioritizedAction } = require('./prioritized-action.service');
+const { simplifyPedagogyJargon } = require('../pedagogy-jargon');
+
+/**
+ * bd-2373: gloss any coach-jargon that slipped into the visible text so the
+ * teacher can parse it ("scaffolding" → "scaffolding (step-by-step support)").
+ * Applied to both the LLM and rule-based paths at their single return seam.
+ */
+function finalizeCard(card) {
+  if (!card) return card;
+  const lang = card.language || 'en';
+  if (typeof card.commitment === 'string') card.commitment = simplifyPedagogyJargon(card.commitment, lang);
+  if (typeof card.action === 'string') card.action = simplifyPedagogyJargon(card.action, lang);
+  return card;
+}
 
 const MODEL = 'gpt-5-mini-2025-08-07';
 
@@ -57,7 +71,7 @@ function buildPrompt(lang, analysis, q3) {
     strategy: (g.strategies || [])[0] || g.rationale || '',
   }));
 
-  return `You are Rumi, a warm teacher coach. Below is a REAL coaching session. Produce a short "commitment card" the teacher receives on WhatsApp after our reflective conversation.
+  return `You are the NIETE Teaching Assistant, a warm teacher coach. Below is a REAL coaching session. Produce a short "commitment card" the teacher receives on WhatsApp after our reflective conversation.
 
 WRITE ALL THREE TEXT FIELDS (commitment, action, lesson_label) IN ${langName.toUpperCase()} — this teacher's lesson and our whole conversation were in ${langName}. Natural, warm, native ${langName}.
 
@@ -65,6 +79,8 @@ GENDER-NEUTRAL — teachers are BOTH men and women. NEVER use gendered second-pe
 
 CODE-SWITCH LIKE A REAL TEACHER TEXTS. Pedagogical / technical / subject-matter terms MUST appear in ENGLISH (Latin letters) inline — NEVER translate them into ${langName} and NEVER transliterate them into ${langName} script. Teachers SAY these in English even mid-sentence: open-ended questions, conjunction, paragraph, pair reading, Think-Pair-Share, wait time, objective, model, fractions, percentage, group work, peer feedback.
 ${CODESWITCH_RULE[lang] || CODESWITCH_RULE.en}
+
+PLAIN LANGUAGE — the teacher must understand every word. Do NOT use coach-jargon she wouldn't say herself: "scaffolding", "extension", "differentiation", "formative assessment", "higher-order thinking", "metacognition", "gradual release". Describe the concrete move in plain words instead (e.g. instead of "scaffolding", write "break it into small steps"; instead of "an extension", write "a harder task for the ones who finish early").
 
 The card has TWO parts:
 1. "commitment" — a single warm sentence (max ~18 words) in the teacher's OWN spirit, reflecting back what SHE values, drawn from her Q3 answer (her forward-looking reflection). Address her as "you"/"we". No honorifics, no name inside it.
@@ -137,7 +153,7 @@ async function generateCommitmentCard(analysis, conversationState, outputLanguag
   const q3 = extractQ3(conversationState);
   if (!q3) {
     logToFile('Commitment card: no Q3 commitment → rule-based fallback', { framework: analysis.framework });
-    return fallbackCard(analysis, teacherName, priorAction, lang);
+    return finalizeCard(await fallbackCard(analysis, teacherName, priorAction, lang));
   }
 
   try {
@@ -149,17 +165,17 @@ async function generateCommitmentCard(analysis, conversationState, outputLanguag
     });
     const parsed = JSON.parse(r.choices[0].message.content);
     if (!parsed.commitment || !parsed.action) throw new Error('incomplete card JSON (no commitment/action)');
-    return {
+    return finalizeCard({
       commitment: String(parsed.commitment).trim(),
       action: String(parsed.action).trim(),
       highlights: Array.isArray(parsed.highlights) ? parsed.highlights.filter(Boolean) : [],
       lesson_label: parsed.lesson_label ? String(parsed.lesson_label).trim() : '',
       language: lang,
       _source: 'llm',
-    };
+    });
   } catch (e) {
     logToFile('Commitment card LLM failed → rule-based fallback', { error: e.message });
-    return fallbackCard(analysis, teacherName, priorAction, lang);
+    return finalizeCard(await fallbackCard(analysis, teacherName, priorAction, lang));
   }
 }
 

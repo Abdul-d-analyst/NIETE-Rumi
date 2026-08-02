@@ -125,6 +125,135 @@ function getContentTypeFromKey(key) {
 }
 
 /**
+ * Content types we are willing to ASSERT at presign time.
+ *
+ * Deliberately narrower than getContentTypeFromKey(): that helper falls back
+ * to application/octet-stream, which is exactly the value that makes a browser
+ * download instead of render. Here an unknown extension returns null, and the
+ * caller then signs no overrides at all — the object's stored metadata wins,
+ * which is no worse than today and never mislabels a file we can't identify.
+ *
+ * SVG is intentionally absent: serving it inline turns an uploaded file into
+ * executable markup in the viewer's tab. Unknown → untouched is the safer rule.
+ */
+const INLINE_CONTENT_TYPES = {
+  pdf: 'application/pdf',
+  // video
+  mp4: 'video/mp4',
+  m4v: 'video/mp4',
+  webm: 'video/webm',
+  mov: 'video/quicktime',
+  // audio
+  mp3: 'audio/mpeg',
+  m4a: 'audio/mp4',
+  aac: 'audio/aac',
+  ogg: 'audio/ogg',
+  oga: 'audio/ogg',
+  opus: 'audio/opus',
+  wav: 'audio/wav',
+  // images
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  // text / documents (documents still download in most browsers — the value
+  // here is a CORRECT type, so the download is named and opened by the right app)
+  txt: 'text/plain; charset=utf-8',
+  csv: 'text/csv; charset=utf-8',
+  doc: 'application/msword',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  ppt: 'application/vnd.ms-powerpoint',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  xls: 'application/vnd.ms-excel',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+};
+
+/** Strip query/fragment off a key so `a.pdf?v=2` still reads as a PDF. */
+function _bareKey(key) {
+  return String(key || '').split(/[?#]/)[0];
+}
+
+/**
+ * Content type for a key, or null when the extension is unrecognised.
+ * @param {string} key - R2 object key or filename
+ * @returns {string|null} MIME type, or null if we should not assert one
+ */
+function getInlineContentTypeFromKey(key) {
+  const bare = _bareKey(key);
+  const base = bare.split('/').pop();
+  if (!base.includes('.')) return null;
+  const ext = base.split('.').pop().toLowerCase();
+  return INLINE_CONTENT_TYPES[ext] || null;
+}
+
+/** Last path segment of a key, percent-decoded when possible. */
+function _filenameFromKey(key) {
+  const base = _bareKey(key).split('/').pop() || 'download';
+  try {
+    return decodeURIComponent(base);
+  } catch (_) {
+    return base;
+  }
+}
+
+/**
+ * Build a Content-Disposition value for `attachment`.
+ * The ASCII filename is conservatively sanitised (CR/LF and quotes would let a
+ * DB-sourced name inject header syntax); a non-ASCII name additionally gets an
+ * RFC 5987 `filename*` so the real name survives.
+ */
+function _attachmentDisposition(filename) {
+  const raw = String(filename || 'download');
+  const ascii = raw.replace(/[^A-Za-z0-9 ._\-()[\]]/g, '_') || 'download';
+  let value = `attachment; filename="${ascii}"`;
+  // eslint-disable-next-line no-control-regex
+  if (/[^\x00-\x7F]/.test(raw)) {
+    // eslint-disable-next-line no-control-regex
+    const clean = raw.replace(/[\x00-\x1F\x7F]/g, '');
+    value += `; filename*=UTF-8''${encodeURIComponent(clean)}`;
+  }
+  return value;
+}
+
+/**
+ * Response-header overrides for a presigned GET.
+ *
+ * ⚠️ These become SIGNED query params (`response-content-disposition`,
+ * `response-content-type`). They are covered by the SigV4 signature, so they
+ * MUST be handed to the GetObjectCommand before getSignedUrl runs. Appending
+ * them to an already-signed URL yields 403 SignatureDoesNotMatch.
+ *
+ * @param {string} key - R2 object key
+ * @param {object} [options]
+ * @param {'inline'|'attachment'|null} [options.disposition='inline'] - null/'none' opts out entirely
+ * @param {string} [options.filename] - attachment filename (defaults to the key's basename)
+ * @returns {object} Partial GetObjectCommand input ({} when nothing should be overridden)
+ */
+function buildResponseOverrides(key, options) {
+  const opts = options || {}; // callers forward an optional arg — null must not throw
+  const disposition = opts.disposition === undefined ? 'inline' : opts.disposition;
+  if (!disposition || disposition === 'none') return {};
+
+  const contentType = getInlineContentTypeFromKey(key);
+
+  if (disposition === 'attachment') {
+    // Explicit user intent — force it even for an unrecognised extension.
+    const overrides = {
+      ResponseContentDisposition: _attachmentDisposition(options.filename || _filenameFromKey(key)),
+    };
+    if (contentType) overrides.ResponseContentType = contentType;
+    return overrides;
+  }
+
+  // inline: only worth asserting when we actually know the type. Forcing
+  // `inline` with application/octet-stream downloads anyway, so guessing gains
+  // nothing and could override correct stored metadata.
+  if (!contentType) return {};
+  return { ResponseContentDisposition: 'inline', ResponseContentType: contentType };
+}
+
+/**
  * Check if URL is a valid R2 URL (not a local path)
  * @param {string} url - URL to check
  * @returns {boolean} True if valid R2 URL
@@ -139,11 +268,23 @@ function isValidR2Url(url) {
 /**
  * Generate a presigned URL for R2 object
  * Issue #25, #26: Fix videos not playing and downloads returning HTML
+ *
+ * Defaults to INLINE rendering with a Content-Type inferred from the key's
+ * extension. The training library was migrated by an external tool, so stored
+ * object metadata is inconsistent (some objects are application/octet-stream,
+ * some carry `attachment`) — signing the response headers per request makes
+ * behaviour uniform without mutating a single object.
+ *
+ * ⚠️ The overrides are part of the SIGNATURE. Never append
+ * `response-content-disposition` to a URL this function already returned —
+ * R2 answers 403 SignatureDoesNotMatch. Pass `options` here instead.
+ *
  * @param {string} r2Url - Full R2 URL (https://...r2.cloudflarestorage.com/bucket/key)
  * @param {number} expiresIn - Expiry time in seconds (default: 1 hour)
+ * @param {object} [options] - see buildResponseOverrides ({ disposition, filename })
  * @returns {Promise<string|null>} Presigned URL or null if invalid
  */
-async function generatePresignedUrl(r2Url, expiresIn = 3600) {
+async function generatePresignedUrl(r2Url, expiresIn = 3600, options = {}) {
   try {
     // Skip if URL is invalid (local path, null, etc.)
     if (!isValidR2Url(r2Url)) {
@@ -156,6 +297,7 @@ async function generatePresignedUrl(r2Url, expiresIn = 3600) {
     const command = new GetObjectCommand({
       Bucket: BUCKET_NAME,
       Key: key,
+      ...buildResponseOverrides(key, options),
     });
 
     const presignedUrl = await getSignedUrl(getR2Client(), command, { expiresIn });
@@ -172,15 +314,16 @@ async function generatePresignedUrl(r2Url, expiresIn = 3600) {
  * Issue #20: Fix thumbnails not appearing
  * @param {string[]} urls - Array of R2 URLs
  * @param {number} expiresIn - Expiry time in seconds
+ * @param {object} [options] - disposition/filename overrides, applied to every URL
  * @returns {Promise<string[]>} Array of presigned URLs (invalid URLs remain as-is)
  */
-async function generatePresignedUrls(urls, expiresIn = 3600) {
+async function generatePresignedUrls(urls, expiresIn = 3600, options = {}) {
   if (!urls || !Array.isArray(urls)) return [];
 
   const presignedUrls = await Promise.all(
     urls.map(async (url) => {
       if (typeof url !== 'string') return url;
-      const presigned = await generatePresignedUrl(url, expiresIn);
+      const presigned = await generatePresignedUrl(url, expiresIn, options);
       return presigned || url; // Return original if presigning fails
     })
   );
@@ -193,6 +336,8 @@ module.exports = {
   streamFromR2,
   extractKeyFromUrl,
   getContentTypeFromKey,
+  getInlineContentTypeFromKey,
+  buildResponseOverrides,
   isValidR2Url,
   generatePresignedUrl,
   generatePresignedUrls,

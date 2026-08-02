@@ -240,16 +240,19 @@ describe('BUG-002: /register Command Handler', () => {
     expect(testCase.expectedBehavior).toBe('sendNameQuestion');
   });
 
-  test('EXPECTED: /register with 0 features should guide to features', () => {
+  test('EXPECTED: /register with 0 features sends the registration Flow (bd-2447 — deferred onboarding deprecated for /register)', () => {
+    // Superseded by bd-2447: /register ALWAYS opens the registration Flow when
+    // REGISTRATION_FLOW_ID is configured, regardless of feature count. The
+    // guide message is only the fallback for flow-less deployments. Real
+    // handler-level pins live in bd-2447-register-command-sends-flow.test.js.
     const testCase = {
       user: { id: 'xxx', first_name: null, featureCount: 0 },
       input: '/register',
-      expectedBehavior: 'showGuideMessage',
-      expectedMessage: "I'll ask for your name after you try one of my features!"
+      expectedBehavior: 'sendRegistrationFlow',
     };
 
     expect(testCase.user.featureCount).toBe(0);
-    expect(testCase.expectedBehavior).toBe('showGuideMessage');
+    expect(testCase.expectedBehavior).toBe('sendRegistrationFlow');
   });
 
   test('EXPECTED: /register when already registered should confirm', () => {

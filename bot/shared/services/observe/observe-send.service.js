@@ -29,6 +29,49 @@ const BTN = {
 };
 const TEMPLATE_PAYLOAD_PREFIX = 'observe_report_';
 
+// bd-2405 — the teacher's report copy must follow the TEACHER's language,
+// scoped to the market's offered languages (Rule 20: language is market-scoped
+// data). The old code hardcoded observeStrings('sw') (a Tanzania-era D6
+// assumption), so NIETE (fico) teachers received a full Kiswahili report.
+// mewaka=Tanzania stays sw; fico=NIETE and hots=PK never resolve to sw.
+const MARKET_LANGS = {
+  mewaka: { offer: ['sw', 'en'], fallback: 'sw' },
+  fico:   { offer: ['ur', 'en'], fallback: 'en' },
+  hots:   { offer: ['ur', 'en'], fallback: 'ur' },
+};
+function marketLangConfig() {
+  const { getObservePack } = require('./observe-framework');
+  return MARKET_LANGS[getObservePack().key] || { offer: ['en'], fallback: 'en' };
+}
+/** Clamp any language to the current market's offered set (else null). */
+function clampToMarket(lang) {
+  const { offer } = marketLangConfig();
+  return offer.includes(lang) ? lang : null;
+}
+/**
+ * Resolve the teacher-report language: the teacher's own locked preference
+ * (looked up read-only by phone) → the coach's language → the market fallback,
+ * each clamped to the market's offered languages. Never Swahili outside TZ.
+ * @param {{teacher_phone?:string}} delivery
+ * @param {string} coachLang
+ * @returns {Promise<'ur'|'en'|'sw'>}
+ */
+async function resolveTeacherLang(delivery, coachLang) {
+  const { fallback } = marketLangConfig();
+  if (delivery && delivery.teacher_phone) {
+    try {
+      const { data } = await supabase
+        .from('users')
+        .select('preferred_language')
+        .eq('phone_number', delivery.teacher_phone)
+        .maybeSingle();
+      const t = clampToMarket(data && data.preferred_language);
+      if (t) return t;
+    } catch (_) { /* fall through to coach/market default */ }
+  }
+  return clampToMarket(coachLang) || fallback;
+}
+
 // ── Pure helpers ───────────────────────────────────────────────────────
 
 /**
@@ -477,16 +520,42 @@ async function _sendPackage(dest, pngBuffer, caption, companionText) {
  *                  window-closed template (payload observe_report_<sid>).
  *  'teacher_tap' — the teacher tapped the template button: direct delivery.
  */
+/**
+ * bd-2411 — a teacher-delivery send failed on the worker (e.g. a Meta template
+ * 400, an R2 miss). The old code let the exception propagate silently: the
+ * coach had already been told "📨 sending now, I'll confirm once it lands" by
+ * handleSendConfirm, the delivery stayed frozen at 'awaiting_confirm', and
+ * NEITHER the coach nor the teacher heard anything again (R17/18). Record the
+ * failure and tell the coach so it's visible + one-tap retryable via /observe.
+ */
+async function _handleDeliverFailure(sessionId, foPhone, S, path, err, meta = {}) {
+  logToFile('❌ observe send: teacher delivery failed', {
+    sessionId, path, template: meta.tpl && meta.tpl.name,
+    error: err && err.message, stack: err && err.stack,
+  });
+  await mergeTeacherDelivery(sessionId, {
+    status: 'send_failed',
+    last_error: err && err.message,
+    failed_at: new Date().toISOString(),
+  }).catch(() => {});
+  await WhatsAppService.sendMessage(foPhone, S.send_failed_fo).catch(() => {});
+}
+
 async function processTeacherReport(sessionId, payload = {}) {
   const session = await _loadSession(sessionId);
   const foPhone = payload.from && payload.phase !== 'teacher_tap'
     ? payload.from
     : (session.users && session.users.phone_number);
   const foName = (session.users && session.users.first_name) || 'Afisa';
-  const lang = (session.users && session.users.preferred_language) === 'sw' ? 'sw' : 'en';
+  // bd-2405: the coach's UI language, clamped to the market (never a stray sw
+  // on NIETE/PK). observeLang handles ur/sw/en; clamp guards data anomalies.
+  const lang = clampToMarket(observeLang(session.users)) || marketLangConfig().fallback;
   const S = observeStrings(lang);
-  const teacherS = observeStrings('sw');   // the teacher-facing copy is Swahili (D6)
   const delivery = (session.analysis_data && session.analysis_data.teacher_delivery) || {};
+  // bd-2405: teacher copy follows the TEACHER's market language, not a
+  // hardcoded 'sw'. (TZ still resolves to sw via the market config.)
+  const teacherLang = await resolveTeacherLang(delivery, lang);
+  const teacherS = observeStrings(teacherLang);
 
   if (delivery.status === 'sent') {
     logToFile('🔭 observe send: already sent — no-op', { sessionId });
@@ -498,16 +567,22 @@ async function processTeacherReport(sessionId, payload = {}) {
   if (phase === 'preview') {
     const { buildCompanionText } = require('./observe-teacher-report');
     const { generateHeroReport } = require('../coaching/report-v2/hero-report.service');
+    const { heroBrandFor } = require('../coaching/report-renderers/renderer-registry');
     const { uploadImageBuffer } = require('../../storage/r2');
 
     const notes = await _extractNotes(session, foName);
     const v2 = session.analysis_data || {};
     // D32: the OFFICIAL hero report, design unchanged — teacherName is what
     // the FO entered; commitmentAction is the teacher's debrief commitment.
+    // bd-2453: this path calls generateHeroReport DIRECTLY (not via the
+    // renderer registry), so the framework brand must be injected here too —
+    // otherwise a FICO/NIETE observe report renders the default Rumi palette
+    // while the same teacher's coaching-pipeline report renders NIETE.
     const { png, caption } = await generateHeroReport(session, v2, {
       teacherName: delivery.teacher_name,
       commitmentAction: (notes && notes.commitment_sw) || '',
-      language: observeLang(session.users),   // FEAT-093 bd-53 — locked language drives the report
+      language: teacherLang,   // bd-2405 — the teacher's market language drives the report
+      brand: heroBrandFor(v2.framework),
     });
     const companionText = notes ? buildCompanionText(notes, { foName }, teacherS) : null;
     const teacherCaption = teacherS.report_caption_teacher.replace('{fo}', foName);
@@ -572,23 +647,33 @@ async function processTeacherReport(sessionId, payload = {}) {
       // Body: {{1}} teacher name, {{2}} FO name. QUICK_REPLY carries the
       // session-scoped payload so the tap routes back to THIS report.
       const tpl = reportTemplateConfig();   // FEAT-093 bd-54 — per-market template
-      await WhatsAppService.sendTemplate(delivery.teacher_phone, tpl.name, tpl.lang, [
-        { type: 'body',
-          parameters: [
-            { type: 'text', text: delivery.teacher_name },
-            { type: 'text', text: foName },
-          ] },
-        { type: 'button', sub_type: 'quick_reply', index: '0',
-          parameters: [{ type: 'payload', payload: `${TEMPLATE_PAYLOAD_PREFIX}${sessionId}` }] },
-      ]);
+      try {
+        await WhatsAppService.sendTemplate(delivery.teacher_phone, tpl.name, tpl.lang, [
+          { type: 'body',
+            parameters: [
+              { type: 'text', text: delivery.teacher_name },
+              { type: 'text', text: foName },
+            ] },
+          { type: 'button', sub_type: 'quick_reply', index: '0',
+            parameters: [{ type: 'payload', payload: `${TEMPLATE_PAYLOAD_PREFIX}${sessionId}` }] },
+        ]);
+      } catch (sendErr) {
+        await _handleDeliverFailure(sessionId, foPhone, S, 'template', sendErr, { tpl });
+        return;
+      }
       await mergeTeacherDelivery(sessionId, { status: 'awaiting_teacher_tap' });
       await WhatsAppService.sendMessage(foPhone, S.send_template_queued_fo);
       logToFile('📨 observe send: template sent (window closed)', { sessionId });
       return;
     }
 
-    const png = await downloadFromR2(delivery.report_key);
-    await _sendPackage(delivery.teacher_phone, png, delivery.caption || '', delivery.companion_text);
+    try {
+      const png = await downloadFromR2(delivery.report_key);
+      await _sendPackage(delivery.teacher_phone, png, delivery.caption || '', delivery.companion_text);
+    } catch (sendErr) {
+      await _handleDeliverFailure(sessionId, foPhone, S, 'direct', sendErr);
+      return;
+    }
     await mergeTeacherDelivery(sessionId, { status: 'sent', sent_at: new Date().toISOString() });
     await WhatsAppService.sendMessage(foPhone, S.send_done_fo);
     logToFile('✅ observe send: combined report delivered to teacher', { sessionId });
@@ -619,4 +704,6 @@ module.exports = {
   handleSendConfirm,
   handleSendCancel,
   processTeacherReport,
+  resolveTeacherLang,
+  clampToMarket,
 };

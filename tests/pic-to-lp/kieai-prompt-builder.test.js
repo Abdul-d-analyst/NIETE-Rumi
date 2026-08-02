@@ -40,15 +40,43 @@ describe('buildPage1Prompt', () => {
   });
 });
 
+describe('IMAGE 1 brand-mark description — NIETE "N", not the Rumi smile (bd-2365/OPS-114)', () => {
+  // The rename relabelled the brand mark "Rumi"→"NIETE" but left the Rumi
+  // *geometry* ("white smile-only mark, curved line + two cheek dots") and the
+  // page-template "white smile brand mark" literals. Those describe Rumi's mark,
+  // not NIETE's green "N" monogram — a text-says-NIETE/picture-says-Rumi split
+  // that pushes the image model to render the wrong shape. Guard every page prompt.
+  const pages = ['buildPage1Prompt', 'buildPage2Prompt'];
+  const langs = ['en', 'ur'];
+
+  it('no page prompt describes the Rumi smile geometry', () => {
+    load();
+    for (const fn of pages) {
+      for (const language of langs) {
+        const out = Builder[fn]({ ...base, language });
+        expect(out).not.toMatch(/smile/i);
+        expect(out).not.toMatch(/cheek/i);
+      }
+    }
+  });
+
+  it('the IMAGE 1 role line names the NIETE "N" mark', () => {
+    load();
+    const out = Builder.buildPage1Prompt({ ...base, language: 'en' });
+    expect(out).toContain('NIETE brand mark');
+    expect(out).toMatch(/monogram|letter ["']?N["']?|"N"/);
+  });
+});
+
 describe('buildPage2Prompt coaching corner — env-driven contact line', () => {
-  it('omits the "WhatsApp Rumi ·" contact line when COACHING_WHATSAPP_NUMBER is unset', () => {
+  it('omits the "WhatsApp NIETE ·" contact line when COACHING_WHATSAPP_NUMBER is unset', () => {
     delete process.env.COACHING_WHATSAPP_NUMBER;
     load();
     const en = Builder.buildPage2Prompt({ ...base, language: 'en' });
     const ur = Builder.buildPage2Prompt({ ...base, language: 'ur' });
     expect(en).toContain('Coaching Corner');           // corner itself kept
-    expect(en).not.toContain('WhatsApp Rumi ·');        // contact line omitted
-    expect(ur).not.toContain('WhatsApp Rumi ·');
+    expect(en).not.toContain('WhatsApp NIETE ·');        // contact line omitted
+    expect(ur).not.toContain('WhatsApp NIETE ·');
   });
 
   it('includes the contact line with the configured number when set', () => {
@@ -56,8 +84,8 @@ describe('buildPage2Prompt coaching corner — env-driven contact line', () => {
     load();
     const en = Builder.buildPage2Prompt({ ...base, language: 'en' });
     const ur = Builder.buildPage2Prompt({ ...base, language: 'ur' });
-    expect(en).toContain('WhatsApp Rumi · +1 555 0100');
-    expect(ur).toContain('WhatsApp Rumi · +1 555 0100');
+    expect(en).toContain('WhatsApp NIETE · +1 555 0100');
+    expect(ur).toContain('WhatsApp NIETE · +1 555 0100');
   });
 
   it('never emits a banned PK/TZ phone literal (set or unset)', () => {

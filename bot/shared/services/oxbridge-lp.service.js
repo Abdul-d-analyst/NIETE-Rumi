@@ -239,8 +239,8 @@ async function sendPicker(phone, matches, ctx = {}) {
   const isUrdu = ctx.language === 'ur';
   const chapter = top.chapter_title || 'lesson';
   const body = isUrdu
-    ? `📚 آپ کے موضوع "${ctx.topic || chapter}" پر ایک Oxbridge لیسن پلان موجود ہے۔\n\nکیا آپ Oxbridge والا لیسن پلان لینا چاہیں گے، یا Rumi خود ایک تیار کرے؟`
-    : `📚 We have an Oxbridge lesson plan matching "${ctx.topic || chapter}".\n\nWould you like the Oxbridge lesson plan, or should Rumi generate a fresh one?`;
+    ? `📚 آپ کے موضوع "${ctx.topic || chapter}" پر ایک Oxbridge لیسن پلان موجود ہے۔\n\nکیا آپ Oxbridge والا لیسن پلان لینا چاہیں گے، یا NIETE خود ایک تیار کرے؟`
+    : `📚 We have an Oxbridge lesson plan matching "${ctx.topic || chapter}".\n\nWould you like the Oxbridge lesson plan, or should NIETE generate a fresh one?`;
 
   // Cache the match set + the original topic so the button handler can act
   // on the pick without re-running the query.
@@ -257,7 +257,7 @@ async function sendPicker(phone, matches, ctx = {}) {
     body,
     buttons: [
       { id: `oxbridge_lp_pick_${top.id}`, title: isUrdu ? 'Oxbridge LP' : 'Oxbridge LP' },
-      { id: 'oxbridge_lp_rumi', title: isUrdu ? 'Rumi LP بنائیں' : 'Generate Rumi LP' },
+      { id: 'oxbridge_lp_rumi', title: isUrdu ? 'NIETE LP بنائیں' : 'Generate NIETE LP' },
     ],
   });
   logToFile('Oxbridge LP: picker sent', {

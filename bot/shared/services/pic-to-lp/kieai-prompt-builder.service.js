@@ -8,7 +8,7 @@
  *   - Style preamble: 8-line block with palette, fonts, paper format,
  *     reference-image roles. NO dimension annotations in prose (they bleed
  *     into rendered text). Hardcore Nastaliq rule for non-English LPs.
- *   - Reference images at the top: IMAGE 1 = white smile logo (native
+ *   - Reference images at the top: IMAGE 1 = NIETE "N" brand mark (native
  *     render in header), IMAGE 2 = teacher's textbook page (visual style anchor).
  *   - Big Idea callout on page 1 — concept distinction + common misconception
  *     + 1-sentence demo move. The pedagogical heart.
@@ -77,7 +77,7 @@ const THEME = {
   paper: 'Print-ready A4 portrait 3:4 format.',
   // Reference-image role lines (IMAGE 1 brand mark, IMAGE 2 textbook page).
   referenceImages: {
-    image1: '  IMAGE 1 = the EXACT Rumi brand mark — a clean white smile-only mark (curved line + two small cheek dots). Render this image pixel-for-pixel at small size (about 8% of page width, vertically centered in the dark-navy header bar, anchored 3% from the left edge). DO NOT redesign. DO NOT add a circle around it. DO NOT change its color.',
+    image1: '  IMAGE 1 = the EXACT NIETE brand mark — a bold monogram letter "N" (two thick diagonal green strokes) with a small pen-nib element at its lower-left, on a transparent background. Render this image pixel-for-pixel at small size (about 8% of page width, vertically centered in the dark-navy header bar, anchored 3% from the left edge), keeping the full transparent padding around it so no part of the "N" is cropped. DO NOT redesign. DO NOT add a circle around it. DO NOT recolor it — keep the mark\'s original green.',
     image2: "  IMAGE 2 = the teacher's textbook page — for visual style reference only. Do NOT copy any text from this image. Use only for visual style cues.",
   },
 };
@@ -149,11 +149,11 @@ function contentLanguageInstruction(language) {
       // labels/headings — not just the body. The label translations are
       // already substituted into the template via structuralLabelsFor('sw');
       // this directive reinforces it for the model.
-      return 'CONTENT LANGUAGE: EVERYTHING on this page — all teacher-facing content (warm-up body, hook speech bubbles, Big Idea paragraphs, board work, exit ticket question + answers, coaching corner) AND every structural section label/heading (e.g. Lengo la Leo, Wazo Kuu, Maandalizi, Mwalimu Anafanya, Tunafanya Pamoja, Wewe Fanya, Kona ya Kocha) — MUST be written in NATURAL Kiswahili. The ONLY non-Kiswahili text allowed is Hindu-Arabic numerals (0-9) for math and the brand name "Rumi". Do NOT render any English headings or labels. The teacher reading this is in East Africa (Kenya / Tanzania / Uganda) and expects native Kiswahili educational vocabulary.';
+      return 'CONTENT LANGUAGE: EVERYTHING on this page — all teacher-facing content (warm-up body, hook speech bubbles, Big Idea paragraphs, board work, exit ticket question + answers, coaching corner) AND every structural section label/heading (e.g. Lengo la Leo, Wazo Kuu, Maandalizi, Mwalimu Anafanya, Tunafanya Pamoja, Wewe Fanya, Kona ya Kocha) — MUST be written in NATURAL Kiswahili. The ONLY non-Kiswahili text allowed is Hindu-Arabic numerals (0-9) for math and the brand name "NIETE". Do NOT render any English headings or labels. The teacher reading this is in East Africa (Kenya / Tanzania / Uganda) and expects native Kiswahili educational vocabulary.';
     case 'ar':
       // Render EVERYTHING in MSA Arabic, including the structural section
       // labels/headings (RTL Naskh) — not just the body.
-      return 'CONTENT LANGUAGE: EVERYTHING on this page — all teacher-facing content (warm-up body, hook speech bubbles, Big Idea paragraphs, board work, exit ticket question + answers, coaching corner) AND every structural section label/heading (e.g. هدف اليوم, الفكرة الكبرى, التهيئة, المعلّم يؤدّي, نعمل معًا, دورك أنت, ركن التدريب) — MUST be written in NATURAL Modern Standard Arabic (MSA / فصحى), right-to-left. The ONLY non-Arabic text allowed is Hindu-Arabic numerals (0-9) for math and the brand name "Rumi". Do NOT render any English headings or labels. The teacher reading this is in the MENA region and expects native Arabic educational vocabulary.';
+      return 'CONTENT LANGUAGE: EVERYTHING on this page — all teacher-facing content (warm-up body, hook speech bubbles, Big Idea paragraphs, board work, exit ticket question + answers, coaching corner) AND every structural section label/heading (e.g. هدف اليوم, الفكرة الكبرى, التهيئة, المعلّم يؤدّي, نعمل معًا, دورك أنت, ركن التدريب) — MUST be written in NATURAL Modern Standard Arabic (MSA / فصحى), right-to-left. The ONLY non-Arabic text allowed is Hindu-Arabic numerals (0-9) for math and the brand name "NIETE". Do NOT render any English headings or labels. The teacher reading this is in the MENA region and expects native Arabic educational vocabulary.';
     case 'sd':
       return 'CONTENT LANGUAGE: All teacher-facing content (warm-up body, hook speech bubbles, Big Idea paragraphs, board work, exit ticket question + answers, coaching corner) MUST be written in NATURAL Pakistani Sindhi using the Perso-Arabic Sindhi script (Naskh Sindhi / Lateef tradition, with Sindhi-specific letters ڄ ڃ ڳ ڱ ڙ ڪ). Use English ONLY for structural section labels (Today\'s Goal, Big Idea, I Do, We Do, You Do, etc.) and Hindu-Arabic numerals for math. The teacher is in Sindh (Pakistan) and expects native Sindhi educational vocabulary, NOT translated Urdu and NOT Urdu Nastaliq style.';
     case 'pa':
@@ -340,10 +340,10 @@ function nastaliqPerCardLine() {
 // configured we append the "WhatsApp Rumi · <number>" line; otherwise we omit
 // the contact line entirely (keeping the rest of the coaching corner).
 function coachingContactSuffixEn(coachingNumber) {
-  return coachingNumber ? ` WhatsApp Rumi · ${coachingNumber}` : '';
+  return coachingNumber ? ` WhatsApp NIETE · ${coachingNumber}` : '';
 }
 function coachingContactSuffixUr(coachingNumber) {
-  return coachingNumber ? ` WhatsApp Rumi · ${coachingNumber}` : '';
+  return coachingNumber ? ` WhatsApp NIETE · ${coachingNumber}` : '';
 }
 
 /**
@@ -395,7 +395,7 @@ ${calibrationBlock}
 Hook, Today's Goal, Big Idea, I-Do (How It Works), and Board Work card. Portrait 3:4.
 
 HEADER BAR (dark navy #1e293b, full width):
-  Left edge: render IMAGE 1 (the white smile brand mark) small, vertically centered, 3% from left.
+  Left edge: render IMAGE 1 (the NIETE "N" brand mark) small, vertically centered, 3% from left.
   Center: "${titleEn}" in white bold.
   Right: small ${color} pill containing "Grade ${grade} · 35 min" in white.
 
@@ -446,7 +446,7 @@ IMPORTANT: Render IMAGE 1 pixel-for-pixel as the brand mark in top-left header. 
 ${calibrationBlock}
 ${nastaliqLine}
 HEADER BAR (dark navy #1e293b, full width):
-  Left edge: render IMAGE 1 (the white smile brand mark) small, vertically centered, 3% from left.
+  Left edge: render IMAGE 1 (the NIETE "N" brand mark) small, vertically centered, 3% from left.
   Center: title in white bold — "Grade ${grade} ${subject} — ${topic}" (English label first, dot separator, then Urdu Nastaliq content).
   Right: small ${color} pill containing "Grade ${grade} · 35 min" in white.
 
@@ -520,7 +520,7 @@ ${calibrationBlock}
 We-Do, You-Do, Differentiation, Exit Ticket, Coaching Corner card. Portrait 3:4.
 
 HEADER BAR (dark navy #1e293b, full width):
-  Left edge: render IMAGE 1 (the white smile brand mark) small, vertically centered, 3% from left.
+  Left edge: render IMAGE 1 (the NIETE "N" brand mark) small, vertically centered, 3% from left.
   Center: "Grade ${grade} ${subject} — ${topic} · Page 2" in white bold.
   Right: small amber pill containing "Grade ${grade} · 35 min".
 
@@ -557,7 +557,7 @@ IMPORTANT: Render IMAGE 1 pixel-for-pixel as the brand mark in top-left header. 
 ${calibrationBlock}
 ${nastaliqLine}
 HEADER BAR (dark navy #1e293b, full width):
-  Left edge: render IMAGE 1 (the white smile brand mark) small, vertically centered, 3% from left.
+  Left edge: render IMAGE 1 (the NIETE "N" brand mark) small, vertically centered, 3% from left.
   Center: "Grade ${grade} ${subject} — ${topic} · Page 2" in white bold.
   Right: small amber pill containing "Grade ${grade} · 35 min".
 
@@ -582,7 +582,7 @@ EXIT TICKET (light blue #dbeafe card, full width):
 COACHING CORNER (light amber #fef3c7 strip at bottom, full width):
   Heading "${L.coachingCorner}" in dark navy bold.
   Body in Nastaliq: lesson-specific reflection tied to ${topic} — what to watch for, common mistake, 2-min reteach move.
-  Right side: small green WhatsApp icon next to text in Nastaliq: "آج کا lesson record کر کے Rumi کو بھیجیں — personalised feedback ملے گا۔${coachingContactSuffixUr(resolvedCoachingNumber)}"
+  Right side: small green WhatsApp icon next to text in Nastaliq: "آج کا lesson record کر کے NIETE کو بھیجیں — personalised feedback ملے گا۔${coachingContactSuffixUr(resolvedCoachingNumber)}"
 
 CRITICAL: This page MUST be about ${topic}. Do not render content about any other topic.
 

@@ -99,7 +99,7 @@ function classifyAudioDocument({ mimeType, fileSize, filename } = {}) {
  */
 function buildTooLargeMessage(sizeMB) {
   return (
-    `This audio file is ${sizeMB} MB. Rumi's transcription engine currently ` +
+    `This audio file is ${sizeMB} MB. NIETE's transcription engine currently ` +
     `caps at 25MB per file — please compress or split into smaller sections ` +
     `(30-min chunks at voice quality typically fit). Chunked long-recording ` +
     `support is on the roadmap.`

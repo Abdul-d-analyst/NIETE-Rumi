@@ -66,6 +66,11 @@ const {
   handleQuizFlowBack
 } = require('./quiz-flow-endpoint');
 const {
+  handleTrainingMsqInit,
+  handleTrainingMsqDataExchange,
+  handleTrainingMsqBack
+} = require('./training-msq-endpoint');
+const {
   handleExamConfirmInit,
   handleExamConfirmDataExchange,
   handleExamConfirmBack
@@ -496,6 +501,36 @@ router.post('/observe-mewaka', async (req, res) => {
   }
 });
 
+/**
+ * bd-2432 (port of main-bot FEAT-116) — the /observe visit picker
+ * (school → teacher → support brief, endpoint-based data_exchange).
+ * Publish the Flow with endpoint_uri .../api/flows/observe-visit and set
+ * OBSERVE_VISIT_FLOW_ID. flow_token = the coach's bare user.id.
+ */
+router.post('/observe-visit', async (req, res) => {
+  try {
+    if (!FlowEncryptionService.isConfigured()) {
+      logToFile('Flow encryption not configured', { endpoint: 'observe-visit' });
+      return res.status(500).json({ error: 'Flow encryption not configured' });
+    }
+    const encryptedResponse = await FlowEncryptionService.processEncryptedRequest(
+      req.body,
+      async (decryptedData) => {
+        const { action, flow_token: flowToken, screen, data: screenData } = decryptedData;
+        if (action === 'ping') return FlowEncryptionService.handlePing();
+        const userId = (flowToken || '').split(':')[0];
+        const VisitHandler = require('../handlers/observe-visit-flow.handler');
+        return VisitHandler.handle(userId, action, screen, screenData || {}, flowToken);
+      }
+    );
+    res.set('Content-Type', 'text/plain');
+    res.send(encryptedResponse);
+  } catch (error) {
+    logToFile('Flow endpoint error', { endpoint: 'observe-visit', error: error.message });
+    res.status(500).json({ error: error.message });
+  }
+});
+
 router.post('/registration', async (req, res) => {
   try {
     if (!FlowEncryptionService.isConfigured()) {
@@ -790,6 +825,46 @@ async function handleQuizFlowRequest(data) {
   if (action === 'BACK')                      return await handleQuizFlowBack(userId, screen, flow_token);
 
   logToFile('Unknown quiz flow action', { action });
+  return FlowEncryptionService.createErrorResponse('Unknown action');
+}
+
+// ============================================================
+// TRAINING MULTI-ANSWER QUESTION (select-all-that-apply CheckboxGroup)
+// ============================================================
+
+router.post('/training-msq', async (req, res) => {
+  try {
+    if (!FlowEncryptionService.isConfigured()) {
+      logToFile('Flow encryption not configured', { endpoint: 'training-msq' });
+      return res.status(500).json({ error: 'Flow encryption not configured' });
+    }
+    const encryptedResponse = await FlowEncryptionService.processEncryptedRequest(
+      req.body,
+      async (decryptedData) => await handleTrainingMsqRequest(decryptedData)
+    );
+    res.set('Content-Type', 'text/plain');
+    res.send(encryptedResponse);
+  } catch (error) {
+    logToFile('Flow endpoint error', { endpoint: 'training-msq', error: error.message, stack: error.stack });
+    res.status(500).json({ error: error.message });
+  }
+});
+
+async function handleTrainingMsqRequest(data) {
+  const { action, flow_token, screen, data: screenData } = data;
+  logToFile('Handling training multi-answer flow request', {
+    action, screen, hasFlowToken: !!flow_token,
+    screenDataKeys: screenData ? Object.keys(screenData) : []
+  });
+
+  if (action === 'ping') return FlowEncryptionService.handlePing();
+  const userId = (flow_token || '').split(':')[0];
+
+  if (action === 'INIT' || action === 'init') return await handleTrainingMsqInit(userId, flow_token);
+  if (action === 'data_exchange')             return await handleTrainingMsqDataExchange(userId, screen, screenData, flow_token);
+  if (action === 'BACK')                      return await handleTrainingMsqBack(userId, screen, flow_token);
+
+  logToFile('Unknown training multi-answer flow action', { action });
   return FlowEncryptionService.createErrorResponse('Unknown action');
 }
 

@@ -161,7 +161,7 @@ describe('HOTS Report Transformer (bd-605)', () => {
   test('SCENARIO: Correct metadata fields', () => {
     const reportData = transformHOTSToReportData(mockSession, 'Zara', mockHOTSAnalysis);
     expect(reportData.teacherName).toBe('Zara');
-    expect(reportData.observerName).toBe('Rumi Digital Coach');
+    expect(reportData.observerName).toBe('NIETE Digital Coach');
     expect(reportData.observationDate).toBeDefined();
     expect(reportData.feedback).toContain('Zara showed');
   });

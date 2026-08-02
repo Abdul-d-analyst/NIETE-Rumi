@@ -679,7 +679,7 @@ class QuizSessionService {
       await redisService.setexWithCeiling(POSTQUIZ_KEY(phone), 1800, JSON.stringify(postQuizState));
 
       await WhatsAppService.sendInteractiveButtons(phone, {
-        header: 'Ask Rumi!',
+        header: 'Ask NIETE!',
         body: `Do you have any questions about ${postQuizState.topic} or anything else? ` +
               `I'm here to help! Type your question or send a voice note 🎤 — I'll listen and reply.\n\n` +
               `This chat will be available for 30 minutes.`,
@@ -847,7 +847,7 @@ class QuizSessionService {
         `When the student references "the quiz" or "the question I got wrong" or asks about a specific question, ground your answer in the data above.`;
     }
 
-    return `You are Rumi, a friendly and encouraging AI learning assistant for school children in Pakistan. ` +
+    return `You are the NIETE Teaching Assistant, a friendly and encouraging AI learning assistant for school children in Pakistan. ` +
       `A student named ${postQuizState.studentName} just finished a quiz on "${postQuizState.topic}". ` +
       `They may ask questions about the topic, follow up on a question they got wrong, ask about other subjects, or anything a curious child might ask.` +
       qaSection +

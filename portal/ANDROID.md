@@ -73,14 +73,16 @@ adb logcat | grep -iE "capacitor|chromium"     # watch for WebView errors
 | 1 | App opens | The **portal login screen** — not the public marketing page |
 | 2 | Login | Succeeds with a phone number + password set up beforehand via the WhatsApp link |
 | 3 | Data loads | Dashboard, lesson plans, curriculum, training, coaching show real data |
-| 4 | Session persists | ❌ **Known broken** — force-close returns you to login. Deferred; tracked as a known bug. Don't re-report it. |
+| 4 | Session persists | ⏳ **Fix applied (bd-2402), needs a device run** — `MainActivity.onPause()` now flushes the WebView cookie store to disk so a force-close no longer drops the persistent session cookie. Confirm: log in, swipe the app away, reopen → land on the dashboard. |
 | 5 | Back button | Navigates back; exits only from the dashboard root |
 | 6 | WhatsApp links | Open WhatsApp / the browser, not a dead WebView |
 | 7 | Stability | No crash or freeze during normal navigation |
 
 **Status as of 2026-07-29** (Realme RMX2061, real hardware): #1, #2, #3 and #7
-pass. #4 **fails** — session does not survive force-close; deferred to a later
-release. #5 and #6 are not implemented yet.
+pass. #4 **failed** — session did not survive force-close. **Fix applied
+2026-08-01 (bd-2402)**: `MainActivity.onPause()` flushes the WebView cookie store
+to disk; awaiting a re-run on real hardware to close it out. #5 and #6 are not
+implemented yet.
 
 Login (#2) only works because the portal server allows the app's origin through
 CORS and issues the session cookie with `SameSite=None`. If login starts failing

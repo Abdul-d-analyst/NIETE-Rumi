@@ -34,8 +34,8 @@ describe('Branding Configuration', () => {
       branding = require(brandingPath);
     });
 
-    test('exports botName with default value "Rumi"', () => {
-      expect(branding.botName).toBe('Rumi');
+    test('exports botName with default value "NIETE Teaching Assistant" (bd-2381)', () => {
+      expect(branding.botName).toBe('NIETE Teaching Assistant');
     });
 
     test('exports orgName with a non-empty default', () => {

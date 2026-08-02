@@ -42,13 +42,14 @@ const { logToFile } = require('../../../utils/logger');
  * `reportData._heroInput` (the side-channel used by report-generator so the
  * PDFKit / HTML renderers can keep their reportData contract unchanged).
  */
-const heroRenderer = {
-  key: 'hero',
+const makeHeroRenderer = (brand) => ({
+  key: brand ? `hero-${brand}` : 'hero',
   async render(input) {
     const { generateHeroReport } = require('../report-v2/hero-report.service');
     const hero = (input && input._heroInput) || input;
+    const opts = brand ? { ...(hero.opts || {}), brand } : (hero.opts || {});
     try {
-      return await generateHeroReport(hero.session, hero.analysis, hero.opts || {});
+      return await generateHeroReport(hero.session, hero.analysis, opts);
     } catch (err) {
       logToFile('[renderer-registry] hero render failed → PDFKit fallback', {
         framework: hero.analysis && hero.analysis.framework,
@@ -60,7 +61,28 @@ const heroRenderer = {
       return pdfkitRenderer.render(input);
     }
   },
-};
+});
+
+const heroRenderer = makeHeroRenderer();
+
+/**
+ * FICO = the NIETE/ICT deployment's framework, so its hero report carries the
+ * NIETE brand (Green #47BA7D + Charcoal #32373C, bd-2452) instead of the
+ * default palette. Branding is an opts-level concern: the renderer injects
+ * `brand: 'niete'` and the hero template picks the matching palette.
+ *
+ * bd-2453: HERO_BRANDS is the single source of truth for framework → brand.
+ * `heroBrandFor()` is exported for callers that render the hero report
+ * DIRECTLY (the observe teacher-report path bypasses the registry), so the
+ * same session can never be branded on one surface and unbranded on another.
+ */
+const HERO_BRANDS = { fico: 'niete' };
+
+function heroBrandFor(frameworkKey) {
+  return HERO_BRANDS[String(frameworkKey || '').toLowerCase()];
+}
+
+const ficoNieteHeroRenderer = makeHeroRenderer(HERO_BRANDS.fico);
 
 /**
  * Default renderer (fallback): the existing PDFKit layout. Wraps the PDFKit-only
@@ -92,7 +114,7 @@ const renderers = {
   oecd:   heroRenderer,
   hots:   heroRenderer,
   teach:  heroRenderer,
-  fico:   heroRenderer,
+  fico:   ficoNieteHeroRenderer,
   mewaka: heroRenderer,
 };
 
@@ -112,4 +134,4 @@ function getReportRenderer(frameworkKey) {
   return renderer;
 }
 
-module.exports = { getReportRenderer };
+module.exports = { getReportRenderer, heroBrandFor };

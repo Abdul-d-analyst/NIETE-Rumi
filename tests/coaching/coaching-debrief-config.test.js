@@ -43,8 +43,8 @@ describe('coaching-debrief.config — single source of truth', () => {
     expect(Array.isArray(config.avoid)).toBe(true);
   });
 
-  test('N is currently 3 (behavior preserved)', () => {
-    expect(config.NUM_REFLECTIVE_QUESTIONS).toBe(3);
+  test('N is 1 — one reflection question per observation (FEAT-106 CHANGE 1, bd-2346)', () => {
+    expect(config.NUM_REFLECTIVE_QUESTIONS).toBe(1);
   });
 });
 

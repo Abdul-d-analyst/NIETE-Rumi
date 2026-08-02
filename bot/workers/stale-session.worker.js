@@ -25,6 +25,8 @@ const supabase = require('../shared/config/supabase');
 const { logToFile } = require('../shared/utils/logger');
 const WhatsAppService = require('../shared/services/whatsapp.service');
 const CoachingJobQueueService = require('../shared/services/coaching/coaching-job-queue.service');
+const { runSonioxCleanup } = require('../shared/services/soniox-cleanup.service');
+const { classifyStuckInitiatedSession } = require('../shared/services/coaching/coaching-stale-recovery');
 
 // Coaching thresholds (in milliseconds)
 const COACHING_REMINDER_THRESHOLD_MS = 2 * 60 * 60 * 1000;  // 2 hours
@@ -48,6 +50,20 @@ async function main() {
     // Process coaching sessions
     const coachingResults = await processStaleCoachingSessions();
     console.log('📊 Coaching results:', coachingResults);
+
+    // bd-2417: recover sessions frozen at the confirmation gate.
+    const stuckInitiatedResults = await processStuckInitiatedSessions();
+    console.log('🔓 Stuck-initiated recovery:', stuckInitiatedResults);
+
+    // bd-2378: purge old Soniox transcriptions + files so the account never
+    // fills up (~2000) and starts failing every transcription. Best-effort —
+    // never fails the cron.
+    try {
+      const sonioxResults = await runSonioxCleanup();
+      console.log('🧹 Soniox cleanup:', sonioxResults);
+    } catch (cleanupErr) {
+      console.error('⚠️ Soniox cleanup failed (non-fatal):', cleanupErr.message);
+    }
 
     // Future: Process reading assessments
     // const readingResults = await processStaleReadingAssessments();
@@ -389,4 +405,69 @@ if (require.main === module) {
   main();
 }
 
-module.exports = { main };
+/**
+ * bd-2417 (row 13): recover coaching sessions frozen at the confirmation gate
+ * ('initiated' / AWAITING_CONFIRMATION). Past a grace window we proceed with the
+ * recording (auto-confirm → queue transcription) so the teacher still gets her
+ * report; if the audio is too old to still exist, mark it abandoned. This is
+ * what stops Sidra's 16-min recording sitting frozen with "still analyzing".
+ */
+async function processStuckInitiatedSessions() {
+  const { data: stuck } = await supabase
+    .from('coaching_sessions')
+    .select('id, user_id, status, created_at, audio_id, users!inner(phone_number, first_name)')
+    .eq('status', 'initiated')
+    .order('created_at', { ascending: true })
+    .limit(50);
+
+  let confirmed = 0; let abandoned = 0; let skipped = 0;
+  for (const session of (stuck || [])) {
+    const decision = classifyStuckInitiatedSession(session);
+    if (decision.action === 'skip') { skipped += 1; continue; }
+
+    try {
+      if (decision.action === 'auto_confirm') {
+        await supabase.from('coaching_sessions').update({
+          status: 'confirmed',
+          confirmed_at: new Date().toISOString(),
+          conversation_state: { current_state: 'AWAITING_ANALYSIS' },
+          updated_at: new Date().toISOString(),
+        }).eq('id', session.id);
+        await CoachingJobQueueService.queueTranscription(session.id, {
+          from: session.users.phone_number,
+          audioId: session.audio_id,
+        });
+        await WhatsAppService.sendMessage(
+          session.users.phone_number,
+          `Hi ${session.users.first_name || ''}! I've gone ahead and started analysing your classroom recording — your report is on the way. 📊`,
+        );
+        confirmed += 1;
+        logToFile('🔄 Stuck confirmation-gate session auto-proceeded', { sessionId: session.id, reason: decision.reason });
+      } else if (decision.action === 'abandon') {
+        await supabase.from('coaching_sessions').update({
+          status: 'abandoned',
+          error_message: `Confirmation gate: ${decision.reason} (bd-2417)`,
+          updated_at: new Date().toISOString(),
+        }).eq('id', session.id);
+        abandoned += 1;
+        logToFile('🚫 Stuck confirmation-gate session abandoned', { sessionId: session.id, reason: decision.reason });
+      }
+    } catch (err) {
+      logToFile('⚠️ Failed to recover stuck initiated session', { sessionId: session.id, error: err.message });
+    }
+  }
+  return { total: (stuck || []).length, confirmed, abandoned, skipped };
+}
+
+/**
+ * Run every recovery sweep WITHOUT process.exit — for the always-on sqs-worker
+ * to call on its interval (NIETE has no Railway Cron, so the standalone main()
+ * never fires here). main() wraps this for a standalone/cron invocation.
+ */
+async function runRecovery() {
+  const coaching = await processStaleCoachingSessions();
+  const stuckInitiated = await processStuckInitiatedSessions();
+  return { coaching, stuckInitiated };
+}
+
+module.exports = { main, runRecovery, processStuckInitiatedSessions, processStaleCoachingSessions };

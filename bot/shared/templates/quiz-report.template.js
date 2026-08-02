@@ -30,7 +30,7 @@ function readBase64(relPath) {
 
 function ensureAssets() {
   if (_logoB64 === null) {
-    _logoB64 = readBase64('assets/Rumi Transparent.png') || '';
+    _logoB64 = readBase64('assets/niete-mark-onlight.png') || '';
     _lexendRegB64 = readBase64('fonts/Lexend-Regular.ttf') || '';
     _lexendBoldB64 = readBase64('fonts/Lexend-Bold.ttf') || '';
     _nastaliqRegB64 = readBase64('fonts/NotoNastaliqUrdu-Regular.ttf') || '';
@@ -203,7 +203,7 @@ function renderQuizReportHtml(reportData) {
 <body>
 <div class="page">
   <header>
-    ${_logoB64 ? `<img class="header-logo" src="data:image/png;base64,${_logoB64}" alt="Rumi">` : ''}
+    ${_logoB64 ? `<img class="header-logo" src="data:image/png;base64,${_logoB64}" alt="NIETE">` : ''}
     <div>
       <h1>Quiz Report</h1>
       <p class="subtitle">${escapeHtml(quiz.topic || '')} ${classDisplay ? `— ${escapeHtml(classDisplay)}` : ''}</p>
@@ -246,7 +246,7 @@ function renderQuizReportHtml(reportData) {
   ${insight ? `
   <div class="section-heading">Teaching Insight</div>
   <div class="insight">
-    <div class="label">From Rumi</div>
+    <div class="label">From NIETE</div>
     <p>${escapeHtml(insight)}</p>
   </div>` : ''}
 

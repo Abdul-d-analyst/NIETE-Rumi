@@ -93,9 +93,9 @@ describe('register-all-flows', () => {
   // FLOW_CONFIGS
   // -----------------------------------------------------------------------
   describe('FLOW_CONFIGS', () => {
-    it('exports an array of all 12 registerable flow configurations', () => {
+    it('exports an array of all 13 registerable flow configurations', () => {
       expect(Array.isArray(FLOW_CONFIGS)).toBe(true);
-      expect(FLOW_CONFIGS).toHaveLength(12);
+      expect(FLOW_CONFIGS).toHaveLength(13);
     });
 
     it('includes Reading Assessment as a navigate type with no endpointPath', () => {

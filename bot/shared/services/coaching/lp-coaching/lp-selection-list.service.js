@@ -37,7 +37,10 @@ function buildLPSelectionList(coachingSessionId, recentLPs, language = 'en', reg
   // en path; the ur path keeps its localised default when no region override
   // is supplied, and swaps to the region-scoped label when one is set.
   const roleLabel = coachRoleLabelForRegion(region);
-  const isDefaultEnRole = roleLabel === 'Rumi Digital Coach';
+  // When the role is the deployment default (no region override), Urdu users get
+  // a localised label. bd-2381: default flipped Rumi→NIETE, so both the match and
+  // the Urdu string are NIETE now (kills the stale "رومی ڈیجیٹل کوچ" self-reference).
+  const isDefaultEnRole = roleLabel === 'NIETE Digital Coach';
 
   // Fallback: no recent LPs → simple Yes/No buttons
   if (!recentLPs || recentLPs.length === 0) {
@@ -90,7 +93,7 @@ function buildLPSelectionList(coachingSessionId, recentLPs, language = 'en', reg
       // region-scoped label (in Latin script) for both — a "Human Coach"
       // deployment renders that in both languages until a localised override
       // is supplied via the same env map (future work).
-      text: isUrdu && isDefaultEnRole ? 'رومی ڈیجیٹل کوچ' : roleLabel,
+      text: isUrdu && isDefaultEnRole ? 'NIETE ڈیجیٹل کوچ' : roleLabel,
     },
     action: {
       button: isUrdu ? 'منتخب کریں' : 'Select',

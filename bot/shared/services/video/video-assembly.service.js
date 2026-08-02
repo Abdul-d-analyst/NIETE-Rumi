@@ -177,14 +177,14 @@ class VideoAssemblyService {
       if (portalBase) {
         // Portal prompts in all 9 supported languages
         const portalPrompts = {
-          en: `📚 Your videos are also available on the Rumi Portal!\n\n👉 ${portalBase}\n\nYou can view and download all your videos and slides there.`,
-          ur: `📚 آپ کی ویڈیوز Rumi Portal پر بھی دستیاب ہیں!\n\n👉 ${portalBase}\n\nوہاں آپ اپنی تمام ویڈیوز اور سلائیڈز دیکھ سکتے ہیں۔`,
+          en: `📚 Your videos are also available on the NIETE Portal!\n\n👉 ${portalBase}\n\nYou can view and download all your videos and slides there.`,
+          ur: `📚 آپ کی ویڈیوز NIETE Portal پر بھی دستیاب ہیں!\n\n👉 ${portalBase}\n\nوہاں آپ اپنی تمام ویڈیوز اور سلائیڈز دیکھ سکتے ہیں۔`,
           ar: `📚 فيديوهاتك متاحة أيضاً على بوابة رومي!\n\n👉 ${portalBase}\n\nيمكنك مشاهدة وتحميل جميع فيديوهاتك وشرائحك هناك.`,
-          es: `📚 ¡Tus videos también están disponibles en el Portal Rumi!\n\n👉 ${portalBase}\n\nPuedes ver y descargar todos tus videos y diapositivas allí.`,
+          es: `📚 ¡Tus videos también están disponibles en el Portal NIETE!\n\n👉 ${portalBase}\n\nPuedes ver y descargar todos tus videos y diapositivas allí.`,
           'ps-PK': `📚 ستاسو ویډیوګانې په رومي پورټل کې هم شتون لري!\n\n👉 ${portalBase}\n\nتاسو کولی شئ هلته خپل ټول ویډیوګانې او سلایډونه وګورئ او ډاونلوډ کړئ.`,
-          'pa-PK': `📚 تہاڈیاں ویڈیوز رومی پورٹل تے وی دستیاب نیں!\n\n👉 ${portalBase}\n\nاوتھے تسی اپنیاں ساریاں ویڈیوز تے سلائیڈز ویکھ تے ڈاؤنلوڈ کر سکدے او۔`,
+          'pa-PK': `📚 تہاڈیاں ویڈیوز NIETE پورٹل تے وی دستیاب نیں!\n\n👉 ${portalBase}\n\nاوتھے تسی اپنیاں ساریاں ویڈیوز تے سلائیڈز ویکھ تے ڈاؤنلوڈ کر سکدے او۔`,
           'sd-PK': `📚 توهان جون وڊيوز رومي پورٽل تي پڻ موجود آهن!\n\n👉 ${portalBase}\n\nاتي توهان پنهنجون سڀ وڊيوز ۽ سلائيڊون ڏسي ۽ ڊائونلوڊ ڪري سگهو ٿا.`,
-          'bal-PK': `📚 شمی ویڈیوز رومی پورٹل ءَ ہم داب انت!\n\n👉 ${portalBase}\n\nادان شما تمام ویڈیوز و سلائڈز گندگ و ڈاؤنلوڈ کن اِت۔`,
+          'bal-PK': `📚 شمی ویڈیوز NIETE پورٹل ءَ ہم داب انت!\n\n👉 ${portalBase}\n\nادان شما تمام ویڈیوز و سلائڈز گندگ و ڈاؤنلوڈ کن اِت۔`,
           'ta-LK': `📚 உங்கள் வீடியோக்கள் ரூமி போர்ட்டலிலும் கிடைக்கின்றன!\n\n👉 ${portalBase}\n\nஅங்கு உங்கள் அனைத்து வீடியோக்களையும் ஸ்லைடுகளையும் பார்க்கலாம் மற்றும் பதிவிறக்கலாம்.`
         };
 

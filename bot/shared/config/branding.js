@@ -14,8 +14,13 @@
  * confirmation messages).
  */
 
-const botName = process.env.BOT_NAME || 'Rumi';
-const orgName = process.env.ORG_NAME || 'Rumi Education';
+// NIETE fork defaults (OPS-114, bd-2381). Amena confirmed the Rumi→NIETE rename is
+// program-wide (2026-07-30). This fork's Railway token is read-only (403 on
+// variableUpsert), so — exactly like RUMI_LOGO_R2_KEY (bd-2374) — the code DEFAULT
+// is the operative config; still overridable via BOT_NAME / ORG_NAME. Convention:
+// full "NIETE Teaching Assistant" on formal surfaces, "NIETE" conversationally.
+const botName = process.env.BOT_NAME || 'NIETE Teaching Assistant';
+const orgName = process.env.ORG_NAME || 'NIETE';
 const supportContact = process.env.SUPPORT_CONTACT || null;
 const securityContact = process.env.SECURITY_CONTACT || null;
 const defaultLanguage = process.env.DEFAULT_LANGUAGE || 'en';

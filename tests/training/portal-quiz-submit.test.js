@@ -166,9 +166,16 @@ function seedThreeQuestionModule({ moduleId = 42, courseId = 7, levelId = 1, pro
   tableStates.training_assessment_answers = { rows: [] };
   tableStates.teacher_training_progress = { rows: [] };
   tableStates.training_grand_quizzes = { rows: [] };
+  require('../fixtures/delegate-training-to-bot').seedProgramScope(tableStates);
 }
 
 beforeEach(() => {
+  // bd-2490 — the portal's assessment routes are gated to WhatsApp. This
+  // suite covers the grading logic behind them, which is RETAINED for when
+  // the surface comes back (bd-2488), so it opens the test seam. The
+  // production default stays blocked — see
+  // tests/portal/assessments-are-whatsapp-only.test.js.
+  process.env.PORTAL_ASSESSMENTS_TEST_ENABLE = '1';
   jest.resetModules();
   tableStates = {};
   inserts = [];
@@ -179,6 +186,8 @@ beforeEach(() => {
     from: supabaseFrom,
     rpc: jest.fn().mockResolvedValue({ error: null }),
   }));
+  const { installTrainingDelegation } = require('../fixtures/delegate-training-to-bot');
+  installTrainingDelegation(() => supabaseFrom);
   jest.doMock('../../dashboard/services/r2.service', () => ({
     generatePresignedUrl: jest.fn().mockResolvedValue(null),
     generatePresignedUrls: jest.fn().mockResolvedValue([]),
@@ -189,6 +198,7 @@ beforeEach(() => {
   jest.doMock('@aws-sdk/client-s3', () => ({ S3Client: jest.fn(), GetObjectCommand: jest.fn() }), { virtual: true });
 });
 
+afterEach(() => { delete process.env.PORTAL_ASSESSMENTS_TEST_ENABLE; });
 afterEach(() => jest.resetModules());
 
 describe('POST /api/portal/training/module/:id/quiz-attempts', () => {
@@ -273,7 +283,85 @@ describe('POST /api/portal/training/module/:id/quiz-attempts', () => {
     }));
   });
 
-  it('partial score — 2/3 correct → score=2, is_passed=false, status still passed (non-blocking)', async () => {
+  /**
+   * bd-2450 — THE fix. A failed check must leave no progress row.
+   *
+   * The portal upserted teacher_training_progress unconditionally, and the bot
+   * counts ANY progress row as a passed module (doneModuleIds has no status
+   * filter). So a teacher failing a check on the portal still had the module
+   * counted toward level completion on WhatsApp — unlocking the level exam and
+   * ultimately certifying a level off work that was never passed.
+   */
+  it('writes NO progress row when the check is failed (bd-2450)', async () => {
+    seedThreeQuestionModule();
+    await invoke({
+      userId: 'user-1', params: { id: '42' },
+      body: { answers: [
+        { question_id: 101, chosen_option: '1' },  // correct
+        { question_id: 102, chosen_option: '1' },  // WRONG
+        { question_id: 103, chosen_option: '1' },  // correct
+      ] },
+    });
+
+    const progress = upserts.filter(u => u.table === 'teacher_training_progress');
+    expect(progress).toHaveLength(0);
+  });
+
+  it('writes the progress row when the check is passed', async () => {
+    seedThreeQuestionModule();
+    await invoke({
+      userId: 'user-1', params: { id: '42' },
+      body: { answers: [
+        { question_id: 101, chosen_option: '1' },
+        { question_id: 102, chosen_option: '2' },
+        { question_id: 103, chosen_option: '1' },
+      ] },
+    });
+
+    const progress = upserts.filter(u => u.table === 'teacher_training_progress');
+    expect(progress).toHaveLength(1);
+    expect(progress[0].row).toMatchObject({ user_id: 'user-1', module_id: 42 });
+  });
+
+  /**
+   * bd-2483 — the bar is the VENDOR's, not 100%.
+   *
+   * `score === totalQuestions` is only right where module_passing_pct is 100
+   * (NIETE). Beacon House and Oxbridge pass at 70, so their teachers were
+   * failed on the portal for work that passed on WhatsApp.
+   */
+  it('passes a Beacon House module at 2/3 — its bar is 70, not 100', async () => {
+    seedThreeQuestionModule();
+    tableStates.training_vendors.rows[0].module_passing_pct = 70;
+
+    const { payload } = await invoke({
+      userId: 'user-1', params: { id: '42' },
+      body: { answers: [
+        { question_id: 101, chosen_option: '1' },
+        { question_id: 102, chosen_option: '1' },  // WRONG -> 2/3 = 67%... 
+        { question_id: 103, chosen_option: '1' },
+      ] },
+    });
+
+    // 2/3 is 66.7%, below 70 — still a fail. The point is the BAR moved, so
+    // assert against the bar the bot reported rather than a hardcoded verdict.
+    expect(payload.attempt.pass_pct).toBe(70);
+    expect(payload.attempt.achieved_pct).toBe(67);
+    expect(payload.attempt.is_passed).toBe(false);
+  });
+
+  /**
+   * bd-2450 / bd-2483 — this used to assert `status: 'passed'` on a FAILED
+   * check, described as "non-blocking, matches WA". It did not match WA: the
+   * bot writes status='failed' below the vendor bar, and the comment recorded
+   * an intention rather than the behaviour.
+   *
+   * The consequence was not cosmetic. The portal also wrote a progress row
+   * whatever the outcome, and the bot treats any progress row as a pass, so a
+   * failed check on the portal counted toward level completion on WhatsApp and
+   * could certify a level off work that was never passed.
+   */
+  it('partial score — 2/3 correct on a 100% bar → is_passed=false AND status=failed', async () => {
     seedThreeQuestionModule();
     const { statusCode, payload } = await invoke({
       userId: 'user-1', params: { id: '42' },
@@ -291,7 +379,7 @@ describe('POST /api/portal/training/module/:id/quiz-attempts', () => {
     const attemptInsert = inserts.find(i => i.table === 'training_assessment_attempts');
     expect(attemptInsert.row.score).toBe(2);
     expect(attemptInsert.row.is_passed).toBe(false);
-    expect(attemptInsert.row.status).toBe('passed');  // non-blocking, matches WA
+    expect(attemptInsert.row.status).toBe('failed');
 
     // The wrong-answer row is is_correct=false
     const answerInserts = inserts.filter(i => i.table === 'training_assessment_answers');
