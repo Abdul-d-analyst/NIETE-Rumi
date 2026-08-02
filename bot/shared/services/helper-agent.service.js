@@ -306,6 +306,13 @@ Respond with just one word, nothing else.`;
    */
   static getEscapePathMessage(conversationState, language = 'en') {
     const escapePaths = {
+      // bd-2508 — coaching's reflective conversation is a waiting state like any
+      // other and needs the same documented exit. It was missing, which is why
+      // teachers who did the right thing and typed /menu were still stuck.
+      CONDUCTING_CONVERSATION: {
+        en: "💬 I'm waiting for your reflection on the lesson.\n\nTake your time — or type /menu to leave this and do something else.",
+        ur: '💬 میں سبق پر آپ کے تاثرات کا انتظار کر رہا ہوں۔\n\nاطمینان سے جواب دیں — یا اسے چھوڑ کر کچھ اور کرنے کے لیے /menu لکھیں۔',
+      },
       AWAITING_MENU_CHOICE: {
         en: "📋 Please choose an option (1-4) from the menu above.\n\nOr type /menu to see the menu again.",
         ur: "📋 براہ کرم اوپر مینو سے ایک آپشن (1-4) منتخب کریں۔\n\nیا دوبارہ مینو دیکھنے کے لیے /menu ٹائپ کریں۔",
