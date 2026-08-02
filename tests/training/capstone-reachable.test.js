@@ -312,8 +312,27 @@ describe('bd-2474 — a Beacon House level has an exam', () => {
     expect(String(gate.cta)).toMatch(/start exam/i);
   });
 
-  test('a level with genuinely no exam row still says so', async () => {
-    seedLevel({ done: [101, 102, 201, 202] });
+  /**
+   * bd-2503 — this used to assert the literal copy "no level exam" on a level
+   * where every module was already done. That copy was the bug: it sat under
+   * "7/7 modules done · 100%" and told a finished teacher to finish.
+   *
+   * The intent — never imply an exam that does not exist — is what matters and
+   * is asserted directly below. The unfinished case still gets the original
+   * wording; that is pinned in tests/training/no-exam-level-completes.test.js.
+   */
+  test('a level with genuinely no exam row never claims one', async () => {
+    seedLevel({ done: [101, 102, 201, 202] });   // every module complete
+    tableStates.training_grand_quizzes = { rows: [] };
+
+    const gate = await Endpoint.loadGrandQuizState(UID, 18);
+
+    expect(JSON.stringify(gate)).not.toMatch(/grand quiz|start exam|take exam/i);
+    expect(String(gate.body)).toMatch(/level complete/i);
+  });
+
+  test('an UNFINISHED level with no exam row still says there is no exam', async () => {
+    seedLevel({ done: [101] });                  // partial
     tableStates.training_grand_quizzes = { rows: [] };
 
     const gate = await Endpoint.loadGrandQuizState(UID, 18);

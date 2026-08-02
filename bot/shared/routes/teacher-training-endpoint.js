@@ -581,7 +581,7 @@ async function loadVisibleLevelsWithProgress(userId) {
 
   // 4. Progress: courses complete + grand-quiz pass state per level
   const levelIds = visibleLevels.map(l => l.id);
-  const [{ data: courses }, { data: progressRows }, { data: attempts }, { data: quizzes }] = await Promise.all([
+  const [{ data: courses }, { data: progressRows }, { data: attempts }, { data: quizzes }, { data: certRows }] = await Promise.all([
     supabase.from('training_courses').select('id, level_id, is_active').in('level_id', levelIds),
     supabase.from('teacher_training_progress').select('module_id').eq('user_id', userId),
     // bd-2391 — LEVEL-EXAM attempts only. Per-module quick-check attempts also
@@ -600,7 +600,14 @@ async function loadVisibleLevelsWithProgress(userId) {
     // on it; widening the filter without it leaves the guard blind.
     supabase.from('training_assessment_attempts').select('level_id, status, is_passed, cooldown_until, completed_at, quiz_kind').eq('user_id', userId).in('quiz_kind', EXAM_QUIZ_KINDS).in('level_id', levelIds),
     supabase.from('training_grand_quizzes').select('id, level_id, quiz_type').in('level_id', levelIds).in('quiz_type', EXAM_QUIZ_TYPES).eq('is_active', true),
+    // bd-2503 — some levels have NO exam at all (Oxbridge). For an all_modules
+    // vendor with no capstone, maybeIssueQuizScoreCertificate certifies the
+    // level off completed modules alone, so the certificate row is the ONLY
+    // record that the teacher finished. Without reading it, a 7/7 level sat in
+    // 'ready_for_quiz' forever, waiting for an exam that does not exist.
+    supabase.from('training_certificates').select('level_id').eq('user_id', userId).in('level_id', levelIds),
   ]);
+  const certifiedLevelIds = new Set((certRows || []).map(c => c.level_id));
 
   // bd-2447 — a course is complete when EVERY active module under it is done.
   //
@@ -658,7 +665,9 @@ async function loadVisibleLevelsWithProgress(userId) {
 
     let state;
     if (chainLocked && !prevPassed && !isFirst) state = 'locked';
-    else if (passedAttempt) state = 'certified';
+    // bd-2503 — a held certificate is terminal whether it came from passing an
+    // exam or from completing every module of an exam-less level.
+    else if (passedAttempt || certifiedLevelIds.has(lv.id)) state = 'certified';
     else if (coursesCompleted.length === lvCourses.length && lvCourses.length > 0) state = 'ready_for_quiz';
     else if (coursesTouched.length > 0) state = 'in_progress';
     else state = 'not_started';
@@ -863,7 +872,7 @@ async function loadCoursesWithProgress(userId, levelId) {
 }
 
 async function loadGrandQuizState(userId, levelId) {
-  const [{ data: catalog }, { data: attempts }, { data: courses }, { data: modules }, { data: progressRows }] = await Promise.all([
+  const [{ data: catalog }, { data: attempts }, { data: courses }, { data: modules }, { data: progressRows }, { data: levelCert }] = await Promise.all([
     // bd-2474 — resolve the level's exam by LEVEL, not by type. Beacon House
     // levels carry quiz_type='capstone'; filtering to 'grand_quiz' meant every
     // BH level reported "No level exam" even though capstones 29-32 are active.
@@ -877,9 +886,11 @@ async function loadGrandQuizState(userId, levelId) {
     supabase.from('training_courses').select('id').eq('level_id', levelId).eq('is_active', true),
     supabase.from('training_modules').select('id, course_id').eq('is_active', true),
     supabase.from('teacher_training_progress').select('module_id').eq('user_id', userId),
+    // bd-2503 — the same signal loadVisibleLevelsWithProgress reads. Both
+    // surfaces must agree on what "complete" means, or HOME and LEVEL_DETAIL
+    // contradict each other again — which is the bug being fixed.
+    supabase.from('training_certificates').select('id').eq('user_id', userId).eq('level_id', levelId).maybeSingle(),
   ]);
-  if (!catalog) return { badge: 'badge_quiz_available', body: '🎓 No level exam — finish all sessions to complete this level.', caption: ' ', cta: ' ' };
-
   const passed = (attempts || []).some(isGrandPass);
   const cooldown = (attempts || []).find(a => a.status === 'failed' && a.cooldown_until && new Date(a.cooldown_until) > new Date());
   const doneIds = new Set((progressRows || []).map(r => r.module_id));
@@ -895,6 +906,23 @@ async function loadGrandQuizState(userId, levelId) {
   // courses are all empty is not "done", it is unbuilt.
   const coursesWithModules = new Set(levelModules.map(m => m.course_id));
   const allDone = coursesWithModules.size > 0 && levelModules.every(m => doneIds.has(m.id));
+
+  // bd-2503 — the no-exam level. Moved BELOW allDone so the copy can tell the
+  // truth: a teacher at 100% was being told to "finish all sessions" directly
+  // under a line reading "7/7 modules done · 100%".
+  if (!catalog) {
+    // Only promise a certificate when one actually exists. A level can be
+    // finished without being certified — maybeIssueQuizScoreCertificate skips
+    // vendors on the chain ladder — and telling a teacher to look for a
+    // certificate that was never issued is worse than saying nothing.
+    if (levelCert) {
+      return { badge: 'badge_quiz_passed', body: '🏆 Level complete — you have finished every session.', caption: 'Certificate available in your records.', cta: '✓ Complete' };
+    }
+    if (allDone) {
+      return { badge: 'badge_quiz_passed', body: '🏆 Level complete — you have finished every session.', caption: ' ', cta: '✓ Complete' };
+    }
+    return { badge: 'badge_quiz_available', body: '🎓 No level exam — finish all sessions to complete this level.', caption: ' ', cta: ' ' };
+  }
 
   if (passed) return { badge: 'badge_quiz_passed', body: '🏆 Grand Quiz — You passed this level exam.', caption: 'Certificate available in your records.', cta: '✓ Passed' };
   if (cooldown) {
