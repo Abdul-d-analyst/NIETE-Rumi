@@ -817,6 +817,32 @@ async function checkLevelUnlocked(userId, levelId) {
   };
 }
 
+/**
+ * bd-2483 — the exam gate, addressed by level ID.
+ *
+ * assertCanStartGrandQuiz takes a 1-based level ORDER plus a vendor key,
+ * because that is what the Flow has in hand. The portal has a level id. This
+ * resolves one to the other and delegates; it adds no rule of its own, so the
+ * two surfaces cannot answer "may I sit this exam?" differently.
+ *
+ * @returns {Promise<{ok: boolean, level?: object, reason?: string, message?: string}>}
+ */
+async function assertCanStartExamForLevel(userId, levelId) {
+  const idNum = parseInt(String(levelId), 10);
+  if (!Number.isFinite(idNum)) {
+    return { ok: false, reason: 'bad_level', message: 'Please open the level again and tap Take exam.' };
+  }
+  const catalog = await loadVisibleLevelsWithProgress(userId);
+  const level = (catalog || []).find(l => l.id === idNum);
+  if (!level) {
+    return { ok: false, reason: 'not_in_program', message: 'That level is not part of your program.' };
+  }
+  // order_index is 0-based in the catalogue; assertCanStartGrandQuiz expects
+  // the Flow's 1-based order. Scoping by vendor_key keeps the lookup correct
+  // when two vendors share an order_index (bd-2392).
+  return assertCanStartGrandQuiz(userId, level.order_index + 1, level.vendor_key);
+}
+
 async function loadCoursesWithProgress(userId, levelId) {
   const [{ data: courses }, { data: progressRows }, { data: modules }] = await Promise.all([
     supabase.from('training_courses').select('id, title, order_index').eq('level_id', levelId).eq('is_active', true).order('order_index'),
@@ -1123,4 +1149,6 @@ module.exports = {
   // bd-2452/2453 — the single precondition check for starting a level exam,
   // shared by the Flow branch and quiz-delivery.startGrandQuiz.
   assertCanStartGrandQuiz,
+  // bd-2483 — the same gate, addressed by level id (what the portal has).
+  assertCanStartExamForLevel,
 };

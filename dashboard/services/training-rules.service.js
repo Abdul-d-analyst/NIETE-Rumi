@@ -135,6 +135,31 @@ async function checkExamGate(userId, levelOrder, vendorKey = null) {
   return gate('exam-gate', () => ask('exam-gate', { userId, levelOrder, vendorKey }));
 }
 
+/**
+ * May this teacher sit this level's exam, addressed by level ID?
+ *
+ * bd-2483 — the portal holds ids, the Flow holds orders. Same rule either way.
+ * The bot's `reason` maps 1:1 onto the states the portal renders:
+ *   no_exam -> no_quiz | already_passed -> passed | cooldown -> cooldown
+ *   incomplete -> courses_incomplete | ok -> ready
+ */
+async function checkExamGateByLevel(userId, levelId) {
+  return gate('exam-gate-by-level', () => ask('exam-gate-by-level', { userId, levelId }));
+}
+
+/**
+ * The module-quiz verdict, decided by the bot's vendor pass bar.
+ *
+ * bd-2483 — THROWS on failure rather than denying. A gate can safely default to
+ * "no"; a grading verdict cannot default to either answer. Recording a pass we
+ * are unsure of hands out unearned progress; recording a fail we are unsure of
+ * destroys a teacher's real work. The caller must abort the write instead.
+ */
+async function getModuleQuizVerdict(moduleId, score, totalQuestions) {
+  const data = await ask('module-quiz-verdict', { moduleId, score, totalQuestions });
+  return { is_passed: data.is_passed === true, status: data.status, pass_pct: data.pass_pct, achieved_pct: data.achieved_pct };
+}
+
 /** The exam's presentation state for a level. Denies on any failure. */
 async function getGrandQuizState(userId, levelId) {
   return gate('grand-quiz-state', () => ask('grand-quiz-state', { userId, levelId }));
@@ -145,6 +170,8 @@ module.exports = {
   checkLevelUnlocked,
   checkModuleUnlocked,
   checkExamGate,
+  checkExamGateByLevel,
+  getModuleQuizVerdict,
   getGrandQuizState,
   UNAVAILABLE,
 };

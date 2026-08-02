@@ -237,12 +237,21 @@ describe('bd-2480 — the client holds no rules of its own', () => {
       .replace(/\/\*[\s\S]*?\*\//g, '')   // block comments
       .replace(/(^|[^:])\/\/.*$/gm, '$1'); // line comments, leaving http:// alone
 
+    // Inputs to a rule, and coercion of the bot's answer, are fine — the client
+    // has to name `is_passed` to hand it back. What must not appear is anything
+    // that DECIDES: reading the source data a rule is computed from, or
+    // comparing scores against a bar.
     expect(code).not.toMatch(/unlock_logic/);
-    expect(code).not.toMatch(/is_passed/);
     expect(code).not.toMatch(/quiz_kind/);
+    expect(code).not.toMatch(/passing_pct|module_passing_pct/);
     expect(code).not.toMatch(/coursesCompleted|coursesStarted|ready_for_quiz|certified/);
     // No arithmetic on level ordering — deriving "the previous level" here is
     // exactly how the two surfaces ended up disagreeing about lock state.
     expect(code).not.toMatch(/order_index/);
+    // No grading. `score === total`, `>= someBar`, or any percentage maths
+    // would be a second copy of the pass rule (bd-2483).
+    expect(code).not.toMatch(/score\s*[=><]/);
+    expect(code).not.toMatch(/totalQuestions\s*[=><]/);
+    expect(code).not.toMatch(/\/\s*total|\*\s*100/);
   });
 });

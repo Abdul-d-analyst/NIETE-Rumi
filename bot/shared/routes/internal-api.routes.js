@@ -216,6 +216,23 @@ router.post('/training/exam-gate', requireInternalKey, trainingRoute('exam-gate'
 }));
 
 /**
+ * POST /api/internal/training/exam-gate-by-level
+ * Body { userId, levelId } -> { success, ok, reason?, message?, level? }
+ *
+ * bd-2483 — the same gate, keyed the way the portal addresses levels. The Flow
+ * holds a level order; the portal holds an id. One rule, two ways in.
+ */
+router.post('/training/exam-gate-by-level', requireInternalKey, trainingRoute('exam-gate-by-level', async (Training, req, res) => {
+  const { userId } = req.body || {};
+  const levelId = num((req.body || {}).levelId);
+  if (!userId) return res.status(400).json({ success: false, error: 'userId is required' });
+  if (levelId === null) return res.status(400).json({ success: false, error: 'levelId is required' });
+
+  const gate = await Training.assertCanStartExamForLevel(userId, levelId);
+  return res.json({ success: true, ...gate });
+}));
+
+/**
  * POST /api/internal/training/grand-quiz-state
  * Body { userId, levelId } → { success, ...state }
  *
@@ -231,5 +248,32 @@ router.post('/training/grand-quiz-state', requireInternalKey, trainingRoute('gra
   const state = await Training.loadGrandQuizState(userId, levelId);
   return res.json({ success: true, ...(state || {}) });
 }));
+
+/**
+ * POST /api/internal/training/module-quiz-verdict
+ * Body { moduleId, score, totalQuestions } -> { success, is_passed, status, pass_pct, achieved_pct }
+ *
+ * bd-2483 — the portal graded module quizzes with `score === total` and wrote
+ * status 'passed' whatever happened. The bar is per vendor
+ * (module_passing_pct), and a failure must record as one.
+ */
+router.post('/training/module-quiz-verdict', requireInternalKey, async (req, res) => {
+  const moduleId = num((req.body || {}).moduleId);
+  const score = num((req.body || {}).score);
+  const totalQuestions = num((req.body || {}).totalQuestions);
+  if (moduleId === null) return res.status(400).json({ success: false, error: 'moduleId is required' });
+  if (score === null) return res.status(400).json({ success: false, error: 'score is required' });
+  if (totalQuestions === null) return res.status(400).json({ success: false, error: 'totalQuestions is required' });
+
+  try {
+    const QuizDelivery = require('../services/training/quiz-delivery.service');
+    const verdict = await QuizDelivery.decideModuleQuizPass(moduleId, score, totalQuestions);
+    return res.json({ success: true, ...verdict });
+  } catch (error) {
+    // Fail CLOSED: never let a lookup failure read as a pass.
+    logToFile('❌ Internal training API failed', { route: 'module-quiz-verdict', error: error?.message });
+    return res.status(500).json({ success: false, error: 'Grading lookup failed' });
+  }
+});
 
 module.exports = router;

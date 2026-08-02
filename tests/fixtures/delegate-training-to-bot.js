@@ -76,7 +76,11 @@ function installTrainingDelegation(getSupabaseFrom) {
       checkLevelUnlocked: (uid, levelId) => bot.checkLevelUnlocked(uid, levelId),
       checkModuleUnlocked: (uid, moduleId) => bot.checkModuleUnlocked(uid, moduleId),
       checkExamGate: (uid, order, vendorKey) => bot.assertCanStartGrandQuiz(uid, order, vendorKey),
+      checkExamGateByLevel: (uid, levelId) => bot.assertCanStartExamForLevel(uid, levelId),
       getGrandQuizState: (uid, levelId) => bot.loadGrandQuizState(uid, levelId),
+      getModuleQuizVerdict: (moduleId, score, total) =>
+        require('../../bot/shared/services/training/quiz-delivery.service')
+          .decideModuleQuizPass(moduleId, score, total),
     };
   });
 }
