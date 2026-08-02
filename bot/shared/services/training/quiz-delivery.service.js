@@ -42,12 +42,32 @@
  *
  * Button ID format is the same for both kinds:
  *   training_quiz_<attemptUuid>_<optionIndex1based>
+ *
+ * The option index in that id is ALWAYS the question's CANONICAL 1-based
+ * option index — the one `correct_option` is written in and the one 400k+
+ * historical answer rows hold. When option order is shuffled for display
+ * (see quiz-serving.service) the translation happens at RENDER time, in the
+ * row id, so nothing downstream — this handler, grading, the portal, the
+ * analytics — ever sees a display position. The id format itself is
+ * unchanged; only which options sit behind which letter moves.
+ *
+ * WHICH questions get served is likewise a decision, not "all of them":
+ * quiz-serving.service picks the set from the vendor's config (one per
+ * Bloom level for a module check, a random cap for a level exam) seeded on
+ * the attempt id. It is stored nowhere, so every path here re-derives it.
  */
+const crypto = require('crypto');
 const supabase = require('../../config/supabase');
 const WhatsAppService = require('../whatsapp.service');
 const { logToFile } = require('../../utils/logger');
 const { logEvent } = require('../../utils/structured-logger');
 const { issueCertificate } = require('./certificate.service');
+const {
+  DEFAULT_SERVING_CONFIG,
+  normalizeServingConfig,
+  selectServedQuestions,
+  buildOptionDisplayOrder,
+} = require('./quiz-serving.service');
 
 const OPTION_LETTERS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'];
 const MAX_OPTIONS = 10;         // WhatsApp interactive list row cap
@@ -77,9 +97,150 @@ function setsEqual(a, b) {
   return a.size === b.size && [...a].every(x => b.has(x));
 }
 
-function selectedLetters(set) {
+/**
+ * Render a stored (canonical) selection as the letters the teacher can
+ * actually see. With shuffled options the canonical index and the display
+ * position differ, so the letter has to come from the display order — quoting
+ * "Selected: A" for canonical 1 when canonical 1 is sitting in row C is how a
+ * teacher ends up submitting a set they did not choose.
+ *
+ * @param {Set<string>} set canonical 1-based indices, as stored
+ * @param {number[]} displayOrder canonical indices in display order
+ */
+function selectedLetters(set, displayOrder) {
+  const order = Array.isArray(displayOrder) && displayOrder.length ? displayOrder : null;
   return [...set].map(Number).sort((a, b) => a - b)
-    .map(n => OPTION_LETTERS[n - 1] || String(n)).join(', ');
+    .map((n) => {
+      const pos = order ? order.indexOf(n) : n - 1;
+      return pos >= 0 ? (OPTION_LETTERS[pos] || String(n)) : String(n);
+    })
+    .join(', ');
+}
+
+// ─── Serving policy: which questions, in which option order ────────────────
+//
+// The rules live in quiz-serving.service (pure). What lives here is the
+// lookup that feeds them — the same module → course → level → vendor walk the
+// pass-mark helpers below already do, because that is where per-vendor policy
+// is configured.
+
+/**
+ * Serving config for a level's vendor. Fail-open: any miss returns the
+ * behaviour that shipped before serving selection existed (serve everything,
+ * unshuffled), never a shorter or empty quiz.
+ *
+ * @param {number} levelId training_levels.id
+ */
+async function getServingConfigByLevel(levelId) {
+  if (!levelId) return { ...DEFAULT_SERVING_CONFIG };
+  try {
+    const { data: level } = await supabase
+      .from('training_levels').select('vendor_id').eq('id', levelId).maybeSingle();
+    if (!level?.vendor_id) return { ...DEFAULT_SERVING_CONFIG };
+    const { data: vendor } = await supabase
+      .from('training_vendors')
+      .select('key, module_quiz_strategy, exam_question_cap, shuffle_options')
+      .eq('id', level.vendor_id)
+      .maybeSingle();
+    return normalizeServingConfig(vendor);
+  } catch (err) {
+    logToFile('⚠️ Could not resolve vendor serving config — serving everything', {
+      levelId, error: err?.message,
+    });
+    return { ...DEFAULT_SERVING_CONFIG };
+  }
+}
+
+/**
+ * Same, starting from whichever handle the caller has. Module-quiz attempts
+ * carry level_id, but older rows may not (the column is nullable for them),
+ * hence the module → course → level fallback.
+ */
+async function getServingConfig({ levelId, moduleId }) {
+  if (levelId) return getServingConfigByLevel(levelId);
+  if (!moduleId) return { ...DEFAULT_SERVING_CONFIG };
+  try {
+    const { data: mod } = await supabase
+      .from('training_modules').select('course_id').eq('id', moduleId).maybeSingle();
+    if (!mod?.course_id) return { ...DEFAULT_SERVING_CONFIG };
+    const { data: course } = await supabase
+      .from('training_courses').select('level_id').eq('id', mod.course_id).maybeSingle();
+    return await getServingConfigByLevel(course?.level_id);
+  } catch (err) {
+    logToFile('⚠️ Could not resolve vendor serving config by module — serving everything', {
+      moduleId, error: err?.message,
+    });
+    return { ...DEFAULT_SERVING_CONFIG };
+  }
+}
+
+/**
+ * The active question bank for an attempt (or a not-yet-inserted attempt
+ * shape), lightest columns only — the bank can be 400+ rows and all the
+ * selection needs is identity, order and Bloom level.
+ */
+async function loadQuestionBank({ quizKind, trainingModuleId, grandQuizId }) {
+  let qBuilder = supabase
+    .from('training_questions')
+    .select('id, order_index, bloom_level')
+    .eq('is_active', true)
+    .order('order_index', { ascending: true });
+  qBuilder = quizKind === KIND_TRAINING_MODULE
+    ? qBuilder.eq('training_module_id', trainingModuleId)
+    : qBuilder.eq('grand_quiz_id', grandQuizId);
+  const { data, error } = await qBuilder;
+  if (error) {
+    logToFile('❌ Question bank lookup failed', { quizKind, error: error.message });
+    return [];
+  }
+  return data || [];
+}
+
+/**
+ * The served question set for an EXISTING attempt, re-derived from scratch.
+ *
+ * Called independently by sendQuestion and handleQuizButton; both must land on
+ * the same list or a teacher gets graded on a question they never saw. That
+ * holds because every input is immutable: the attempt id, the bank, and the
+ * vendor config.
+ *
+ * COMPATIBILITY. Attempts started before serving selection shipped snapshotted
+ * total_questions = the whole bank. Serving them a 3-question paper now would
+ * renumber indices they have already answered against. So when the snapshot
+ * matches the FULL bank rather than the served set, the attempt keeps the full
+ * bank and finishes the way it started. Option order is still shuffled — that
+ * is per-render and harmless mid-attempt.
+ *
+ * @returns {Promise<{questions: object[], config: object}>}
+ */
+async function resolveServedQuestions(attempt) {
+  const isModuleQuiz = attempt.quiz_kind === KIND_TRAINING_MODULE;
+  const all = await loadQuestionBank({
+    quizKind: attempt.quiz_kind,
+    trainingModuleId: attempt.training_module_id,
+    grandQuizId: attempt.grand_quiz_id,
+  });
+  if (all.length === 0) return { questions: [], config: { ...DEFAULT_SERVING_CONFIG } };
+
+  const config = await getServingConfig({
+    levelId: attempt.level_id,
+    moduleId: isModuleQuiz ? attempt.training_module_id : null,
+  });
+  const served = selectServedQuestions(all, { attemptId: attempt.id, isModuleQuiz, config });
+
+  const snapshot = Number(attempt.total_questions);
+  if (Number.isFinite(snapshot) && snapshot > 0 && served.length !== snapshot && all.length === snapshot) {
+    logToFile('🎓 Attempt predates serving selection — keeping the full bank', {
+      attemptId: attempt.id, snapshot, wouldServe: served.length,
+    });
+    return {
+      questions: selectServedQuestions(all, {
+        attemptId: attempt.id, isModuleQuiz, config: DEFAULT_SERVING_CONFIG,
+      }),
+      config,
+    };
+  }
+  return { questions: served, config };
 }
 
 async function loadPartialAnswer(attemptId, questionIndex) {
@@ -170,13 +331,9 @@ async function startGrandQuiz(userId, levelOrder, phoneNumber) {
     return false;
   }
 
-  // 4. Count questions
-  const { count: totalQuestions } = await supabase
-    .from('training_questions')
-    .select('id', { count: 'exact', head: true })
-    .eq('grand_quiz_id', quiz.id)
-    .eq('is_active', true);
-  if (!totalQuestions || totalQuestions === 0) {
+  // 4. The question bank for this exam.
+  const bank = await loadQuestionBank({ quizKind: KIND_GRAND, grandQuizId: quiz.id });
+  if (bank.length === 0) {
     await WhatsAppService.sendMessage(phoneNumber, 'This level has no active exam questions yet. Please contact NIETE support.');
     return false;
   }
@@ -203,10 +360,29 @@ async function startGrandQuiz(userId, levelOrder, phoneNumber) {
     return true;
   }
 
-  // 6. Create attempt
+  // 6. Create attempt.
+  //
+  // The id is minted HERE rather than by the database default, because the
+  // served paper is seeded on it (quiz-serving.service) and total_questions
+  // has to record the SERVED count — otherwise the pass ratio is measured
+  // against questions the teacher was never asked. Chicken-and-egg with a
+  // DB-generated id; a client-side uuid resolves it and the column keeps its
+  // default for every other writer.
+  const attemptId = crypto.randomUUID();
+  const servingConfig = await getServingConfigByLevel(level.id);
+  const served = selectServedQuestions(bank, {
+    attemptId, isModuleQuiz: false, config: servingConfig,
+  });
+  const totalQuestions = served.length;
+  logToFile('🎓 Exam paper selected', {
+    attemptId, levelId: level.id, bank: bank.length, served: totalQuestions,
+    cap: servingConfig.exam_question_cap,
+  });
+
   const { data: attempt, error: aErr } = await supabase
     .from('training_assessment_attempts')
     .insert({
+      id: attemptId,
       user_id: userId,
       program_id: assignment.program_id,
       quiz_kind: KIND_GRAND,
@@ -271,22 +447,21 @@ async function startTrainingQuiz(userId, moduleId, phoneNumber) {
     return false;
   }
 
-  // 2. Count active questions for this module
-  const { count: totalQuestions } = await supabase
-    .from('training_questions')
-    .select('id', { count: 'exact', head: true })
-    .eq('training_module_id', moduleIdNum)
-    .eq('is_active', true);
+  // 2. The active question bank for this module (the SERVED subset is chosen
+  // at step 6, once the attempt id that seeds it exists).
+  const bank = await loadQuestionBank({
+    quizKind: KIND_TRAINING_MODULE, trainingModuleId: moduleIdNum,
+  });
 
   const eligPayload = {
     user_uuid: userId,
     module_row_id: moduleIdNum,
-    questions_found: totalQuestions || 0,
+    questions_found: bank.length,
     source: 'start_training_quiz',
   };
   logEvent('training_quiz_eligibility_checked', eligPayload);
 
-  if (!totalQuestions || totalQuestions === 0) {
+  if (bank.length === 0) {
     // No questions for this module — caller decides what to do next.
     return true;
   }
@@ -333,10 +508,27 @@ async function startTrainingQuiz(userId, moduleId, phoneNumber) {
     return await sendQuestion(existing.id, phoneNumber);
   }
 
-  // 6. Create attempt
+  // 6. Create attempt.
+  //
+  // The id is minted client-side because the served paper is seeded on it and
+  // total_questions must be the SERVED count — see the same note in
+  // startGrandQuiz. With one_per_bloom this is where a 9-question bank
+  // becomes a 3-question check.
+  const attemptId = crypto.randomUUID();
+  const servingConfig = await getServingConfig({ levelId, moduleId: moduleIdNum });
+  const served = selectServedQuestions(bank, {
+    attemptId, isModuleQuiz: true, config: servingConfig,
+  });
+  const totalQuestions = served.length;
+  logToFile('🎓 Module check paper selected', {
+    attemptId, moduleId: moduleIdNum, bank: bank.length, served: totalQuestions,
+    strategy: servingConfig.module_quiz_strategy,
+  });
+
   const { data: attempt, error: aErr } = await supabase
     .from('training_assessment_attempts')
     .insert({
+      id: attemptId,
       user_id: userId,
       program_id: assignment.program_id,
       quiz_kind: KIND_TRAINING_MODULE,
@@ -359,6 +551,7 @@ async function startTrainingQuiz(userId, moduleId, phoneNumber) {
     attempt_uuid: attempt.id,
     module_row_id: moduleIdNum,
     total_qs: totalQuestions,
+    bank_size: bank.length,
   };
   logEvent('training_quiz_started', startedPayload);
 
@@ -376,6 +569,25 @@ async function startTrainingQuiz(userId, moduleId, phoneNumber) {
   );
 
   return await sendQuestion(attempt.id, phoneNumber);
+}
+
+/**
+ * Hydrate a selected question with the columns delivery/grading need.
+ *
+ * Selection runs on a light projection (id / order_index / bloom_level) so an
+ * exam bank of 400+ rows is not dragged across the wire on every render; only
+ * the one question actually being served is fetched in full.
+ *
+ * @param {{id: (string|number)}|undefined} selected
+ */
+async function loadQuestionForDelivery(selected) {
+  if (!selected?.id) return null;
+  const { data } = await supabase
+    .from('training_questions')
+    .select('id, question_text, options, correct_option, order_index')
+    .eq('id', selected.id)
+    .maybeSingle();
+  return data || null;
 }
 
 /**
@@ -400,20 +612,11 @@ async function sendQuestion(attemptId, phoneNumber) {
     return await gradeAttempt(attemptId, phoneNumber);
   }
 
-  // Load the question at this index — filter by whichever discriminator this
-  // attempt uses. order_index is synthesised 1..N per grand quiz / per module
-  // during migration (scripts/migrate-teacher-training.py step 6).
-  let qBuilder = supabase
-    .from('training_questions')
-    .select('id, question_text, options, correct_option, order_index')
-    .eq('is_active', true)
-    .order('order_index', { ascending: true });
-  qBuilder = attempt.quiz_kind === KIND_TRAINING_MODULE
-    ? qBuilder.eq('training_module_id', attempt.training_module_id)
-    : qBuilder.eq('grand_quiz_id', attempt.grand_quiz_id);
-  const { data: questions } = await qBuilder
-    .range(attempt.current_question_index, attempt.current_question_index);
-  const q = questions?.[0];
+  // The question at this index within the SERVED set — not the raw bank. The
+  // set is re-derived (never stored); handleQuizButton derives the identical
+  // one from the identical inputs.
+  const { questions: served, config: servingConfig } = await resolveServedQuestions(attempt);
+  const q = await loadQuestionForDelivery(served[attempt.current_question_index]);
   if (!q) {
     logToFile('⚠️ No question at index', { attemptId, index: attempt.current_question_index });
     return await gradeAttempt(attemptId, phoneNumber);
@@ -422,7 +625,20 @@ async function sendQuestion(attemptId, phoneNumber) {
   // WhatsApp interactive list — one row per option (A, B, C, ...). Multi
   // questions reserve one row for the Done submit action (10-row list cap).
   const optionCap = isMultiKey(q.correct_option) ? MAX_OPTIONS - 1 : MAX_OPTIONS;
-  const options = Array.isArray(q.options) ? q.options.slice(0, optionCap) : [];
+  const allOptions = Array.isArray(q.options) ? q.options : [];
+  // Canonical 1-based option indices, capped and (optionally) permuted for
+  // display. The permutation is seeded on (attempt, question) so a re-render
+  // after a multi-select tap — or a resume tomorrow — shows the same letters
+  // against the same text.
+  const displayOrder = buildOptionDisplayOrder({
+    optionCount: allOptions.length,
+    correctOption: q.correct_option,
+    cap: optionCap,
+    attemptId: attempt.id,
+    questionId: q.id,
+    shuffle: servingConfig.shuffle_options,
+  });
+  const options = displayOrder.map(canonical => allOptions[canonical - 1]);
   if (options.length === 0) {
     // Bad question data — skip it (count as wrong, advance).
     logToFile('⚠️ Question has no options, skipping', { questionId: q.id });
@@ -441,7 +657,10 @@ async function sendQuestion(attemptId, phoneNumber) {
   const optionsInBody = options.some(o => String(o || '').length > OPTION_DESC_MAX);
 
   const rows = options.map((text, i) => ({
-    id: `training_quiz_${attempt.id}_${i + 1}`,   // chosen_option is 1-indexed to match DB
+    // The id carries the CANONICAL index, so the shuffle never escapes the
+    // rendering layer — everything downstream keeps speaking the DB's own
+    // 1-based option numbering.
+    id: `training_quiz_${attempt.id}_${displayOrder[i]}`,
     title: OPTION_LETTERS[i],
     // Full text lives in the body when it would truncate here (bd-2230).
     description: optionsInBody ? '' : (text || '').toString().slice(0, OPTION_DESC_MAX),
@@ -475,7 +694,7 @@ async function sendQuestion(attemptId, phoneNumber) {
       description: 'Submit your selected answers',
     });
     const selected = await loadPartialAnswer(attempt.id, attempt.current_question_index);
-    if (selected.size > 0) bodyText += `\n\nSelected: ${selectedLetters(selected)}`;
+    if (selected.size > 0) bodyText += `\n\nSelected: ${selectedLetters(selected, displayOrder)}`;
     footer = 'Select all that apply, then tap Done';
   }
 
@@ -506,7 +725,9 @@ async function handleQuizButton(userId, replyId, phoneNumber) {
 
   const { data: attempt } = await supabase
     .from('training_assessment_attempts')
-    .select('id, user_id, quiz_kind, grand_quiz_id, training_module_id, current_question_index, total_questions, status')
+    // level_id joins the vendor's serving config — the same config sendQuestion
+    // used to choose the paper, so both derive the same served set.
+    .select('id, user_id, quiz_kind, grand_quiz_id, training_module_id, level_id, current_question_index, total_questions, status')
     .eq('id', attemptId)
     .single();
   if (!attempt) {
@@ -522,19 +743,13 @@ async function handleQuizButton(userId, replyId, phoneNumber) {
     return false;
   }
 
-  // Load the current question to check correctness — same discriminator branch
-  // as sendQuestion above.
-  let qBuilder = supabase
-    .from('training_questions')
-    .select('id, correct_option')
-    .eq('is_active', true)
-    .order('order_index', { ascending: true });
-  qBuilder = attempt.quiz_kind === KIND_TRAINING_MODULE
-    ? qBuilder.eq('training_module_id', attempt.training_module_id)
-    : qBuilder.eq('grand_quiz_id', attempt.grand_quiz_id);
-  const { data: questions } = await qBuilder
-    .range(attempt.current_question_index, attempt.current_question_index);
-  const q = questions?.[0];
+  // Load the current question to check correctness. Re-derives the served set
+  // exactly as sendQuestion did — same attempt id, same bank, same vendor
+  // config, therefore same question. `chosen` is already the CANONICAL option
+  // index (the row id carries it), so no display-order translation is needed
+  // here and nothing shuffled ever reaches storage.
+  const { questions: served } = await resolveServedQuestions(attempt);
+  const q = await loadQuestionForDelivery(served[attempt.current_question_index]);
   if (!q) {
     logToFile('⚠️ Question missing when recording answer', { attemptId, idx: attempt.current_question_index });
     return false;
