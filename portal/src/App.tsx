@@ -11,6 +11,7 @@ import HowItWorks from "./pages/HowItWorks";
 import NotFound from "./pages/NotFound";
 import PortalSetup from "./portal/pages/PortalSetup";
 import PortalLogin from "./portal/pages/PortalLogin";
+import PortalRoot from "./portal/pages/PortalRoot";
 import PortalPasswordReset from "./portal/pages/PortalPasswordReset";
 import PortalPasswordResetVerify from "./portal/pages/PortalPasswordResetVerify";
 import PortalDashboard from "./portal/pages/PortalDashboard";
@@ -63,7 +64,11 @@ const App = () => {
         <Sonner />
         <BrowserRouter>
           <Routes>
-            <Route path="/" element={isPortalSubdomain ? <PortalLogin /> : <Index />} />
+            {/* bd-2394: for the portal audience "/" resolves against the
+                session (PortalRoot), not straight to the login form — the
+                Android app cold-boots here on every launch. The marketing
+                site is unchanged. */}
+            <Route path="/" element={isPortalSubdomain ? <PortalRoot /> : <Index />} />
             <Route path="/how-it-works" element={<HowItWorks />} />
             
             {/* Portal Routes */}
