@@ -1106,17 +1106,28 @@ router.get('/curriculum/grades', requirePortalAuth, async (req, res) => {
     // grades non-deterministically (this is exactly why grades 6-12 stayed
     // missing from the picker even after the Oxbridge rows were loaded).
     // Page through the full result set so every grade is seen.
-    const data = await fetchAllPaged(() => supabase
-      .from('curriculum_lp_ast')
-      .select('grade, grade_label')
-      .eq('is_enabled', true)
-      .order('grade', { ascending: true }));
-
-    // Distinct grades with a count, ordered ascending.
     const byGrade = new Map();
-    for (const r of data || []) {
+    if (CORE_LPS_ENABLED) {
+      const data = await fetchAllPaged(() => supabase
+        .from('curriculum_lp_ast')
+        .select('grade, grade_label')
+        .eq('is_enabled', true)
+        .order('grade', { ascending: true }));
+      for (const r of data || []) {
+        const key = r.grade;
+        if (!byGrade.has(key)) byGrade.set(key, { grade: r.grade, label: r.grade_label, count: 0 });
+        byGrade.get(key).count += 1;
+      }
+    }
+    // FEAT-109: merge pre_generated_lps counts per grade. pgen emits label
+    // as "Grade N"; map to the word form so the dropdown UX matches the
+    // legacy Core-LP labels ("Grade One", "Grade Two", ...).
+    const GRADE_WORDS = ['Prep','Grade One','Grade Two','Grade Three','Grade Four','Grade Five','Grade Six','Grade Seven','Grade Eight','Grade Nine','Grade Ten','Grade Eleven','Grade Twelve'];
+    const pgenRows = await fetchPgenRowsShaped({});
+    for (const r of pgenRows) {
       const key = r.grade;
-      if (!byGrade.has(key)) byGrade.set(key, { grade: r.grade, label: r.grade_label, count: 0 });
+      const label = GRADE_WORDS[r.grade] || r.grade_label || `Grade ${r.grade}`;
+      if (!byGrade.has(key)) byGrade.set(key, { grade: r.grade, label, count: 0 });
       byGrade.get(key).count += 1;
     }
     const grades = [...byGrade.values()].sort((a, b) => (a.grade ?? 999) - (b.grade ?? 999));
