@@ -98,4 +98,138 @@ router.post('/queue-lesson-plan', requireInternalKey, async (req, res) => {
   }
 });
 
+/* ------------------------------------------------------------------------- *
+ * bd-2479 — the training DECISION layer.
+ *
+ * The portal reimplemented the bot's training rules in its own process and the
+ * copies rotted. Found live 2026-08-02, while the portal's own comments still
+ * claimed parity ("mirror the WhatsApp endpoint's rule exactly"):
+ *
+ *   - a capstone pass did not count as a level pass, so the first Beacon House
+ *     certificate ever issued was invisible to the portal;
+ *   - "ready for exam" still used the pre-bd-2447 ">=1 module per course"
+ *     proxy, a fix we had already announced as shipped;
+ *   - a missing vendor row defaulted to chain-locked on one surface and
+ *     unlocked on the other;
+ *   - the module-order gate (bd-2448) did not exist on the portal at all.
+ *
+ * These routes add NO logic. Each one delegates to the function the bot's own
+ * Flow already calls, and passes the answer back untouched. That is the whole
+ * point: a rule that exists in one place cannot drift from itself.
+ *
+ * Every handler requires the domain module lazily, matching the enqueue route
+ * above and keeping this router cheap to load.
+ * ------------------------------------------------------------------------- */
+
+/** Coerce a body value to a finite number, or null. Rejects '' and undefined. */
+function num(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * Wrap a training handler with the two things every one of them needs:
+ * lazy module resolution, and fail-CLOSED error handling.
+ *
+ * Failing closed matters more here than in most places. These endpoints answer
+ * "is this locked?", and an error that reads as `ok: true` turns a gate into a
+ * doorway — the exact bug class bd-2452 fixed on the bot, where a level
+ * rendered "🔒 Locked" and started anyway when tapped. On a throw we send 5xx
+ * with no `ok` field at all, so a caller cannot mistake failure for permission.
+ */
+function trainingRoute(name, handler) {
+  return async (req, res) => {
+    try {
+      const Training = require('./teacher-training-endpoint');
+      return await handler(Training, req, res);
+    } catch (error) {
+      logToFile('❌ Internal training API failed', { route: name, error: error?.message });
+      return res.status(500).json({ success: false, error: 'Training lookup failed' });
+    }
+  };
+}
+
+/**
+ * POST /api/internal/training/level-states
+ * Body { userId } → { success, levels: [...] }
+ *
+ * The whole level catalogue with per-level state, exactly as the WhatsApp Flow
+ * renders it: locked / certified / ready_for_quiz / in_progress / not_started.
+ */
+router.post('/training/level-states', requireInternalKey, trainingRoute('level-states', async (Training, req, res) => {
+  const { userId } = req.body || {};
+  if (!userId) return res.status(400).json({ success: false, error: 'userId is required' });
+
+  const levels = await Training.loadVisibleLevelsWithProgress(userId);
+  return res.json({ success: true, levels: levels || [] });
+}));
+
+/**
+ * POST /api/internal/training/level-unlocked
+ * Body { userId, levelId } → { success, ok, status?, message?, previous_level_order? }
+ */
+router.post('/training/level-unlocked', requireInternalKey, trainingRoute('level-unlocked', async (Training, req, res) => {
+  const { userId } = req.body || {};
+  const levelId = num((req.body || {}).levelId);
+  if (!userId) return res.status(400).json({ success: false, error: 'userId is required' });
+  if (levelId === null) return res.status(400).json({ success: false, error: 'levelId is required' });
+
+  const gate = await Training.checkLevelUnlocked(userId, levelId);
+  return res.json({ success: true, ...gate });
+}));
+
+/**
+ * POST /api/internal/training/module-unlocked
+ * Body { userId, moduleId } → { success, ok, message? }
+ *
+ * bd-2448's sequencing rule — exactly one unpassed module is open at a time.
+ * The portal has never had this gate.
+ */
+router.post('/training/module-unlocked', requireInternalKey, trainingRoute('module-unlocked', async (Training, req, res) => {
+  const { userId } = req.body || {};
+  const moduleId = num((req.body || {}).moduleId);
+  if (!userId) return res.status(400).json({ success: false, error: 'userId is required' });
+  if (moduleId === null) return res.status(400).json({ success: false, error: 'moduleId is required' });
+
+  const gate = await Training.checkModuleUnlocked(userId, moduleId);
+  return res.json({ success: true, ...gate });
+}));
+
+/**
+ * POST /api/internal/training/exam-gate
+ * Body { userId, levelOrder, vendorKey? } → { success, ok, reason?, message?, level? }
+ *
+ * The single precondition check for sitting a level exam — grand quiz or
+ * capstone. `vendorKey` is passed through as null when absent rather than
+ * defaulted here; what a missing scope means is the domain's call, not the
+ * wire's.
+ */
+router.post('/training/exam-gate', requireInternalKey, trainingRoute('exam-gate', async (Training, req, res) => {
+  const { userId, vendorKey } = req.body || {};
+  const levelOrder = num((req.body || {}).levelOrder);
+  if (!userId) return res.status(400).json({ success: false, error: 'userId is required' });
+  if (levelOrder === null) return res.status(400).json({ success: false, error: 'levelOrder is required' });
+
+  const gate = await Training.assertCanStartGrandQuiz(userId, levelOrder, vendorKey || null);
+  return res.json({ success: true, ...gate });
+}));
+
+/**
+ * POST /api/internal/training/grand-quiz-state
+ * Body { userId, levelId } → { success, ...state }
+ *
+ * The exam's presentation state (badge, body, caption, CTA) alongside its
+ * availability, resolved by LEVEL so Beacon House capstones resolve too.
+ */
+router.post('/training/grand-quiz-state', requireInternalKey, trainingRoute('grand-quiz-state', async (Training, req, res) => {
+  const { userId } = req.body || {};
+  const levelId = num((req.body || {}).levelId);
+  if (!userId) return res.status(400).json({ success: false, error: 'userId is required' });
+  if (levelId === null) return res.status(400).json({ success: false, error: 'levelId is required' });
+
+  const state = await Training.loadGrandQuizState(userId, levelId);
+  return res.json({ success: true, ...(state || {}) });
+}));
+
 module.exports = router;
