@@ -125,6 +125,29 @@ describe('issueCertificate → PDF', () => {
     expect(cert.pdf_r2_key).toBeNull();
   });
 
+  it('still issues the certificate when the PDF module cannot even LOAD', async () => {
+    // The realistic dashboard case: issueCertificate is shared with the portal,
+    // whose process resolves node_modules from dashboard/ — so a `require` from
+    // inside bot/ for a bot-only dependency (pdfkit) can throw at load time,
+    // not call time. The require therefore has to sit inside the try, and this
+    // is the test that keeps it there.
+    jest.resetModules();
+    tableStates.training_certificates = { rows: [] };
+    tableStates.users = { rows: [{ name: 'Amina Khan' }] };
+    tableStates.training_levels = { rows: [{ name: 'Aspiring Teacher' }] };
+
+    jest.doMock('../../bot/shared/utils/logger', () => ({ logToFile: jest.fn() }));
+    jest.doMock('../../bot/shared/services/training/certificate-pdf.service', () => {
+      throw new Error("Cannot find module 'pdfkit'");
+    });
+    const svc = require('../../bot/shared/services/training/certificate.service');
+
+    const cert = await svc.issueCertificate(makeSupabase(), params);
+    expect(cert.certificate_code).toMatch(/^CERT-\d{8}-[A-Z0-9]{6}$/);
+    expect(cert.pdf_r2_key).toBeNull();
+    expect(inserts.find((i) => i.table === 'training_certificates')).toBeDefined();
+  });
+
   it('re-issue returns the existing row key without re-rendering', async () => {
     tableStates.training_certificates = {
       rows: [{
