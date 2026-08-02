@@ -29,6 +29,7 @@ import LoadingState from '../components/LoadingState';
 import ModuleQuizPanel, { type SubmittedAttempt } from '../components/ModuleQuizPanel';
 import LevelExamCard from '../components/LevelExamCard';
 import CapstoneResultCard from '../components/CapstoneResultCard';
+import CertificatesPanel from '../components/CertificatesPanel';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
@@ -468,6 +469,11 @@ const PortalTraining = () => {
             Browse your training levels, courses, and modules. Levels unlock as you pass each grand quiz on WhatsApp.
           </p>
         </div>
+
+        {/* Certificates the teacher has already earned. Self-contained and
+            lazy — it fetches nothing until the button is pressed, so it costs
+            the page nothing on load. */}
+        <CertificatesPanel />
 
         {/* Vendor grouping — click a card to filter the cascade below */}
         <VendorGrouping

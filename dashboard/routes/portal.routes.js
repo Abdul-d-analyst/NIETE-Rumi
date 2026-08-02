@@ -1849,6 +1849,80 @@ router.get('/training/vendors', requirePortalAuth, async (req, res) => {
 });
 
 /**
+ * GET /api/portal/training/certificates
+ *
+ * Every certificate the authenticated teacher has earned, newest first, with a
+ * download link when a PDF exists.
+ *
+ * Three deliberate choices:
+ *
+ *   - SCOPED IN THE QUERY. The filter is `user_id = req.session.portalUserId`
+ *     and the request supplies no id at all, so there is no shape of request
+ *     that reaches another teacher's certificate.
+ *
+ *   - A CERTIFICATE WITHOUT A PDF STILL LISTS, with `download_url: null`.
+ *     `pdf_r2_key` is null on every certificate issued before PDF generation
+ *     existed, and generation is best-effort by design — so null is permanent
+ *     and valid, and the row must render as a certificate you simply cannot
+ *     download yet, never as an error or a link that 404s.
+ *
+ *   - PRESIGNED AS AN ATTACHMENT with a filename built from the certificate
+ *     code. A certificate is the one artefact a teacher wants as a file rather
+ *     than a tab, and the HTML `download` attribute is ignored cross-origin —
+ *     so the disposition has to be signed into the URL. Those overrides are
+ *     part of the SigV4 signature: they go INTO generatePresignedUrl, never
+ *     appended to a URL it already returned (that answers 403).
+ */
+router.get('/training/certificates', requirePortalAuth, async (req, res) => {
+  try {
+    const userId = req.session.portalUserId;
+
+    const { data: rows, error } = await supabase
+      .from('training_certificates')
+      .select('id, certificate_code, level_name_snapshot, teacher_name_snapshot, issued_at, pdf_r2_key')
+      .eq('user_id', userId)
+      .order('issued_at', { ascending: false });
+    if (error) throw error;
+
+    // pdf_r2_key stores a BARE object key; the presigner validates a full R2
+    // URL (same prepend the lesson-plan download does).
+    const endpoint = (process.env.R2_ENDPOINT || '').replace(/\/$/, '');
+    const bucket = process.env.R2_BUCKET_NAME;
+
+    const certificates = await Promise.all((rows || []).map(async (c) => {
+      let downloadUrl = null;
+      if (c.pdf_r2_key) {
+        // A presign failure degrades this one row to "no download" — it must
+        // not take the whole list down.
+        try {
+          downloadUrl = await generatePresignedUrl(
+            `${endpoint}/${bucket}/${c.pdf_r2_key}`,
+            3600,
+            { disposition: 'attachment', filename: `${c.certificate_code}.pdf` },
+          );
+        } catch (presignErr) {
+          console.error('training/certificates presign failed:', presignErr.message);
+          downloadUrl = null;
+        }
+      }
+      return {
+        id: c.id,
+        certificate_code: c.certificate_code,
+        level_name: c.level_name_snapshot,
+        teacher_name: c.teacher_name_snapshot,
+        issued_at: c.issued_at,
+        download_url: downloadUrl || null,
+      };
+    }));
+
+    res.json({ success: true, certificates });
+  } catch (error) {
+    console.error('training/certificates error:', error);
+    res.status(500).json({ success: false, error: 'Failed to load certificates' });
+  }
+});
+
+/**
  * GET /api/portal/training/levels
  * Returns the 4 training levels with per-level module counts, completion %,
  * AND lockdown state (mirrors WhatsApp Flow). A level is `locked` until the
