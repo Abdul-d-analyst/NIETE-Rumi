@@ -166,6 +166,7 @@ function seedThreeQuestionModule({ moduleId = 42, courseId = 7, levelId = 1, pro
   tableStates.training_assessment_answers = { rows: [] };
   tableStates.teacher_training_progress = { rows: [] };
   tableStates.training_grand_quizzes = { rows: [] };
+  require('../fixtures/delegate-training-to-bot').seedProgramScope(tableStates);
 }
 
 beforeEach(() => {
@@ -179,6 +180,8 @@ beforeEach(() => {
     from: supabaseFrom,
     rpc: jest.fn().mockResolvedValue({ error: null }),
   }));
+  const { installTrainingDelegation } = require('../fixtures/delegate-training-to-bot');
+  installTrainingDelegation(() => supabaseFrom);
   jest.doMock('../../dashboard/services/r2.service', () => ({
     generatePresignedUrl: jest.fn().mockResolvedValue(null),
     generatePresignedUrls: jest.fn().mockResolvedValue([]),

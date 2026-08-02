@@ -2880,6 +2880,25 @@ router.post('/training/level/:id/grand-quiz/attempts', requirePortalAuth, async 
       return res.status(400).json({ success: false, error: 'Body must include an answers array' });
     }
 
+    // 0. Enrolment, checked BEFORE the lock gate on purpose.
+    //
+    // bd-2469 — the bot's catalogue is program-scoped, so an unenrolled
+    // teacher's level simply is not in it and the gate answers a generic
+    // "Level not found" (404). True, but useless: "you are not enrolled on a
+    // training program" and "that level does not exist" are different problems
+    // with different fixes, and the caller can only act on the first if we say
+    // it. Running the specific check first keeps the 400 contract the frontend
+    // already branches on; the gate below would deny anyway.
+    const { data: enrolment } = await supabase
+      .from('teacher_training_assignments')
+      .select('program_id')
+      .eq('user_id', userId)
+      .eq('is_active', true)
+      .maybeSingle();
+    if (!enrolment) {
+      return res.status(400).json({ success: false, error: 'No active training program assignment' });
+    }
+
     // 1. Level chain-lock gate — same rule as every other training endpoint.
     const lock = await _assertLevelUnlocked(userId, levelId);
     if (!lock.ok) return res.status(lock.status).json({ success: false, error: lock.error, previous_level_order: lock.previous_level_order });

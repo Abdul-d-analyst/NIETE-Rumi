@@ -156,7 +156,15 @@ function seedLevel({
   certificates = [],
 } = {}) {
   tableStates.training_levels = {
-    rows: [{ id: levelId, name: 'Foundations', order_index: 0, is_active: true }],
+    rows: [{ id: levelId, name: 'Foundations', order_index: 0, is_active: true, vendor_id: 'vendor-niete' }],
+  };
+  // bd-2469 — the bot's catalogue is program-scoped and vendor-aware; seed both
+  // so the exam gate can resolve this level (bd-2468).
+  tableStates.training_vendors = {
+    rows: [{ id: 'vendor-niete', key: 'NIETE', name: 'NIETE', unlock_logic: 'chain', has_grand_quiz: true, passing_pct: 80, module_passing_pct: 100 }],
+  };
+  tableStates.training_program_scopes = {
+    rows: [{ program_id: programId, vendor_id: 'vendor-niete', level_ids: null }],
   };
   tableStates.training_courses = {
     rows: [
@@ -207,6 +215,8 @@ beforeEach(() => {
     from: supabaseFrom,
     rpc: jest.fn().mockResolvedValue({ error: null }),
   }));
+  const { installTrainingDelegation } = require('../fixtures/delegate-training-to-bot');
+  installTrainingDelegation(() => supabaseFrom);
   jest.doMock('../../dashboard/services/r2.service', () => ({
     generatePresignedUrl: jest.fn().mockResolvedValue(null),
     generatePresignedUrls: jest.fn().mockResolvedValue([]),
