@@ -1278,6 +1278,28 @@ app.post('/webhook', async (req, res) => {
           });
           await WhatsAppService.sendMessage(from, 'Sorry, something went wrong loading your training content. Please try /training again.');
         }
+      } else if (flowType === 'training_msq') {
+        // Training multi-answer question — the CheckboxGroup Flow's completion
+        // payload IS the answer. Unlike the other endpoint flows nothing was
+        // persisted during the exchange (the screen completes rather than
+        // round-tripping), so this branch owns the write: grade the set,
+        // advance the attempt, send the next question.
+        logToFile('🎓 Detected multi-answer training question submission', {
+          from,
+          responseFields: Object.keys(responseJson)
+        });
+        try {
+          const QuizDelivery = require('./shared/services/training/quiz-delivery.service');
+          const recorded = await QuizDelivery.handleQuizFlowSubmission(user.id, responseJson, from);
+          if (!recorded) {
+            logToFile('⚠️ Multi-answer submission was not recorded', { from });
+          }
+        } catch (msqError) {
+          logToFile('❌ Exception handling multi-answer training submission', {
+            from, error: msqError.message, stack: msqError.stack
+          });
+          await WhatsAppService.sendMessage(from, 'Sorry, something went wrong saving your answer. Please send /training to continue.');
+        }
       } else if (flowType === 'observe') {
         // FEAT-102: the editable FICO observation form was submitted. The
         // endpoint already applied the observer's v2 edits; ack + offer the

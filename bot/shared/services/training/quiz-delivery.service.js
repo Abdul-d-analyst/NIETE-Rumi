@@ -74,6 +74,39 @@ const MAX_OPTIONS = 10;         // WhatsApp interactive list row cap
 const OPTION_DESC_MAX = 72;     // WhatsApp row description length cap
 const COOLDOWN_HOURS = 24;
 
+// ─── Multi-answer delivery surface ─────────────────────────────────────────
+//
+// Multi-answer questions have two possible surfaces:
+//
+//   Flow      — one WhatsApp Flow screen with a CheckboxGroup. The whole set
+//               is picked and submitted in ONE interaction.
+//   List      — the original fallback: one interactive-list row per option,
+//               each tap toggling the stored selection, plus a "Done" row.
+//
+// The Flow is used iff TRAINING_MSQ_FLOW_ID is configured. That is deliberate
+// and load-bearing: clearing the env var restores list delivery instantly,
+// with no deploy and no code revert, and both surfaces persist the identical
+// canonical `chosen_option`, so an attempt started on one can be finished on
+// the other. Read at call time, not module load, so a restart is enough.
+function msqFlowId() {
+  return process.env.TRAINING_MSQ_FLOW_ID || '';
+}
+
+/**
+ * The option cap the multi-answer DISPLAY ORDER is derived with.
+ *
+ * The list surface must reserve one of WhatsApp's 10 rows for "Done", so it
+ * has always shown at most 9 options. The Flow has no such limit — but
+ * buildOptionDisplayOrder seeds its permutation on the KEPT set, so a
+ * different cap would letter the options differently on the two surfaces.
+ * A teacher who saw the question as a list yesterday and as a Flow today
+ * would be looking at a reordered question. Same cap, same order, always.
+ */
+const MULTI_OPTION_CAP = MAX_OPTIONS - 1;
+
+/** Flow token format: `<userId>:training-msq:<attemptId>:<questionIndex>`. */
+const MSQ_TOKEN_TAG = 'training-msq';
+
 const KIND_GRAND = 'grand';
 const KIND_TRAINING_MODULE = 'training_module';
 
@@ -598,7 +631,10 @@ async function sendQuestion(attemptId, phoneNumber) {
   const { data: attempt } = await supabase
     .from('training_assessment_attempts')
     // level_id is needed for the bd-2393 per-question footer (vendor pass bar).
-    .select('id, quiz_kind, grand_quiz_id, training_module_id, level_id, current_question_index, total_questions, status')
+    // user_id is needed for the multi-answer Flow token: every Flow endpoint
+    // in this repo resolves the teacher from segment 0 of the token, so the
+    // token has to lead with it.
+    .select('id, user_id, quiz_kind, grand_quiz_id, training_module_id, level_id, current_question_index, total_questions, status')
     .eq('id', attemptId)
     .single();
   if (!attempt) return false;
@@ -624,7 +660,7 @@ async function sendQuestion(attemptId, phoneNumber) {
 
   // WhatsApp interactive list — one row per option (A, B, C, ...). Multi
   // questions reserve one row for the Done submit action (10-row list cap).
-  const optionCap = isMultiKey(q.correct_option) ? MAX_OPTIONS - 1 : MAX_OPTIONS;
+  const optionCap = isMultiKey(q.correct_option) ? MULTI_OPTION_CAP : MAX_OPTIONS;
   const allOptions = Array.isArray(q.options) ? q.options : [];
   // Canonical 1-based option indices, capped and (optionally) permuted for
   // display. The permutation is seeded on (attempt, question) so a re-render
@@ -648,6 +684,33 @@ async function sendQuestion(attemptId, phoneNumber) {
       last_activity_at: new Date().toISOString(),
     }).eq('id', attempt.id);
     return await sendQuestion(attempt.id, phoneNumber);
+  }
+
+  // Multi-answer questions go out as a Flow when one is configured: a single
+  // CheckboxGroup screen the teacher fills once, instead of one round-trip per
+  // option plus a Done tap. The screen's contents are NOT sent here — the Flow
+  // endpoint's INIT builds them from this same attempt + question, so there is
+  // one derivation, not two. All this message carries is the token that names
+  // the question.
+  if (isMultiKey(q.correct_option) && msqFlowId()) {
+    await WhatsAppService.sendFlow(phoneNumber, {
+      flowId: msqFlowId(),
+      header: `Q${attempt.current_question_index + 1}/${attempt.total_questions}`,
+      body: (q.question_text || 'Select all that apply.').toString().slice(0, 1024),
+      footer: 'Select all that apply',
+      buttonText: 'Answer',
+      // Leads with the teacher's own id (segment 0 is how every Flow endpoint
+      // here resolves the user) and names the exact question, so a submission
+      // from a Flow message re-opened after the quiz moved on is recognised as
+      // stale and dropped instead of overwriting a newer answer.
+      flowToken: `${attempt.user_id}:${MSQ_TOKEN_TAG}:${attempt.id}:${attempt.current_question_index}`,
+    });
+    return true;
+  }
+  if (isMultiKey(q.correct_option)) {
+    logToFile('⚠️ TRAINING_MSQ_FLOW_ID not set — falling back to list + Done delivery', {
+      attemptId: attempt.id, questionId: q.id, index: attempt.current_question_index,
+    });
   }
 
   // bd-2230 — WhatsApp list rows truncate descriptions at OPTION_DESC_MAX
@@ -798,6 +861,214 @@ async function handleQuizButton(userId, replyId, phoneNumber) {
   }).eq('id', attempt.id);
 
   return await sendQuestion(attempt.id, phoneNumber);
+}
+
+// ─── Multi-answer Flow surface ─────────────────────────────────────────────
+//
+// Everything below serves the CheckboxGroup Flow. It shares every derivation
+// with the list surface — the served set, the display order, the partial
+// selection, the set-equality grade — so the two are the same question asked
+// two ways, and `chosen_option` comes out identical either way.
+
+/**
+ * Resolve the multi-answer question an attempt is currently on, with the
+ * option order it is being displayed in.
+ *
+ * Re-derived from scratch, exactly as sendQuestion and handleQuizButton do:
+ * the served set is stored nowhere, so every path must reach the same answer
+ * from the same immutable inputs (attempt id, bank, vendor config).
+ *
+ * @param {string} attemptId
+ * @param {number|string} questionIndex the index the caller believes it is
+ *        answering. A mismatch with the attempt's own cursor means a stale
+ *        submission — an old Flow message re-opened after the quiz moved on —
+ *        and is refused rather than allowed to overwrite a newer answer.
+ * @returns {Promise<{reason?: string, attempt?: object, question?: object,
+ *                    allOptions?: any[], displayOrder?: number[], index?: number}>}
+ */
+async function resolveMsqQuestion(attemptId, questionIndex) {
+  const { data: attempt } = await supabase
+    .from('training_assessment_attempts')
+    .select('id, user_id, quiz_kind, grand_quiz_id, training_module_id, level_id, current_question_index, total_questions, status')
+    .eq('id', attemptId)
+    .maybeSingle();
+  if (!attempt) return { reason: 'attempt_not_found' };
+  if (attempt.status !== 'in_progress') return { reason: 'attempt_not_in_progress' };
+
+  const index = attempt.current_question_index;
+  const claimed = Number(questionIndex);
+  if (Number.isFinite(claimed) && claimed !== index) return { reason: 'stale_question' };
+
+  const { questions: served, config } = await resolveServedQuestions(attempt);
+  const question = await loadQuestionForDelivery(served[index]);
+  if (!question) return { reason: 'question_not_found' };
+  if (!isMultiKey(question.correct_option)) return { reason: 'not_multi_answer' };
+
+  const allOptions = Array.isArray(question.options) ? question.options : [];
+  const displayOrder = buildOptionDisplayOrder({
+    optionCount: allOptions.length,
+    correctOption: question.correct_option,
+    cap: MULTI_OPTION_CAP,
+    attemptId: attempt.id,
+    questionId: question.id,
+    shuffle: config.shuffle_options,
+  });
+  if (displayOrder.length === 0) return { reason: 'no_options' };
+
+  return { attempt, question, allOptions, displayOrder, index };
+}
+
+const MSQ_OPTION_TITLE_MAX = 80;   // Meta CheckboxGroup data-source title cap
+
+/**
+ * The Flow screen's data for the question an attempt is currently on.
+ *
+ * Called by the Flow endpoint's INIT. Every key here MUST be declared in the
+ * MSQ_QUESTION screen's `data` block, or Meta renders `${data.x}` as literal
+ * text.
+ *
+ * @param {string} userId the teacher, from segment 0 of the flow token
+ * @param {string} attemptId
+ * @param {number|string} questionIndex
+ * @returns {Promise<object|null>} screen data, or null if the question cannot
+ *          be served to this teacher right now
+ */
+async function buildMsqFlowScreenData(userId, attemptId, questionIndex) {
+  const r = await resolveMsqQuestion(attemptId, questionIndex);
+  if (r.reason) {
+    logToFile('⚠️ Multi-answer Flow screen not buildable', { attemptId, questionIndex, reason: r.reason });
+    return null;
+  }
+  if (r.attempt.user_id !== userId) {
+    logToFile('⚠️ Multi-answer Flow token user mismatch', { attemptId, tokenUser: userId });
+    return null;
+  }
+
+  const stored = await loadPartialAnswer(r.attempt.id, r.index);
+  const options = r.displayOrder.map((canonical) => {
+    const text = String(r.allOptions[canonical - 1] ?? '');
+    const option = {
+      // CANONICAL index, never the display position — the shuffle stops at the
+      // rendering layer and storage keeps speaking the database's numbering.
+      id: String(canonical),
+      title: text.slice(0, MSQ_OPTION_TITLE_MAX) || `Option ${canonical}`,
+    };
+    if (text.length > MSQ_OPTION_TITLE_MAX) option.description = text;
+    return option;
+  });
+
+  return {
+    progress: `Question ${r.index + 1} of ${r.attempt.total_questions}`,
+    question_text: String(r.question.question_text || 'Select all that apply.'),
+    options,
+    // Pre-checks a partially-answered question so a resume does not silently
+    // discard taps the teacher already made on the list surface. Anything no
+    // longer on display is dropped — an init-value with no matching option is
+    // how a CheckboxGroup renders empty.
+    selected: [...stored].filter(s => r.displayOrder.includes(Number(s))).map(String),
+    attempt_ref: `${r.attempt.id}:${r.index}`,
+    training_msq_action: 'submit',
+  };
+}
+
+/**
+ * Which question a Flow submission is answering.
+ *
+ * `attempt_ref` is echoed back from the screen's own data, so it does not
+ * depend on Meta returning the flow token in the completion payload; the token
+ * is the fallback.
+ */
+function parseMsqRef(responseJson) {
+  const ref = String(responseJson?.attempt_ref || '');
+  let m = /^([a-f0-9-]{36}):(\d+)$/.exec(ref);
+  if (m) return { attemptId: m[1], questionIndex: Number(m[2]) };
+
+  const token = String(responseJson?.flow_token || '');
+  m = new RegExp(`:${MSQ_TOKEN_TAG}:([a-f0-9-]{36}):(\\d+)$`).exec(token);
+  if (m) return { attemptId: m[1], questionIndex: Number(m[2]) };
+  return null;
+}
+
+/**
+ * The checked option ids, as canonical integers.
+ *
+ * Meta sends a CheckboxGroup's value as an array, but has been observed to
+ * deliver it as a JSON-encoded string in completion payloads, so both are
+ * accepted. Anything that is not a plain integer is dropped here rather than
+ * being allowed to reach the answer row.
+ */
+function parseSelectedOptionIds(raw) {
+  let list = raw;
+  if (typeof list === 'string') {
+    try {
+      const parsed = JSON.parse(list);
+      list = Array.isArray(parsed) ? parsed : String(list).split(',');
+    } catch {
+      list = String(list).split(',');
+    }
+  }
+  if (!Array.isArray(list)) return [];
+  return list
+    .map(v => Number(String(v).trim()))
+    .filter(n => Number.isInteger(n) && n >= 1);
+}
+
+/**
+ * Record a multi-answer question answered through the Flow.
+ *
+ * Deliberately the same three steps the list surface's "Done" branch takes —
+ * set-equality grade, canonical comma-joined write, advance — so an attempt is
+ * indistinguishable afterwards regardless of which surface delivered it.
+ *
+ * @param {string} userId
+ * @param {object} responseJson the NFM completion payload
+ * @param {string} phoneNumber
+ * @returns {Promise<boolean>} true when the answer was recorded
+ */
+async function handleQuizFlowSubmission(userId, responseJson, phoneNumber) {
+  const ref = parseMsqRef(responseJson);
+  if (!ref) {
+    logToFile('⚠️ Multi-answer Flow submission carried no attempt reference', {
+      fields: Object.keys(responseJson || {}),
+    });
+    return false;
+  }
+
+  const r = await resolveMsqQuestion(ref.attemptId, ref.questionIndex);
+  if (r.reason) {
+    logToFile('⚠️ Multi-answer Flow submission refused', {
+      attemptId: ref.attemptId, index: ref.questionIndex, reason: r.reason,
+    });
+    return false;
+  }
+  if (r.attempt.user_id !== userId) {
+    logToFile('⚠️ Multi-answer Flow submission user mismatch', {
+      attemptId: ref.attemptId, attempt_user: r.attempt.user_id, actual: userId,
+    });
+    return false;
+  }
+
+  // Only ids that are actually on display count. A checkbox cannot return an
+  // id the screen never offered, but the payload is user-reachable input and
+  // an unfiltered value would land in a column 400k+ rows are compared against.
+  const chosen = parseSelectedOptionIds(responseJson?.selected_options)
+    .filter(n => r.displayOrder.includes(n));
+  if (chosen.length === 0) {
+    logToFile('⚠️ Multi-answer Flow submission had no valid options — re-sending', {
+      attemptId: r.attempt.id, index: r.index,
+    });
+    return await sendQuestion(r.attempt.id, phoneNumber);
+  }
+
+  const selected = new Set(chosen.map(String));
+  const isCorrect = setsEqual(selected, parseSet(r.question.correct_option));
+  await recordAnswer(r.attempt.id, r.index, r.question.id, normalizeSet(selected), isCorrect);
+  await supabase.from('training_assessment_attempts').update({
+    current_question_index: r.index + 1,
+    last_activity_at: new Date().toISOString(),
+  }).eq('id', r.attempt.id);
+
+  return await sendQuestion(r.attempt.id, phoneNumber);
 }
 
 async function recordAnswer(attemptId, questionIndex, questionId, chosenOption, isCorrect) {
@@ -1094,4 +1365,15 @@ async function decideModuleQuizPass(moduleId, score, totalQuestions) {
   };
 }
 
-module.exports = { startGrandQuiz, startTrainingQuiz, sendQuestion, handleQuizButton, gradeAttempt, decideModuleQuizPass, getVendorPassingPctByLevel };
+module.exports = {
+  startGrandQuiz,
+  startTrainingQuiz,
+  sendQuestion,
+  handleQuizButton,
+  gradeAttempt,
+  decideModuleQuizPass,
+  getVendorPassingPctByLevel,
+  // Multi-answer Flow surface
+  buildMsqFlowScreenData,
+  handleQuizFlowSubmission,
+};
