@@ -8,13 +8,30 @@
  *   courses_incomplete  locked card — "finish all courses first" + progress
  *   cooldown            locked card — retry time after a failed attempt
  *   passed              certified card — certificate code + issue date
+ *   whatsapp_only       redirect card — bd-2490, the interim state that
+ *                       currently REPLACES 'ready' in production
  *   ready               "Take Level Exam" CTA → full exam form → result
  *
  * All gating is enforced server-side; this component only mirrors the state
  * for honest copy. Submitting posts the complete answer set to
  * POST /training/level/:id/grand-quiz/attempts which grades with the same
- * semantics as the WhatsApp bot (100% pass bar, 24h cooldown on fail,
- * certificate on pass).
+ * semantics as the WhatsApp bot (certificate on pass).
+ *
+ * NUMBERS COME FROM THE GATE, NEVER FROM THIS FILE — bd-2489 / bd-2475
+ * -------------------------------------------------------------------
+ * This card used to tell every teacher "100% required to pass · 24h cooldown".
+ * Both halves were literals and both were wrong:
+ *
+ *   - the pass bar is per vendor (training_vendors.passing_pct), and the gate
+ *     has sent it as `pass_mark_pct` since bd-2393 — the SPA simply ignored the
+ *     field and printed 100 regardless;
+ *   - capstones have no cooldown at all (the grader never writes a
+ *     cooldown_until), which the gate now reports as cooldown_hours: 0.
+ *
+ * So: render what the gate says, and render NOTHING when it says nothing. A
+ * missing pass mark means the bot was unreachable — inventing 100 there is the
+ * original bug, and "null%" is no better. `passClause`/`cooldownClause` below
+ * are the only places these sentences are built.
  */
 
 import { useState, useEffect, useCallback } from 'react';
@@ -26,7 +43,9 @@ import { useToast } from '@/hooks/use-toast';
 import api from '../services/api';
 import { WHATSAPP_TRAINING_URL } from '@/lib/assessments';
 
-type GrandQuizState = 'no_quiz' | 'passed' | 'cooldown' | 'courses_incomplete' | 'ready';
+/** bd-2490 — 'whatsapp_only' currently replaces 'ready' in production. */
+type GrandQuizState =
+  | 'no_quiz' | 'passed' | 'cooldown' | 'courses_incomplete' | 'whatsapp_only' | 'ready';
 
 type Certificate = {
   certificate_code: string;
@@ -38,11 +57,11 @@ type Certificate = {
 type GrandQuizGate = {
   state: GrandQuizState;
   question_count: number;
-  /** bd-2490 — 'whatsapp_only' while the portal cannot run exams. */
-  state: string;
   exam_kind: 'grand_quiz' | 'capstone' | null;
-  pass_mark_pct: number;
-  cooldown_hours: number;
+  /** The VENDOR's bar. Null when the bot could not be reached — show nothing. */
+  pass_mark_pct: number | null;
+  /** 0 for a capstone (it has no cooldown). bd-2475. */
+  cooldown_hours: number | null;
   cooldown_until: string | null;
   courses_total: number;
   courses_started: number;
@@ -91,6 +110,25 @@ function formatWhen(iso: string | null): string {
 function hoursLeft(iso: string | null): number {
   if (!iso) return 0;
   return Math.max(1, Math.round((new Date(iso).getTime() - Date.now()) / 3_600_000));
+}
+
+// ── Honest caption clauses (bd-2489 / bd-2475) ──────────────────────────────
+// Each returns '' when the gate gave us nothing to say, and `joinClauses`
+// drops the empties. That is what stops the card printing "null%" or the
+// nonsense "0h cooldown on a failed attempt".
+
+/** "80% required to pass", or '' when the gate supplied no bar. */
+function passClause(pct: number | null | undefined): string {
+  return typeof pct === 'number' && Number.isFinite(pct) ? `${pct}% required to pass` : '';
+}
+
+/** "24h cooldown on a failed attempt", or '' when this exam has no cooldown. */
+function cooldownClause(hours: number | null | undefined): string {
+  return typeof hours === 'number' && hours > 0 ? `${hours}h cooldown on a failed attempt` : '';
+}
+
+function joinClauses(...parts: string[]): string {
+  return parts.filter(Boolean).join(' · ');
 }
 
 const LevelExamCard = ({
@@ -193,7 +231,10 @@ const LevelExamCard = ({
             <Trophy className="w-6 h-6" /> Level exam passed!
           </div>
           <p className="text-sm text-green-900 mb-3">
-            {attempt.score}/{attempt.max_score} — a perfect score on the {levelName} exam.
+            {/* bd-2489 — "a perfect score" was unconditional, but a pass is
+                the vendor's bar, not 100%. Only call it perfect when it is. */}
+            {attempt.score}/{attempt.max_score}
+            {attempt.score === attempt.max_score ? ' — a perfect score' : ''} on the {levelName} exam.
             {certificate ? ' Your certificate has been issued.' : ''}
           </p>
           {certificate && (
@@ -219,13 +260,23 @@ const LevelExamCard = ({
           <XCircle className="w-6 h-6" /> Not this time
         </div>
         <p className="text-sm text-red-900 mb-2">
-          You scored {attempt.score}/{attempt.max_score}. This exam requires 100%.
+          You scored {attempt.score}/{attempt.max_score}.
+          {gate.pass_mark_pct != null ? ` This exam requires ${gate.pass_mark_pct}%.` : ''}
         </p>
-        <p className="text-sm text-red-900 flex items-center gap-1.5">
-          <Timer className="w-4 h-4" />
-          Try again in about {hoursLeft(attempt.cooldown_until)} hours
-          {attempt.cooldown_until ? ` (${formatWhen(attempt.cooldown_until)})` : ''}. Use the time to review the modules you struggled with.
-        </p>
+        {/* bd-2475 — the retry line used to render unconditionally, so an exam
+            with no cooldown (a capstone) told the teacher to "try again in
+            about 0 hours". No cooldown_until means no wait: say so. */}
+        {attempt.cooldown_until ? (
+          <p className="text-sm text-red-900 flex items-center gap-1.5">
+            <Timer className="w-4 h-4" />
+            Try again in about {hoursLeft(attempt.cooldown_until)} hours
+            {` (${formatWhen(attempt.cooldown_until)})`}. Use the time to review the modules you struggled with.
+          </p>
+        ) : (
+          <p className="text-sm text-red-900">
+            Review the modules you struggled with, then take it again whenever you are ready.
+          </p>
+        )}
       </div>
     );
   }
@@ -234,6 +285,7 @@ const LevelExamCard = ({
   if (questions) {
     const answered = questions.filter(q => answers[q.id]).length;
     const allAnswered = answered === questions.length;
+    const rules = joinClauses(passClause(gate.pass_mark_pct), cooldownClause(gate.cooldown_hours));
     return (
       <div className="rounded-lg border bg-card p-6 shadow-sm" data-testid="level-exam-form">
         <div className="flex items-center justify-between mb-4">
@@ -244,7 +296,7 @@ const LevelExamCard = ({
           <span className="text-sm text-muted-foreground">{answered}/{questions.length} answered</span>
         </div>
         <p className="text-xs text-muted-foreground mb-4">
-          100% required to pass · {gate.cooldown_hours}h cooldown on a failed attempt. Leaving this page discards your answers (no penalty).
+          {rules ? `${rules}. ` : ''}Leaving this page discards your answers (no penalty).
         </p>
         <div className="space-y-6">
           {questions.map((q, qi) => (
@@ -383,7 +435,11 @@ const LevelExamCard = ({
             <ClipboardCheck className="w-5 h-5 text-primary" /> Level exam — ready
           </div>
           <p className="text-sm text-muted-foreground mt-1">
-            {gate.question_count} questions · 100% required to pass · {gate.cooldown_hours}h cooldown on a failed attempt.
+            {joinClauses(
+              `${gate.question_count} questions`,
+              passClause(gate.pass_mark_pct),
+              cooldownClause(gate.cooldown_hours),
+            )}.
           </p>
         </div>
         <Button onClick={startExam} disabled={loadingQuestions} data-testid="exam-start">

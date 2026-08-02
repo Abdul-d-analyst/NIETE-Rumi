@@ -1908,7 +1908,9 @@ router.get('/training/levels', requirePortalAuth, async (req, res) => {
  * the level, with each answer's text, LLM score (0-5) and feedback line.
  * 200 with { attempt: null } when the teacher hasn't attempted it — the SPA
  * hides the panel on that. Grading internals (prompts, pass math) stay
- * server-side; only display fields are returned.
+ * server-side; only display fields are returned — plus `pass_mark_pct`, the
+ * bar the bot grades capstones against, so the card states it instead of
+ * carrying its own copy (bd-2489).
  */
 router.get('/training/level/:id/capstone', requirePortalAuth, async (req, res) => {
   try {
@@ -1938,8 +1940,14 @@ router.get('/training/level/:id/capstone', requirePortalAuth, async (req, res) =
         .from('training_questions').select('id, question_text').in('id', qIds);
       qText = new Map((qs || []).map(q => [q.id, q.question_text]));
     }
+    // bd-2489 — the SPA hardcoded "Below the 70% pass mark". 70 is this bot
+    // constant, so the copy was right by coincidence and would have gone stale
+    // silently. Send the bar the capstone is ACTUALLY graded against.
+    const { CAPSTONE_PASS_PCT } = require('../../bot/shared/services/training/capstone-delivery.service');
+
     return res.json({
       success: true,
+      pass_mark_pct: Math.round(CAPSTONE_PASS_PCT * 100),
       attempt: {
         id: attempt.id,
         status: attempt.status,
@@ -2865,9 +2873,11 @@ function _grandQuizState(gate) {
  *
  * Response:
  *   { success: true, grand_quiz: {
- *       state: 'no_quiz'|'passed'|'cooldown'|'courses_incomplete'|'ready',
- *       question_count, pass_mark_pct: 100,
- *       cooldown_hours: 24, cooldown_until: ISO|null,
+ *       state: 'no_quiz'|'passed'|'cooldown'|'courses_incomplete'|'whatsapp_only'|'ready',
+ *       question_count,
+ *       pass_mark_pct: the VENDOR's bar (null if the bot could not supply it),
+ *       cooldown_hours: 24 for an MCQ grand quiz, 0 for a capstone,
+ *       cooldown_until: ISO|null,
  *       courses_total, courses_started,
  *       passed_at: ISO|null,
  *       certificate: { certificate_code, teacher_name, level_name, issued_at } | null
@@ -2919,7 +2929,13 @@ router.get('/training/level/:id/grand-quiz', requirePortalAuth, async (req, res)
         question_count: gate.questionCount,
         // bd-2393 — was hardcoded 100. The bar is the vendor's.
         pass_mark_pct: gate.passPct,
-        cooldown_hours: GRAND_QUIZ_COOLDOWN_HOURS,
+        // bd-2475 — was GRAND_QUIZ_COOLDOWN_HOURS unconditionally. A capstone
+        // has no cooldown: capstone-delivery.service grades an attempt without
+        // ever writing `cooldown_until`, so there is no window to serve out and
+        // nothing for a retry gate to read. Advertising 24h there is the API
+        // inventing a rule the grader does not implement — and it is a rule the
+        // teacher would obey, waiting a day for nothing.
+        cooldown_hours: gate.examKind === 'capstone' ? 0 : GRAND_QUIZ_COOLDOWN_HOURS,
         cooldown_until: gate.cooldownUntil,
         courses_total: gate.coursesTotal,
         courses_started: gate.coursesStarted,
