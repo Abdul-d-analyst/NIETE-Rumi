@@ -683,6 +683,12 @@ async function loadVisibleLevelsWithProgress(userId) {
         : Math.round((lvModuleIds.filter(id => doneModuleIds.has(id)).length / lvModuleIds.length) * 100),
       passed_at: passedAttempt?.completed_at || null,
       cooldown_until: cooldownAttempt?.cooldown_until || null,
+      // bd-2479 — which level a teacher must clear to open this one, in the
+      // 0-based display numbering ladder vendors use (bd-2235). Emitted here so
+      // the portal renders the same number the Flow does instead of deriving
+      // its own; a second copy of this arithmetic is how the two surfaces
+      // started disagreeing about lock state. Null when nothing precedes it.
+      previous_level_order: isFirst ? null : lv.order_index - 1,
       grand_quiz_id: grand?.id || null,
     };
   });
@@ -798,7 +804,9 @@ async function checkLevelUnlocked(userId, levelId) {
   if (!level) return { ok: false, status: 404, message: 'Level not found' };
   if (level.state !== 'locked') return { ok: true, level };
 
-  const previousOrder = level.order_index - 1;
+  // Read the number off the level state rather than recomputing it — one
+  // definition, so the refusal can never cite a different level than the card.
+  const previousOrder = level.previous_level_order;
   logToFile('🎓 Refused a locked level', { userId, levelId: idNum, previousOrder });
   return {
     ok: false,

@@ -33,6 +33,9 @@ const { S3Client, GetObjectCommand } = require('@aws-sdk/client-s3');
 const { generatePresignedUrl, generatePresignedUrls, isValidR2Url } = require('../services/r2.service');
 const axios = require('axios');
 const { fetchAllPaged } = require('../lib/fetch-all-paged');
+// bd-2469 — the portal's single source of training decisions. Asks the bot;
+// holds no rules of its own. See dashboard/services/training-rules.service.js.
+const TrainingRules = require('../services/training-rules.service');
 // bd-2460 — Assessment Generator availability. Fail-closed, shared with the
 // bot via one app_settings row (see dashboard/lib/feature-flags.js).
 const {
@@ -1538,95 +1541,78 @@ async function _filterLevelsByScopes(userId, levels) {
   });
 }
 
+/**
+ * bd-2469 / bd-2480 — level state comes from the BOT, not from here.
+ *
+ * This function used to compute state locally, and its copy of the rules had
+ * drifted from the bot's in three ways while its comments still claimed
+ * parity ("mirror the WhatsApp endpoint's rule exactly"):
+ *
+ *   - isGrandPass tested `quiz_kind === 'grand'`, so a level certified by a
+ *     CAPSTONE read as un-passed. The first Beacon House certificate ever
+ *     issued was invisible here.
+ *   - "ready_for_quiz" used coursesStarted (>=1 module per course), the proxy
+ *     bd-2447 replaced on the bot with "every module passed" — a fix already
+ *     announced as shipped.
+ *   - a missing vendor row defaulted to chain-locked here, unlocked there.
+ *
+ * The decision fields now come over the wire verbatim. The two COUNTS below
+ * (module_count / completed_count) stay local deliberately: they are display
+ * rollups with no rule in them, and moving raw counting to the bot would buy
+ * nothing but a round trip.
+ *
+ * Throws when the bot cannot be reached — callers must not render a guess.
+ */
 async function _computeLevelStates(userId, levels) {
   const levelIds = levels.map(l => l.id);
-  const vendorIds = [...new Set(levels.map(l => l.vendor_id).filter(Boolean))];
-  const [{ data: courses }, { data: progressRows }, { data: attempts }, { data: vendorRows }] = await Promise.all([
+
+  const [botStates, { data: courses }, { data: progressRows }] = await Promise.all([
+    TrainingRules.getLevelStates(userId),
     supabase.from('training_courses').select('id, level_id').eq('is_active', true).in('level_id', levelIds),
     supabase.from('teacher_training_progress')
       .select('module_id, training_modules!inner(course_id, is_active)')
       .eq('user_id', userId)
       .eq('training_modules.is_active', true),
-    // bd-2391 — GRAND attempts only, matching _loadGrandQuizGate below. Module
-    // quick-check attempts carry a level_id and is_passed=true on a perfect
-    // score, so an unfiltered read certifies the level off one module quiz.
-    supabase.from('training_assessment_attempts')
-      .select('level_id, status, is_passed, cooldown_until, completed_at, quiz_kind')
-      .eq('user_id', userId).eq('quiz_kind', 'grand').in('level_id', levelIds),
-    vendorIds.length
-      ? supabase.from('training_vendors').select('id, unlock_logic').in('id', vendorIds)
-      : Promise.resolve({ data: [] }),
   ]);
-  const vendorById = new Map((vendorRows || []).map(v => [v.id, v]));
 
-  // module → course → level chain, plus overall completed_set for the module-count rollup
-  const progressByCourse = new Map();
-  const completedModuleIds = new Set();
-  for (const p of progressRows || []) {
-    completedModuleIds.add(p.module_id);
-    const cid = p?.training_modules?.course_id;
-    if (cid) progressByCourse.set(cid, (progressByCourse.get(cid) || 0) + 1);
-  }
+  const completedModuleIds = new Set((progressRows || []).map(p => p.module_id));
 
-  // Also need module counts per level for the "X/Y done" copy
+  // Module counts per level for the "X/Y done" copy. Pure arithmetic.
   const allCourseIds = (courses || []).map(c => c.id);
   const { data: modules } = allCourseIds.length
     ? await supabase.from('training_modules')
         .select('id, course_id').eq('is_active', true).in('course_id', allCourseIds)
     : { data: [] };
 
+  const courseLevel = new Map((courses || []).map(c => [c.id, c.level_id]));
   const moduleCountByLevel = new Map();
   const completedCountByLevel = new Map();
   for (const m of modules || []) {
-    const course = (courses || []).find(c => c.id === m.course_id);
-    if (!course) continue;
-    moduleCountByLevel.set(course.level_id, (moduleCountByLevel.get(course.level_id) || 0) + 1);
+    const levelId = courseLevel.get(m.course_id);
+    if (levelId == null) continue;
+    moduleCountByLevel.set(levelId, (moduleCountByLevel.get(levelId) || 0) + 1);
     if (completedModuleIds.has(m.id)) {
-      completedCountByLevel.set(course.level_id, (completedCountByLevel.get(course.level_id) || 0) + 1);
+      completedCountByLevel.set(levelId, (completedCountByLevel.get(levelId) || 0) + 1);
     }
   }
 
-  // Now compute state per level using the WhatsApp bot's rules
+  const botById = new Map((botStates || []).map(s => [s.id, s]));
   const byLevelId = new Map();
   for (const lv of levels) {
-    const lvCourses = (courses || []).filter(c => c.level_id === lv.id);
-    const coursesStarted = lvCourses.filter(c => (progressByCourse.get(c.id) || 0) > 0);
-    // bd-2391 — guard in memory too, so the rule holds even if a caller passes
-    // unfiltered rows. A missing quiz_kind predates the column (level exams only).
-    const isGrandPass = (a) => a && a.is_passed === true && (a.quiz_kind || 'grand') === 'grand';
-    const passedAttempt = (attempts || []).find(a => a.level_id === lv.id && isGrandPass(a));
-    const cooldownAttempt = (attempts || []).find(a =>
-      a.level_id === lv.id && a.status === 'failed' && a.cooldown_until && new Date(a.cooldown_until) > new Date()
-    );
-    // Chain-lock applies only to vendors whose unlock_logic says so — mirror
-    // the WhatsApp endpoint's rule exactly. Missing vendor row defaults to
-    // 'chain' (the legacy Taleemabad behaviour). Previous-level lookup is
-    // scoped WITHIN the vendor: with multiple vendors on the board, a global
-    // order_index-1 lookup crosses vendor boundaries and locks the wrong rows.
-    const vendor = vendorById.get(lv.vendor_id);
-    const chainLocked = (vendor?.unlock_logic || 'chain') === 'chain';
-    const prevLevel = levels
-      .filter(l => l.vendor_id === lv.vendor_id)
-      .find(l => l.order_index === lv.order_index - 1);
-    const prevPassed = !prevLevel || !!(attempts || []).find(a => a.level_id === prevLevel.id && isGrandPass(a));
-    const isFirst = !prevLevel;
-
-    let state;
-    if (chainLocked && !prevPassed && !isFirst) state = 'locked';
-    else if (passedAttempt) state = 'certified';
-    else if (coursesStarted.length === lvCourses.length && lvCourses.length > 0) state = 'ready_for_quiz';
-    else if (coursesStarted.length > 0) state = 'in_progress';
-    else state = 'not_started';
-
+    const bot = botById.get(lv.id);
+    // A level the bot does not return is not in this teacher's programme. Say
+    // nothing about it rather than inventing a state — callers treat a missing
+    // entry as "not found", which is the honest answer.
+    if (!bot) continue;
     byLevelId.set(lv.id, {
-      state,
-      courses_total: lvCourses.length,
-      courses_completed: coursesStarted.length,
+      state: bot.state,
+      courses_total: bot.courses_total,
+      courses_completed: bot.courses_completed,
       module_count: moduleCountByLevel.get(lv.id) || 0,
       completed_count: completedCountByLevel.get(lv.id) || 0,
-      passed_at: passedAttempt?.completed_at || null,
-      cooldown_until: cooldownAttempt?.cooldown_until || null,
-      previous_level_order: prevLevel ? prevLevel.order_index : null,
+      passed_at: bot.passed_at || null,
+      cooldown_until: bot.cooldown_until || null,
+      previous_level_order: bot.previous_level_order ?? null,
     });
   }
   return byLevelId;
@@ -1976,23 +1962,42 @@ function _isPdfSourceUrl(url) {
   return !!url && /\.pdf(\?|$)/i.test(url);
 }
 
+/**
+ * bd-2480 — the level gate, answered by the bot.
+ *
+ * Was a local re-derivation on top of _computeLevelStates, carrying its own
+ * phrasing of the refusal. Now a thin adapter: the bot decides, and the only
+ * work left here is renaming `message` to the `error` key every call site
+ * already reads.
+ *
+ * Fails CLOSED. TrainingRules denies on any transport or config failure, so an
+ * unreachable bot locks the level rather than opening it.
+ */
 async function _assertLevelUnlocked(userId, levelId) {
-  // vendor_id is required by _computeLevelStates for the per-vendor
-  // unlock_logic + within-vendor previous-level rule.
-  const { data: levels } = await supabase
-    .from('training_levels').select('id, name, order_index, vendor_id').eq('is_active', true).order('order_index');
-  const stateMap = await _computeLevelStates(userId, levels || []);
-  const s = stateMap.get(levelId);
-  if (!s) return { ok: false, status: 404, error: 'Level not found' };
-  if (s.state === 'locked') {
-    const prevOrder = s.previous_level_order;
-    return {
-      ok: false, status: 403,
-      error: `This level is locked. Pass Level ${prevOrder}'s grand quiz first.`,  // 0-based display (bd-2235)
-      previous_level_order: prevOrder,
-    };
-  }
-  return { ok: true };
+  const gate = await TrainingRules.checkLevelUnlocked(userId, levelId);
+  if (gate.ok) return { ok: true };
+  return {
+    ok: false,
+    status: gate.status || 403,
+    error: gate.message,
+    previous_level_order: gate.previous_level_order ?? null,
+  };
+}
+
+/**
+ * bd-2481 — the module-order gate, which the portal has never had.
+ *
+ * The bot enforces "exactly one unpassed module is open at a time"
+ * (bd-2448, announced as shipped). The portal gated only on the LEVEL, so a
+ * teacher could open any module in any order and skip everything before it.
+ *
+ * Same adapter shape as _assertLevelUnlocked, and the same fail-closed
+ * guarantee.
+ */
+async function _assertModuleUnlocked(userId, moduleId) {
+  const gate = await TrainingRules.checkModuleUnlocked(userId, moduleId);
+  if (gate.ok) return { ok: true };
+  return { ok: false, status: gate.status || 403, error: gate.message };
 }
 
 /**
@@ -2151,6 +2156,10 @@ router.get('/training/module/:id', requirePortalAuth, async (req, res) => {
       const gate = await _assertLevelUnlocked(userId, course.level_id);
       if (!gate.ok) return res.status(gate.status).json({ success: false, error: gate.error, previous_level_order: gate.previous_level_order });
     }
+    // bd-2481 — module ORDER, not just level lock. Unconditional: the bot
+    // denies an unknown or course-less module, closing the orphan hole too.
+    const modGate = await _assertModuleUnlocked(userId, moduleId);
+    if (!modGate.ok) return res.status(modGate.status).json({ success: false, error: modGate.error });
 
     // Progress
     let completedAt = null;
@@ -2334,6 +2343,12 @@ router.get('/training/module/:id/questions', requirePortalAuth, async (req, res)
         const gate = await _assertLevelUnlocked(userId, course.level_id);
         if (!gate.ok) return res.status(gate.status).json({ success: false, error: gate.error, previous_level_order: gate.previous_level_order });
       }
+      // bd-2481 — the module-ORDER gate, outside the `if (course)` above on
+      // purpose. The bot denies an unknown module or one with no course, so
+      // running it unconditionally also closes the orphan-module hole the
+      // level gate leaves open.
+      const modGate = await _assertModuleUnlocked(userId, moduleId);
+      if (!modGate.ok) return res.status(modGate.status).json({ success: false, error: modGate.error });
     }
 
     // 3. Active questions, canonical order — the exact set the POST endpoint
@@ -2442,6 +2457,12 @@ router.post('/training/module/:id/quiz-attempts', requirePortalAuth, async (req,
         if (!gate.ok) return res.status(gate.status).json({ success: false, error: gate.error, previous_level_order: gate.previous_level_order });
       }
     }
+    // bd-2481 — module ORDER, not just level lock. Unconditional, so the
+    // orphan-module case the comment above accepts is denied rather than
+    // waved through: submitting a quiz for a module you cannot open is the
+    // one place where skipping ahead also writes progress.
+    const modGate = await _assertModuleUnlocked(userId, moduleId);
+    if (!modGate.ok) return res.status(modGate.status).json({ success: false, error: modGate.error });
 
     // 3. Load active questions for the module, ordered — the canonical list
     //    the answer set must exhaustively cover.
@@ -3115,6 +3136,12 @@ router.post('/training/module/:id/complete', requirePortalAuth, async (req, res)
         const gate = await _assertLevelUnlocked(userId, course.level_id);
         if (!gate.ok) return res.status(gate.status).json({ success: false, error: gate.error, previous_level_order: gate.previous_level_order });
       }
+      // bd-2481 — the module-ORDER gate, outside the `if (course)` above on
+      // purpose. The bot denies an unknown module or one with no course, so
+      // running it unconditionally also closes the orphan-module hole the
+      // level gate leaves open.
+      const modGate = await _assertModuleUnlocked(userId, moduleId);
+      if (!modGate.ok) return res.status(modGate.status).json({ success: false, error: modGate.error });
     }
 
     // 3. Quiz-less check — modules WITH active questions must complete via
