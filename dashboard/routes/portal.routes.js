@@ -1200,14 +1200,18 @@ router.get('/curriculum/chapters', requirePortalAuth, async (req, res) => {
       }
     }
     // FEAT-109: merge pre_generated_lps chapters (publisher='Rumi').
+    // pre_generated_lps.chapter_title stores per-LESSON topics, not a shared
+    // chapter name — grouping on it explodes each LP into its own chapter row.
+    // Group by (publisher, chapter_number) only and synthesize a "Chapter N"
+    // label; the per-lesson topics surface in the /lps endpoint drill-down.
     const pgenRows = await fetchPgenRowsShaped({ grade, subject });
     for (const r of pgenRows) {
-      const key = `${r.publisher}::${r.chapter_number}::${r.chapter_title}`;
+      const key = `${r.publisher}::${r.chapter_number}`;
       if (!byChapter.has(key)) {
         byChapter.set(key, {
           publisher: r.publisher,
           chapter_number: r.chapter_number,
-          chapter_title: r.chapter_title,
+          chapter_title: `Chapter ${r.chapter_number}`,
           lp_count: 0,
         });
       }
