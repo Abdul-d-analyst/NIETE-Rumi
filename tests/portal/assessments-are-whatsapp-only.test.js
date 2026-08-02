@@ -239,11 +239,35 @@ describe('bd-2490 — content still works', () => {
     expect(statusCode).toBe(200);
   });
 
-  it('still reports exam status, so the UI can render the redirect card', async () => {
+  it('reports whatsapp_only ONLY when the exam is actually sittable', async () => {
     seed();
+    tableStates.teacher_training_progress = { rows: [
+      { user_id: UID, module_id: PLAIN_MODULE }, { user_id: UID, module_id: QUIZZED_MODULE },
+    ] };  // level complete -> the bot's gate says ready
     const { statusCode, payload } = await invoke('get', '/training/level/:id/grand-quiz', { params: { id: String(LEVEL) } });
     expect(statusCode).toBe(200);
     expect(payload.grand_quiz.state).toBe('whatsapp_only');
+  });
+
+  /**
+   * Regression: the first cut returned 'whatsapp_only' ahead of every other
+   * state, so a teacher with unfinished coursework was told to go and take the
+   * exam on WhatsApp — where the bot would refuse her. Sending someone to
+   * another surface for nothing is worse than the dead form this replaced.
+   */
+  it('still says courses_incomplete when the coursework is not done', async () => {
+    seed();   // no progress at all
+    const { payload } = await invoke('get', '/training/level/:id/grand-quiz', { params: { id: String(LEVEL) } });
+    expect(payload.grand_quiz.state).toBe('courses_incomplete');
+  });
+
+  it('refuses the paper even in a state that is not whatsapp_only', async () => {
+    // The redirect card is display; the API is the gate, and it does not
+    // consult eligibility before refusing.
+    seed();
+    const { statusCode, payload } = await invoke('get', '/training/level/:id/grand-quiz/questions', { params: { id: String(LEVEL) } });
+    expect(statusCode).toBe(409);
+    expect(payload.code).toBe('whatsapp_only');
   });
 
   it('still completes a module that has NO quiz — there is nothing to assess', async () => {
