@@ -1,0 +1,118 @@
+{
+  "_comment": "WhatsApp Flow for multi-answer (select-all-that-apply) training quiz questions.",
+  "_instructions": [
+    "1. Registered automatically by `npm run setup:flows` (flow-configs.js → 'Training Multi-Answer Question').",
+    "2. The resulting Flow ID is written to TRAINING_MSQ_FLOW_ID in your .env.",
+    "3. Endpoint (data_api_version 3.0, encrypted): POST /api/flows/training-msq.",
+    "4. ONE Flow serves EVERY multi-answer question: the question text, the option list and the",
+    "   already-selected set are all supplied dynamically by the endpoint's INIT. There are no",
+    "   per-option slots and no per-question Flow.",
+    "5. Leaving TRAINING_MSQ_FLOW_ID unset is the rollback lever — delivery falls back to the",
+    "   interactive-list + Done path with no deploy.",
+    "6. Modelled on attendance-marking-flow.json (the proven dynamic-data CheckboxGroup pattern here)."
+  ],
+  "_notes": [
+    "Option ids are the question's CANONICAL 1-based option indices, never display positions —",
+    "the endpoint orders the list per the attempt's seeded shuffle but the id always identifies",
+    "the option the database knows, so the stored answer stays comparable with every historical row.",
+    "init-values pre-checks a partially-answered question. Init-values only apply reliably once the",
+    "Flow is PUBLISHED; on a DRAFT the boxes may render unchecked.",
+    "The Footer completes the Flow rather than calling data_exchange: the selection is a single",
+    "atomic submission, so there is nothing to round-trip and no ~10s endpoint budget to respect."
+  ],
+  "version": "6.2",
+  "data_api_version": "3.0",
+  "routing_model": {},
+  "screens": [
+    {
+      "id": "MSQ_QUESTION",
+      "title": "Question",
+      "terminal": true,
+      "refresh_on_back": true,
+      "data": {
+        "progress": {
+          "type": "string",
+          "__example__": "Question 2 of 5"
+        },
+        "question_text": {
+          "type": "string",
+          "__example__": "Which of these are formative assessment techniques?"
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "title": { "type": "string" },
+              "description": { "type": "string" }
+            }
+          },
+          "__example__": [
+            { "id": "3", "title": "Exit tickets", "description": "" },
+            { "id": "1", "title": "Cold calling", "description": "" },
+            { "id": "5", "title": "Think-pair-share", "description": "" },
+            { "id": "2", "title": "End-of-term exam", "description": "" },
+            { "id": "4", "title": "Annual report card", "description": "" }
+          ]
+        },
+        "selected": {
+          "type": "array",
+          "items": { "type": "string" },
+          "__example__": []
+        },
+        "attempt_ref": {
+          "type": "string",
+          "__example__": "00000000-0000-0000-0000-000000000000:1"
+        },
+        "training_msq_action": {
+          "type": "string",
+          "__example__": "submit"
+        }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "Form",
+            "name": "msq_form",
+            "init-values": {
+              "selected_options": "${data.selected}"
+            },
+            "children": [
+              {
+                "type": "TextHeading",
+                "text": "${data.progress}"
+              },
+              {
+                "type": "TextBody",
+                "text": "${data.question_text}"
+              },
+              {
+                "type": "CheckboxGroup",
+                "name": "selected_options",
+                "label": "Select all that apply",
+                "required": true,
+                "data-source": "${data.options}",
+                "min-selected-items": 1,
+                "max-selected-items": 10
+              },
+              {
+                "type": "Footer",
+                "label": "Submit answer",
+                "on-click-action": {
+                  "name": "complete",
+                  "payload": {
+                    "selected_options": "${form.selected_options}",
+                    "attempt_ref": "${data.attempt_ref}",
+                    "training_msq_action": "${data.training_msq_action}"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}
