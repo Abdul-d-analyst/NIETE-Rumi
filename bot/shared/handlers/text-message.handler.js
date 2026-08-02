@@ -140,6 +140,10 @@ async function tryCurriculumLessonPlanServe(from, topic, user, language) {
 
 const { evaluateHomeworkTrigger } = require('./homework-trigger');
 const { detectEditClassIntent } = require('./edit-class-trigger');
+const {
+  parseCertificateCommand,
+  deliverCertificateByCode,
+} = require('../services/training/certificate-pdf.service');
 
 async function handleTextMessage(message, from, messageBody, user = null) {
   logToFile(`Processing TEXT message: ${messageBody}`);
@@ -684,11 +688,22 @@ async function handleTextMessage(message, from, messageBody, user = null) {
   }
 
   // ============================================================
-  // CERTIFICATES COMMAND: /certificates — list the teacher's earned
-  // grand-quiz certifications. Text-only (PDF delivery is Layer 2).
+  // CERTIFICATES COMMAND
+  //   /certificates            → list the teacher's earned certifications
+  //   /certificate <CODE>      → send THAT certificate as a PDF document
+  //
+  // The PDF is fetched-or-minted through the same shared service the portal
+  // reaches over the internal API, so a certificate a teacher can download in
+  // the browser is exactly the one they get in chat — legacy certificates
+  // included, which render on first request either way.
+  //
+  // Parsing and delivery live in the service, not here: this handler pulls in
+  // ~40 services and cannot be booted in a test, so logic inlined in it is
+  // untestable by construction.
   // ============================================================
-  if (trimmedMessage === '/certificates' || trimmedMessage === '/certificate') {
-    logToFile('🏆 /certificates command detected', { userId: user?.id, phoneNumber: from });
+  const certCommand = parseCertificateCommand(trimmedMessage);
+  if (certCommand) {
+    logToFile('🏆 /certificates command detected', { userId: user?.id, phoneNumber: from, code: certCommand.code });
     if (!user) {
       typingController.stop();
       await WhatsAppService.sendMessage(
@@ -697,6 +712,24 @@ async function handleTextMessage(message, from, messageBody, user = null) {
       );
       return;
     }
+    // A named certificate: fetch-or-mint it and send the file itself.
+    if (certCommand.code) {
+      const result = await deliverCertificateByCode(supabase, {
+        userId: user.id,
+        phoneNumber: from,
+        certificateCode: certCommand.code,
+      });
+      typingController.stop();
+      if (result.ok) return;
+      await WhatsAppService.sendMessage(
+        from,
+        result.reason === 'not_found'
+          ? `I could not find a certificate with the code \`${certCommand.code}\` in your records.\n\nSend /certificates to see the ones you have earned.`
+          : "I could not prepare that certificate just now. Please try again in a moment — it is safe in your records either way."
+      );
+      return;
+    }
+
     const { data: certs } = await supabase
       .from('training_certificates')
       .select('certificate_code, teacher_name_snapshot, level_name_snapshot, issued_at, level_id, training_levels(order_index)')
@@ -722,7 +755,8 @@ async function handleTextMessage(message, from, messageBody, user = null) {
     const body =
       `🏆 *NIETE Certifications — ${teacherName}*\n\n` +
       lines.join('\n\n') +
-      `\n\n_Type /training to continue with your next level._`;
+      `\n\n_Send_ \`/certificate <code>\` _to get the PDF._` +
+      `\n_Type /training to continue with your next level._`;
     await WhatsAppService.sendMessage(from, body);
     logToFile('🏆 Sent certificates list', { userId: user.id, count: certs.length });
     return;

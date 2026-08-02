@@ -1848,6 +1848,111 @@ router.get('/training/vendors', requirePortalAuth, async (req, res) => {
   }
 });
 
+/* ------------------------------------------------------------------------- *
+ * Certificates — identity here, everything else in the bot.
+ *
+ * These two routes used to read `training_certificates` and presign R2 keys in
+ * this process. Both moved to the bot, because the RENDER has to live there:
+ * `certificate-pdf.service.js` sits under bot/shared, so its
+ * `require('pdfkit')` resolves from bot/node_modules and then the repo root
+ * and never reaches dashboard/node_modules — Node resolves from the requiring
+ * FILE's directory upward, so the dashboard declaring pdfkit itself changes
+ * nothing. A portal-side mint therefore works in a dev tree where both
+ * installs exist and fails on the deployed service. Same trap as the LP
+ * enqueue, which degraded silently for two days.
+ *
+ * Once the mint is in the bot, keeping the read here would mean two places
+ * that know what a certificate is. So the portal keeps the one thing it
+ * genuinely owns — WHO IS ASKING — and asks the bot for the rest. Both routes
+ * take the userId from the SESSION and never from the path, query or body.
+ * ------------------------------------------------------------------------- */
+
+/**
+ * GET /api/portal/training/certificates
+ *
+ * The teacher's certificates, newest first, straight from the bot.
+ *
+ * This route NEVER mints. A teacher with 40 certificates must not trigger 40
+ * PDF renders just to see their names — rendering happens on the download
+ * route below, for the one certificate actually asked for. That split is also
+ * why a rendering problem can never take this list down.
+ *
+ * `download_url` is the portal's own download route, present for EVERY
+ * certificate. Before fetch-or-mint, a null `pdf_r2_key` meant a permanently
+ * undownloadable certificate; now it just means "not rendered yet", so a
+ * null download link here would be a bug rather than an honest state.
+ * `has_pdf` still reports whether the file already exists, so the UI can warn
+ * that a first download may take a moment.
+ *
+ * A lookup failure is a 500, NOT an empty list: `[]` is a legitimate answer
+ * ("none yet"), so returning it on error would tell a teacher their
+ * certificates do not exist.
+ */
+router.get('/training/certificates', requirePortalAuth, async (req, res) => {
+  try {
+    const userId = req.session.portalUserId;
+    const certificatesClient = require('../services/certificates.service');
+
+    const certificates = await certificatesClient.listCertificates(userId);
+
+    res.json({
+      success: true,
+      certificates: (certificates || []).map((c) => ({
+        ...c,
+        download_url: `/api/portal/training/certificates/${encodeURIComponent(c.certificate_code)}/download`,
+      })),
+    });
+  } catch (error) {
+    console.error('training/certificates error:', error.message);
+    res.status(500).json({ success: false, error: 'Failed to load certificates' });
+  }
+});
+
+/**
+ * GET /api/portal/training/certificates/:code/download
+ *
+ * Fetch-or-mint one certificate, then 302 to a short-lived signed R2 URL.
+ *
+ * Why a redirect rather than handing the signed URL out in the list: the URL
+ * is a bearer token for the file, and issuing one per rendered row would mint
+ * credentials for certificates nobody ever clicks. This way the session is
+ * re-checked at the moment of the download.
+ *
+ * The bot distinguishes "no such certificate for this user" (404) from "we
+ * could not produce the file" (502), and so does this route — collapsing both
+ * into one status would hide a rendering outage behind a not-found.
+ */
+router.get('/training/certificates/:code/download', requirePortalAuth, async (req, res) => {
+  const code = req.params && req.params.code;
+  if (!code) return res.status(400).json({ success: false, error: 'certificate code is required' });
+
+  try {
+    const userId = req.session.portalUserId;
+    const certificatesClient = require('../services/certificates.service');
+
+    const result = await certificatesClient.getCertificatePdf(userId, code);
+
+    if (result && result.notFound) {
+      return res.status(404).json({ success: false, error: 'Certificate not found' });
+    }
+    if (!result || !result.download_url) {
+      // The certificate exists; its PDF could not be produced. Say so — the
+      // list is unaffected and the teacher can retry.
+      return res.status(502).json({
+        success: false,
+        error: 'Your certificate PDF could not be prepared. Please try again in a moment.',
+      });
+    }
+    return res.redirect(302, result.download_url);
+  } catch (error) {
+    console.error('training/certificates download error:', error.message);
+    return res.status(502).json({
+      success: false,
+      error: 'Your certificate PDF could not be prepared. Please try again in a moment.',
+    });
+  }
+});
+
 /**
  * GET /api/portal/training/levels
  * Returns the 4 training levels with per-level module counts, completion %,

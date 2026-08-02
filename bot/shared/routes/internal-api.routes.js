@@ -282,4 +282,107 @@ router.post('/training/module-quiz-verdict', requireInternalKey, async (req, res
   }
 });
 
+/* ------------------------------------------------------------------------- *
+ * Certificates — the bot owns them, the portal asks.
+ *
+ * WHY THIS IS FORCED RATHER THAN PREFERRED
+ * ----------------------------------------
+ * certificate-pdf.service.js lives under bot/shared/, so its
+ * `require('pdfkit')` resolves from bot/node_modules and then the repo root —
+ * it never reaches dashboard/node_modules. The dashboard listing pdfkit in its
+ * own package.json changes nothing, because Node resolves from the requiring
+ * FILE's directory upward. A portal-side render therefore succeeds in a dev
+ * tree where both installs happen to exist and fails in production: the worst
+ * failure shape there is. Exactly the conclusion the LP enqueue reached above.
+ *
+ * TWO ROUTES, DELIBERATELY SPLIT
+ *   /training/certificates     list only — never mints, never presigns
+ *   /training/certificate-pdf  fetch-or-mint ONE, on a real request
+ *
+ * All 12,954 certificates in production have pdf_r2_key null (12,952 of them
+ * from the migration import). They are minted the first time someone actually
+ * asks for one, never in bulk and never while drawing a list — a teacher with
+ * 40 certificates must not trigger 40 renders to see their names.
+ *
+ * IDENTITY stays with the caller: the portal knows who the session belongs to,
+ * passes that userId, and every lookup filters on it. The bot never accepts a
+ * bare certificate code, so a leaked code is not a download link.
+ * ------------------------------------------------------------------------- */
+
+/** Lazy-require the certificate service, matching every other route here. */
+function certificateService() {
+  return require('../services/training/certificate-pdf.service');
+}
+
+/**
+ * POST /api/internal/training/certificates
+ * Body { userId } → { success, certificates: [{ id, certificate_code, level_name,
+ *                     teacher_name, issued_at, has_pdf }] }
+ *
+ * A pure read. On failure it 500s rather than answering `certificates: []` —
+ * an empty list is a legitimate answer ("none yet"), so returning it on error
+ * would tell a teacher their certificates do not exist.
+ */
+router.post('/training/certificates', requireInternalKey, async (req, res) => {
+  const { userId } = req.body || {};
+  if (!userId) return res.status(400).json({ success: false, error: 'userId is required' });
+
+  try {
+    const supabase = require('../config/supabase');
+    const certificates = await certificateService().listCertificates(supabase, userId);
+    return res.json({ success: true, certificates });
+  } catch (error) {
+    logToFile('❌ Internal certificates list failed', { userId, error: error?.message });
+    return res.status(500).json({ success: false, error: 'Certificate lookup failed' });
+  }
+});
+
+/**
+ * POST /api/internal/training/certificate-pdf
+ * Body { userId, certificateCode }
+ *   → 200 { success, certificate_code, level_name, teacher_name, issued_at,
+ *           pdf_r2_key, download_url, minted }
+ *   → 400 missing userId/certificateCode
+ *   → 401 bad key
+ *   → 404 no such certificate FOR THIS USER
+ *   → 502 render/upload/presign failed
+ *
+ * Fetch-or-mint. `minted` tells the caller whether this request paid for a
+ * render, which is worth having in the logs while the legacy backlog drains.
+ *
+ * A failure is reported as a failure. There is deliberately no 200-with-a-null
+ * download_url: the caller cannot then tell "no such certificate" from "we
+ * could not render it", and a silent success is how a comparable bug hid for
+ * two days elsewhere in this codebase. Degrading is the CALLER's decision —
+ * the portal turns a failure here into a certificate that still lists.
+ */
+router.post('/training/certificate-pdf', requireInternalKey, async (req, res) => {
+  const { userId, certificateCode } = req.body || {};
+  if (!userId) return res.status(400).json({ success: false, error: 'userId is required' });
+  if (!certificateCode) return res.status(400).json({ success: false, error: 'certificateCode is required' });
+
+  try {
+    const supabase = require('../config/supabase');
+    const result = await certificateService().fetchOrMintCertificatePdf(supabase, { userId, certificateCode });
+    if (result.minted) {
+      logToFile('🏆 Certificate PDF minted via internal API', { userId, certificateCode });
+    }
+    return res.json({ success: true, ...result });
+  } catch (error) {
+    const code = error && error.code;
+    if (code === 'bad_request') {
+      return res.status(400).json({ success: false, error: 'userId and certificateCode are required' });
+    }
+    if (code === 'not_found') {
+      return res.status(404).json({ success: false, error: 'Certificate not found' });
+    }
+    if (code === 'mint_failed') {
+      logToFile('❌ Certificate PDF mint failed via internal API', { userId, certificateCode, error: error.message });
+      return res.status(502).json({ success: false, error: 'Certificate PDF could not be generated' });
+    }
+    logToFile('❌ Internal certificate-pdf failed', { userId, certificateCode, error: error?.message });
+    return res.status(500).json({ success: false, error: 'Certificate lookup failed' });
+  }
+});
+
 module.exports = router;
