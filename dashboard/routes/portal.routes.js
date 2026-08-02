@@ -2831,11 +2831,16 @@ function _grandQuizState(gate) {
   if (!gate.quiz || gate.questionCount === 0) return 'no_quiz';
   // bd-2490 — INTERIM. Assessments are taken on WhatsApp, not here.
   //
-  // Placed ABOVE the `ok` check on purpose: the state must never be 'ready',
-  // so the card never invites a start the API would refuse, and a client that
-  // ignores the banner still cannot open a paper it could not submit.
-  if (ASSESSMENTS_ON_WHATSAPP_ONLY) return 'whatsapp_only';
-  if (gate.ok) return 'ready';
+  // This replaces 'ready' and ONLY 'ready'. An earlier version returned it
+  // ahead of every other state, which told a teacher to go take an exam on
+  // WhatsApp that she is not yet eligible to sit — the bot would refuse her
+  // there, having sent her for nothing. Locked, incomplete, cooling down and
+  // already-passed all still report themselves, because those are true
+  // regardless of which surface the exam is taken on.
+  //
+  // Display only. The routes refuse unconditionally and before any eligibility
+  // check, so the gate does not depend on this line being right.
+  if (gate.ok) return ASSESSMENTS_ON_WHATSAPP_ONLY ? 'whatsapp_only' : 'ready';
   // Could not reach the bot. Never render 'ready' off a failure — the caller
   // surfaces gate.message, and 'courses_incomplete' is the safe closed state
   // the UI already knows how to show.
