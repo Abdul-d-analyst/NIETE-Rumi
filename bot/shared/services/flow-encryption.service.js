@@ -179,6 +179,19 @@ async function processEncryptedRequest(encryptedRequest, handler) {
     flow_token: decryptedData.flow_token ? 'present' : 'missing',
   });
 
+  // BUG-144 — when the WhatsApp client fails to render a screen it re-POSTs
+  // with {error, error_message} in the data payload. That message is the only
+  // place the real reason appears; without it we are guessing at causes.
+  const clientErr = decryptedData?.data;
+  if (clientErr && (clientErr.error || clientErr.error_message)) {
+    logToFile('❌ Flow CLIENT-SIDE error reported', {
+      action: decryptedData.action,
+      screen: decryptedData.screen,
+      error: clientErr.error,
+      error_message: clientErr.error_message,
+    });
+  }
+
   // Call handler to process request and get response
   const response = await handler(decryptedData);
 

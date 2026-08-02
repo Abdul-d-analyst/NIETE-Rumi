@@ -95,12 +95,23 @@ describe('LP Selection List Builder (bd-619)', () => {
     expect(result.listData.body.text || result.listData.body).toMatch(/سبق|درس|لیسن/);
   });
 
-  test('SCENARIO: Footer defaults to "Rumi Digital Coach" when no region is passed', () => {
+  test('SCENARIO: Footer defaults to "NIETE Digital Coach" when no region is passed (bd-2381)', () => {
     const recentLPs = [
       { id: 'lp-1', topic: 'Photosynthesis', grade: '5', created_at: '2026-03-01' },
     ];
     const result = buildLPSelectionList('session-abc', recentLPs, 'en');
-    expect(result.listData.footer.text).toBe('Rumi Digital Coach');
+    expect(result.listData.footer.text).toBe('NIETE Digital Coach');
+  });
+
+  test('SCENARIO: Urdu default footer is the NIETE-branded label, never "رومی" (bd-2381)', () => {
+    const recentLPs = [
+      { id: 'lp-1', topic: 'Photosynthesis', grade: '5', created_at: '2026-03-01' },
+    ];
+    const result = buildLPSelectionList('session-abc', recentLPs, 'ur');
+    // The old code localised the default English role to "رومی ڈیجیٹل کوچ"
+    // (Rumi in Urdu script). On the NIETE fork the Urdu default must be NIETE.
+    expect(result.listData.footer.text).not.toMatch(/رومی/);
+    expect(result.listData.footer.text).toBe('NIETE ڈیجیٹل کوچ');
   });
 
   test('SCENARIO: Region routing swaps the footer to "Human Coach" for ICT / NIETE', () => {

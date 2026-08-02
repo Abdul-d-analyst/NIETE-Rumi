@@ -186,6 +186,42 @@ beforeEach(() => {
   jest.doMock('bcryptjs', () => ({ hash: jest.fn(), compare: jest.fn(), genSalt: jest.fn() }), { virtual: true });
   jest.doMock('express-rate-limit', () => jest.fn(() => (_req, _res, next) => next()), { virtual: true });
   jest.doMock('@aws-sdk/client-s3', () => ({ S3Client: jest.fn(), GetObjectCommand: jest.fn() }), { virtual: true });
+
+  // bd-2469 — the portal no longer decides any of this; it asks the bot over
+  // HTTP. Here the hop is replaced by an in-process call to the REAL bot
+  // functions, driven by the SAME fixture. That is deliberately not a stub:
+  // every assertion below still exercises the genuine unlock rules, and it now
+  // also proves the portal delegates instead of keeping its own copy. The
+  // wire itself is covered separately in tests/portal/training-rules-client
+  // and tests/routes/internal-training-api.
+  jest.doMock('../../bot/shared/config/supabase', () => ({ from: supabaseFrom, rpc: jest.fn() }));
+  jest.doMock('../../bot/shared/utils/logger', () => ({ logToFile: jest.fn() }));
+  jest.doMock('../../bot/shared/utils/structured-logger', () => ({
+    logEvent: jest.fn(), getCurrentCorrelationId: () => null,
+    logger: { info: jest.fn(), error: jest.fn(), warn: jest.fn() },
+  }));
+  jest.doMock('../../bot/shared/services/whatsapp.service', () => ({
+    sendMessage: jest.fn().mockResolvedValue(true),
+    sendInteractiveButtons: jest.fn().mockResolvedValue(true),
+    sendInteractiveMessage: jest.fn().mockResolvedValue(true),
+  }));
+  jest.doMock('dotenv', () => ({ config: () => ({ parsed: {} }) }), { virtual: true });
+  jest.doMock('pdfkit', () => jest.fn(), { virtual: true });
+  jest.doMock('bullmq', () => ({ Queue: jest.fn(), Worker: jest.fn() }), { virtual: true });
+  jest.doMock('aws-sdk', () => ({ SQS: jest.fn() }), { virtual: true });
+  jest.doMock('exceljs', () => ({ Workbook: jest.fn() }), { virtual: true });
+  jest.doMock('@aws-sdk/s3-request-presigner', () => ({ getSignedUrl: jest.fn() }), { virtual: true });
+  process.env.OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || 'test-key';
+  jest.doMock('../../dashboard/services/training-rules.service', () => {
+    const bot = require('../../bot/shared/routes/teacher-training-endpoint');
+    return {
+      getLevelStates: (uid) => bot.loadVisibleLevelsWithProgress(uid),
+      checkLevelUnlocked: (uid, levelId) => bot.checkLevelUnlocked(uid, levelId),
+      checkModuleUnlocked: (uid, moduleId) => bot.checkModuleUnlocked(uid, moduleId),
+      checkExamGate: (uid, order, vendorKey) => bot.assertCanStartGrandQuiz(uid, order, vendorKey),
+      getGrandQuizState: (uid, levelId) => bot.loadGrandQuizState(uid, levelId),
+    };
+  });
 });
 
 afterEach(() => jest.resetModules());
@@ -216,7 +252,7 @@ describe('GET /training/levels — unlock_logic-aware lockdown', () => {
   });
 
   it('unlocks the chain vendor level once the previous level is passed', async () => {
-    seedLevels({ attempts: [{ level_id: 1, status: 'passed', is_passed: true, cooldown_until: null, completed_at: '2026-07-01' }] });
+    seedLevels({ attempts: [{ level_id: 1, status: 'passed', is_passed: true, quiz_kind: 'grand', cooldown_until: null, completed_at: '2026-07-01' }] });
     const { payload } = await invoke('/training/levels', { userId: 'user-1' });
     expect(stateOf(payload, 1)).toBe('certified');
     expect(stateOf(payload, 2)).toBe('not_started'); // unlocked, no progress yet
@@ -236,7 +272,26 @@ describe('GET /training/levels — unlock_logic-aware lockdown', () => {
     expect(stateOf(payload, 2)).toBe('locked');
   });
 
-  it('defaults to chain when the level has no matching vendor row (legacy behaviour)', async () => {
+  /**
+   * BEHAVIOUR CHANGE, bd-2480 — a level with no vendor row is no longer locked.
+   *
+   * This was the third divergence between the two surfaces, and the two
+   * defaults were exact opposites:
+   *
+   *   portal   (vendor?.unlock_logic || 'chain') === 'chain'   -> LOCKED
+   *   bot       vendor?.unlock_logic === 'chain'               -> open
+   *
+   * The migration makes the bot authoritative, so the bot's default wins and
+   * the portal now matches WhatsApp. That is a real change in what teachers
+   * see, not just a refactor.
+   *
+   * It is also the safer of the two. A missing vendor row is a data-integrity
+   * fault, and the portal's answer was to lock every level under it — turning
+   * one bad row into a total block for every teacher in that programme, with
+   * a message telling them to pass a level that may not exist. The bot leaves
+   * them open, which fails toward the teacher being able to work.
+   */
+  it('does NOT lock a level whose vendor row is missing — matches the bot (bd-2480)', async () => {
     seedLevels();
     tableStates.training_levels.rows = [
       { id: 21, name: 'Legacy-L1', order_index: 0, vendor_id: 'vendor-unknown', is_active: true, training_vendors: { key: 'X' } },
@@ -244,7 +299,7 @@ describe('GET /training/levels — unlock_logic-aware lockdown', () => {
     ];
     const { payload } = await invoke('/training/levels', { userId: 'user-1' });
     expect(stateOf(payload, 21)).toBe('not_started');
-    expect(stateOf(payload, 22)).toBe('locked');
+    expect(stateOf(payload, 22)).toBe('not_started');
   });
 });
 

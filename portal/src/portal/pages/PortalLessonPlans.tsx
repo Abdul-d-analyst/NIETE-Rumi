@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { WHATSAPP_URL } from '@/lib/whatsapp';
 import { FileText, Presentation, BookOpen } from 'lucide-react';
 import PortalLayout from '../components/PortalLayout';
 import LessonPlanCard from '../components/LessonPlanCard';
@@ -163,7 +164,7 @@ const PortalLessonPlans = () => {
               : `No ${filter === 'lesson_plan' ? 'lesson plans' : 'presentations'} found`
             }
             actionLabel="Open WhatsApp"
-            actionHref="https://wa.me/message/WCYNS4DTDB2MD1"
+            actionHref={WHATSAPP_URL}
           />
         )}
       </div>

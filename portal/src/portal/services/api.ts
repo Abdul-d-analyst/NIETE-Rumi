@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { getApiBaseUrl } from '@/lib/runtime';
-import type { User, DashboardStats, LessonPlan, CoachingSession, SessionDetail, CoachingAnalytics, Pagination, VideoRequest, VideoDetail } from '../types/portal';
+import type { User, DashboardStats, LessonPlan, CoachingSession, SessionDetail, CoachingAnalytics, Pagination, VideoRequest, VideoDetail, LeaderOverview, LeaderPatchTeacher, LeaderTeacherDetail, LeaderObservationsData } from '../types/portal';
 import type { ReadingAssessment, ReadingAssessmentDetail, ReadingStats } from '../types/readingAssessment';
 
 // On the web, frontend and backend share a domain, so a relative URL avoids
@@ -159,6 +159,101 @@ export const portal = {
     video: VideoDetail;
   }> => {
     const response = await api.get(`/video/${id}`);
+    return response.data;
+  },
+
+  // bd-2460 — what this deployment currently offers. Fail-closed on the server,
+  // and fail-closed here too: if the call fails we assume the feature is off
+  // rather than rendering a form that would 503 on submit.
+  getConfig: async (): Promise<PortalConfig> => {
+    try {
+      const response = await api.get('/config');
+      return response.data;
+    } catch {
+      return {
+        success: true,
+        features: {
+          assessmentGenerator: false,
+          assessmentGeneratorMessage:
+            "The assessment generator is being prepared for you. We'll notify you when it's live.",
+        },
+      };
+    }
+  },
+
+  // Assessment Generator (browser surface for the UG_EG-backed engine).
+  // generate → { jobId }; then poll getAssessmentStatus until completed/failed.
+  generateAssessment: async (
+    spec: AssessmentSpec
+  ): Promise<{ success: boolean; jobId?: string; error?: string }> => {
+    const response = await api.post('/assessment/generate', spec);
+    return response.data;
+  },
+
+  getAssessmentStatus: async (
+    jobId: string,
+    format: 'pdf' | 'docx' = 'pdf'
+  ): Promise<AssessmentStatus> => {
+    const response = await api.get(`/assessment/status/${jobId}`, { params: { format } });
+    return response.data;
+  },
+};
+
+// ── Portal config ─────────────────────────────────────────────────────────
+export type PortalConfig = {
+  success: boolean;
+  features: {
+    assessmentGenerator: boolean;
+    assessmentGeneratorMessage: string | null;
+  };
+};
+
+// ── Assessment Generator types ────────────────────────────────────────────
+export type AssessmentQuestionType = {
+  id: string;
+  count: number;
+  category?: 'objective' | 'subjective';
+};
+
+export type AssessmentSpec = {
+  generationType: 'exam' | 'class_assessment';
+  grade: number;
+  subject: string;
+  pageRanges: string;
+  contentSource: 'seen' | 'unseen';
+  questionTypes: AssessmentQuestionType[];
+  format?: 'pdf' | 'docx';
+};
+
+export type AssessmentStatus = {
+  success: boolean;
+  status: 'pending' | 'processing' | 'completed' | 'failed';
+  downloadUrl?: string;
+  filename?: string;
+  error?: string;
+};
+
+// Leader Portal endpoints (bd-2434) — school-leader family only.
+// The backend gate 403s non-leaders; the frontend also hides these via isLeader.
+export const leader = {
+  getOverview: async (): Promise<{ success: boolean; overview: LeaderOverview }> => {
+    const response = await api.get('/leader/overview');
+    return response.data;
+  },
+
+  getTeachers: async (): Promise<{ success: boolean; total: number; onRumi: number; teachers: LeaderPatchTeacher[] }> => {
+    const response = await api.get('/leader/teachers');
+    return response.data;
+  },
+
+  getTeacher: async (id: string): Promise<{ success: boolean } & LeaderTeacherDetail> => {
+    const response = await api.get(`/leader/teacher/${id}`);
+    return response.data;
+  },
+
+  // bd-2455 — upcoming schedules + pending debriefs + completed observations.
+  getObservations: async (): Promise<{ success: boolean; observations: LeaderObservationsData }> => {
+    const response = await api.get('/leader/observations');
     return response.data;
   }
 };

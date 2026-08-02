@@ -114,6 +114,27 @@ async function getBrowser() {
 }
 
 /**
+ * bd-2406/2407 — deterministically load every declared @font-face before a
+ * capture (PDF or screenshot). `document.fonts.ready` alone resolves once the
+ * fonts *currently in the loading set* finish — but a large @font-face that
+ * layout hasn't forced yet may not be in that set, so `.ready` returns early
+ * and the capture fires before the glyphs exist. On macOS the OS substitutes a
+ * system Urdu font (looks fine); on prod Linux there is no Nastaliq fallback,
+ * so Urdu rendered as empty tofu boxes. Iterating the FontFaceSet and awaiting
+ * each `.load()` forces the request and closes the race on every runtime.
+ * @param {import('playwright-core').Page} page
+ */
+async function ensureFontsLoaded(page) {
+  await page.evaluate(async () => {
+    try {
+      const faces = Array.from(document.fonts);
+      await Promise.all(faces.map((f) => f.load().catch(() => {})));
+    } catch (_) { /* FontFaceSet not iterable — fall through to ready */ }
+    await document.fonts.ready;
+  });
+}
+
+/**
  * Convert an HTML string to a PDF buffer.
  *
  * Waits for `document.fonts.ready` before PDF capture so embedded
@@ -136,8 +157,9 @@ async function htmlToPdf(html, options = {}) {
       waitUntil: 'networkidle',
       timeout: options.timeout || 30000,
     });
-    // Critical for embedded base64 fonts: glyphs render blank otherwise.
-    await page.evaluate(() => document.fonts.ready);
+    // bd-2406/2407 — force every embedded @font-face to load before capture
+    // (document.fonts.ready alone races on large lazily-referenced fonts).
+    await ensureFontsLoaded(page);
 
     const pdfBuffer = await page.pdf({
       format: 'A4',
@@ -187,8 +209,14 @@ async function htmlToImage(html, options = {}) {
   const page = await ctx.newPage();
   try {
     await page.setContent(html, { waitUntil: 'domcontentloaded', timeout });
-    // Critical for embedded base64 fonts: glyphs render blank otherwise.
-    await page.evaluate(() => document.fonts.ready);
+    // bd-2406/2407 — force EVERY declared @font-face to actually load before
+    // the screenshot. `document.fonts.ready` alone can resolve before a
+    // lazily-referenced large font (the 1.1 MB Noto Nastaliq Urdu) has even
+    // been requested, so Urdu rendered as tofu on prod Linux (which has no
+    // system Nastaliq fallback) while looking fine on macOS (CoreText
+    // substitutes a system Urdu font). Explicitly loading each FontFace and
+    // awaiting it closes the race on every runtime.
+    await ensureFontsLoaded(page);
 
     const el = selector ? await page.$(selector) : null;
     const target = el || page;
@@ -228,4 +256,4 @@ process.on('exit', () => {
 process.on('SIGINT', () => closeBrowser().finally(() => process.exit()));
 process.on('SIGTERM', () => closeBrowser().finally(() => process.exit()));
 
-module.exports = { htmlToPdf, htmlToImage, closeBrowser };
+module.exports = { htmlToPdf, htmlToImage, closeBrowser, ensureFontsLoaded };

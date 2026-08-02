@@ -2,9 +2,10 @@
  * Teacher Training — Content Delivery Service
  *
  * Given a teacher + course, find the next unfinished module and deliver it
- * to WhatsApp: video from R2, caption with module title/progress, and a
- * "✓ Done" button that marks the module complete on tap and auto-delivers
- * the next one.
+ * to WhatsApp: video from R2 (or PDF), caption with module title/progress,
+ * and a CTA button whose label depends on whether a quick check gates the
+ * module — "📝 Take quiz" if it does, "▶ Next video" if it doesn't. See
+ * moduleCta below; bd-2446 for why that distinction is load-bearing.
  *
  * State lives in `teacher_training_progress` (user_id, module_id, completed_at).
  * Position within a course is derived — always the lowest order_index module
@@ -16,6 +17,10 @@ const WhatsAppService = require('../whatsapp.service');
 const { getPresignedUrl } = require('../../storage/r2');
 const { logToFile } = require('../../utils/logger');
 const { logEvent } = require('../../utils/structured-logger');
+// bd-2390 — the single writer for teacher_training_progress. Lives in its own
+// module so quiz-delivery can record a completion without requiring this file
+// (which requires quiz-delivery back).
+const { markModuleComplete, countActiveQuestions } = require('./progress.service');
 
 /**
  * A module is delivered as a PDF (not a video) when it has no video_url but
@@ -29,6 +34,56 @@ function isPdfModule(m) {
   if (m.video_url) return false;
   if (!m.source_media_url) return false;
   return /\.pdf(\?|$)/i.test(m.source_media_url);
+}
+
+/**
+ * bd-2446 — every teacher-facing string about "what happens when you tap" is
+ * generated here, from the two facts that decide it: what the module ships
+ * (video / PDF / nothing yet) and whether a quick check gates it.
+ *
+ * The bug this replaces: bd-2390 made the quiz a gate, so on a quizzed module
+ * the tap opens a quiz and delivers no video — but the button still read
+ * "▶ Next video" and the caption still told teachers to tap "✓ Done", a button
+ * that had not existed since before bd-2390. Three strings, three different
+ * stories, none of them what the handler does. Deriving all of them from one
+ * predicate is what stops them drifting apart again.
+ *
+ * @param {object} m training_modules row
+ * @param {boolean} hasQuiz whether an active quick check gates this module
+ * @param {boolean} [reviewMode] re-watching an already-completed module
+ * @returns {{title: string, body: string, trailer: string}}
+ *   title   — the button label (WhatsApp caps these at 20 chars)
+ *   body    — the interactive-button body ("Finished watching …?")
+ *   trailer — the caption's closing line, telling them what the tap does
+ */
+function moduleCta(m, hasQuiz, reviewMode = false) {
+  const kind = isPdfModule(m) ? 'pdf' : (m?.video_url ? 'video' : 'none');
+  const verb = {
+    pdf: { imperative: 'Read the PDF', finished: 'Finished reading' },
+    video: { imperative: 'Watch the video', finished: 'Finished watching' },
+    none: { imperative: null, finished: null },
+  }[kind];
+
+  // "▶ Next video" is only honest on a video module — the Beacon House corpus
+  // is 155 PDFs, where the next thing to arrive is a document, not a video.
+  const title = hasQuiz
+    ? '📝 Take quiz'
+    : (kind === 'video' ? '▶ Next video' : '➡ Next module');
+  // A quizzed tap does not hand over the next module — passing it does.
+  // The "Next module" label already names the outcome, so don't repeat it.
+  const outcome = hasQuiz
+    ? ' — passing it unlocks the next module.'
+    : (kind === 'video' ? ' for the next module.' : ' to continue.');
+
+  const trailer = verb.imperative
+    ? `${reviewMode ? `${verb.imperative} again to review` : verb.imperative}, then tap ${title}${outcome}`
+    : `Tap ${title}${outcome}`;
+
+  const body = verb.finished
+    ? `${verb.finished} "${m.title}"?`
+    : `Ready to continue with "${m.title}"?`;
+
+  return { title, body, trailer };
 }
 
 /**
@@ -183,9 +238,15 @@ async function deliverNextModule(userId, courseId, phoneNumber) {
     positionLabel = state.positionLabel;
   }
 
+  // bd-2446 — the CTA has to know whether a quick check gates this module
+  // before it can name the button honestly. Same predicate handleModuleDone
+  // branches on, so the label always matches the tap.
+  const hasQuiz = (await countActiveQuestions(m.id)) > 0;
+  const cta = moduleCta(m, hasQuiz, reviewMode);
+
   const caption = reviewMode
-    ? `📘 *${courseTitle}* — ${positionLabel}\n\n*${m.title}*\n\nYou've already completed this course. Watch again to review, then tap ▶ Next video for the next module.`
-    : `📘 *${courseTitle}* — Module ${positionLabel}\n\n*${m.title}*\n\nWatch the video, then tap ✓ Done to mark it complete and get the next module.`;
+    ? `📘 *${courseTitle}* — ${positionLabel}\n\n*${m.title}*\n\nYou've already completed this course. ${cta.trailer}`
+    : `📘 *${courseTitle}* — Module ${positionLabel}\n\n*${m.title}*\n\n${cta.trailer}`;
 
   logToFile('🎓 Delivering training module', { userId, courseId: courseIdNum, moduleId: m.id, moduleTitle: m.title, videoUrl: m.video_url, sourceMediaUrl: m.source_media_url });
 
@@ -215,23 +276,102 @@ async function deliverNextModule(userId, courseId, phoneNumber) {
     logToFile('⚠️ Module has no video_url — sending "no video available" text', { moduleId: m.id, courseId: courseIdNum });
     await WhatsAppService.sendMessage(
       phoneNumber,
-      `📘 *${courseTitle}* — ${positionLabel}\n\n*${m.title}*\n\nNo video is available for this module yet. Tap ▶ Next video to continue.`
+      `📘 *${courseTitle}* — ${positionLabel}\n\n*${m.title}*\n\nNo file is available for this module yet. ${cta.trailer}`
     );
   }
 
-  // Delay the "Next video" button so it lands AFTER the video finishes
-  // fetching + delivering (link-mode is async — Meta acknowledges our API
-  // call in ~200ms but fetches from R2 asynchronously for another 3-6s).
-  // Without this delay the button appears above the video in the chat.
+  // Delay the CTA button so it lands AFTER the video finishes fetching +
+  // delivering (link-mode is async — Meta acknowledges our API call in ~200ms
+  // but fetches from R2 asynchronously for another 3-6s). Without this delay
+  // the button appears above the video in the chat.
   await new Promise(resolve => setTimeout(resolve, 1000));
 
   await WhatsAppService.sendInteractiveButtons(phoneNumber, {
-    body: `Finished watching "${m.title}"?`,
+    body: cta.body,
     buttons: [
-      { id: `training_module_done_${m.id}`, title: '▶ Next video' },
+      { id: `training_module_done_${m.id}`, title: cta.title },
       { id: `training_pause`, title: '⏸ Pause' },
     ],
   });
+  return true;
+}
+
+
+/**
+ * bd-2472/bd-2473 — the single post-completion step.
+ *
+ * A module can complete on either of two paths: the tap, for a module with no
+ * quiz, or gradeAttempt, once the quick check is passed. Everything that must
+ * happen AFTER a module is credited belongs here so it cannot be stranded on
+ * one branch — which is exactly what happened to the capstone offer. It lived
+ * only in the no-quiz branch, and since every Beacon House module has a quiz,
+ * no capstone was ever offered to anyone: 0 attempts in the entire database.
+ *
+ * @param {string} userId
+ * @param {number} moduleId the module just credited
+ * @param {string} phoneNumber
+ */
+async function onModuleCompleted(userId, moduleId, phoneNumber) {
+  // Capstone offer — fire-and-forget, never blocks forward progress. The
+  // service itself checks vendor type, capstone existence, full completion and
+  // prior passes, so calling it after every completion is safe and cheap.
+  {
+    const CapstoneDelivery = require('./capstone-delivery.service');
+    Promise.resolve(CapstoneDelivery.maybeOfferCapstone(userId, moduleId, phoneNumber))
+      .catch((err) => logToFile('⚠️ Non-blocking capstone offer failed', { moduleId, error: err?.message }));
+  }
+  return advanceAfterModule(userId, moduleId, phoneNumber);
+}
+
+/**
+ * bd-2473 — advance within the LEVEL, not the course.
+ *
+ * gradeAttempt used to call deliverNextModule(course_id). Finish the last
+ * module of a course and nothing in that course is incomplete, so it fell into
+ * review mode and re-sent module 1 — a teacher who had just passed the final
+ * module of Beacon House English was shown "Review · 1 of 11".
+ *
+ * Order matches what the Flow renders (course order_index, then module
+ * order_index) so "next" means the same thing in both surfaces.
+ */
+async function advanceAfterModule(userId, moduleId, phoneNumber) {
+  const { data: mod } = await supabase
+    .from('training_modules').select('id, course_id').eq('id', moduleId).maybeSingle();
+  if (!mod?.course_id) {
+    logToFile('⚠️ Completed module has no course_id — cannot advance', { moduleId });
+    return true;
+  }
+  const { data: course } = await supabase
+    .from('training_courses').select('id, level_id').eq('id', mod.course_id).maybeSingle();
+  if (!course?.level_id) return deliverNextModule(userId, mod.course_id, phoneNumber);
+
+  const { data: courses } = await supabase
+    .from('training_courses').select('id, order_index')
+    .eq('level_id', course.level_id).eq('is_active', true);
+  const courseIds = (courses || []).map(c => c.id);
+  const { data: levelModules } = courseIds.length
+    ? await supabase.from('training_modules').select('id, course_id, order_index')
+        .in('course_id', courseIds).eq('is_active', true)
+    : { data: [] };
+  const { data: progress } = await supabase
+    .from('teacher_training_progress').select('module_id').eq('user_id', userId);
+  const done = new Set((progress || []).map(p => p.module_id));
+  const orderOf = new Map((courses || []).map(c => [c.id, c.order_index ?? 0]));
+  const ordered = (levelModules || []).slice().sort((a, b) =>
+    (orderOf.get(a.course_id) - orderOf.get(b.course_id))
+    || (a.course_id - b.course_id)                       // stable across duplicate course order_index
+    || ((a.order_index || 0) - (b.order_index || 0)));
+
+  const next = ordered.find(m => !done.has(m.id));
+  if (next) return deliverModuleById(next.id, phoneNumber, { userId, courseId: next.course_id, reviewMode: false });
+
+  // Level complete. Do NOT loop back to module 1 — say so and let the exam
+  // surface take over (the capstone offer above, or the Flow's exam CTA).
+  logToFile('🎓 Level complete after module', { userId, moduleId, levelId: course.level_id });
+  await WhatsAppService.sendMessage(
+    phoneNumber,
+    "🎉 That's every module in this level complete.\n\nSend /training to take the level exam."
+  );
   return true;
 }
 
@@ -254,44 +394,24 @@ async function handleModuleDone(userId, moduleId, phoneNumber) {
     return false;
   }
 
-  // Upsert progress row (idempotent — safe to double-tap).
-  const { error: pErr } = await supabase
-    .from('teacher_training_progress')
-    .upsert(
-      { user_id: userId, module_id: moduleIdNum, completed_at: new Date().toISOString() },
-      { onConflict: 'user_id,module_id' }
-    );
-  if (pErr) {
-    logToFile('❌ Progress upsert failed', { userId, moduleId: moduleIdNum, error: pErr.message });
-  }
+  // bd-2390 — the module quiz GATES completion; the progress row is no
+  // longer written here. Tapping the module button is a request to move on,
+  // not proof of learning. Previously this handler upserted progress on the
+  // tap and fired the quiz + next module in parallel, so "completed" meant
+  // "tapped the button" — a teacher could tap through a whole course in
+  // seconds and every module read as done (and the certificate services
+  // then issued level certificates off completions nobody earned).
+  //
+  // Now: a module WITH a quiz sends only the quiz and stops. The progress
+  // row and the next module are handled by quiz-delivery.gradeAttempt once
+  // the teacher passes. A module with NO questions keeps the old
+  // tap-completes behaviour — otherwise it could never be finished.
 
-  logToFile('🎓 Module marked done', { userId, moduleId: moduleIdNum, courseId: mod.course_id, title: mod.title });
-
-  // Per-module training quiz (non-blocking).
-  //
-  // If this module has any active questions on training_questions
-  // (training_module_id = mod.id AND is_active), fire the quiz WITHOUT
-  // gating the next module — the teacher sees a short "quick check"
-  // sequence AND the next video keeps flowing. We deliberately don't
-  // await the quiz completion; the button handler will finalize it.
-  //
-  // Decision (non-blocking / parallel):
-  //   - Fire startTrainingQuiz first so Q1 arrives before the next video
-  //     header (WhatsApp preserves send order).
-  //   - Do NOT await it inside the same chain — kick it off with the
-  //     Promise and let it resolve independently. That way an error in
-  //     the quiz never blocks the next module.
-  //   - Only fire when questions actually exist; otherwise skip silently.
-  //
-  // Trade-off: a teacher racing through modules could see Q1 of module N
-  // interleaved with the header of module N+1. In practice the quiz Q1
-  // fires ~200ms before the next-module video URL, and the button reply
-  // model on WhatsApp handles out-of-order taps fine.
-  const { count: quizQCount } = await supabase
-    .from('training_questions')
-    .select('id', { count: 'exact', head: true })
-    .eq('training_module_id', moduleIdNum)
-    .eq('is_active', true);
+  // Does a quick check gate this module? bd-2446 routes this through the
+  // shared countActiveQuestions rather than an inline count, because the
+  // delivery functions call the SAME predicate to label the button. If the
+  // two ever diverged we'd be back to a button that lies about its own tap.
+  const quizQCount = await countActiveQuestions(moduleIdNum);
   const eligPayload = {
     user_uuid: userId,
     module_row_id: moduleIdNum,
@@ -299,61 +419,34 @@ async function handleModuleDone(userId, moduleId, phoneNumber) {
     source: 'module_done',
   };
   logEvent('training_quiz_eligibility_checked', eligPayload);
+
   if (quizQCount && quizQCount > 0) {
     const QuizDelivery = require('./quiz-delivery.service');
-    // Fire-and-forget — kicks Q1 out ahead of the next module video.
-    // Any failure inside the quiz path is logged there; we never block
-    // the teacher's forward progress on it.
-    Promise.resolve(QuizDelivery.startTrainingQuiz(userId, moduleIdNum, phoneNumber))
-      .catch((err) => logToFile('⚠️ Non-blocking training quiz failed', { moduleId: moduleIdNum, error: err?.message }));
-  }
-
-  // BH open-ended capstone offer (bd-2233) — when this module completes the
-  // level for an all_modules vendor, offer the level's Grand Quiz. Fire-and-
-  // forget; never blocks forward progress. The service itself checks vendor
-  // type, capstone existence, full completion, and prior passes.
-  {
-    const CapstoneDelivery = require('./capstone-delivery.service');
-    Promise.resolve(CapstoneDelivery.maybeOfferCapstone(userId, moduleIdNum, phoneNumber))
-      .catch((err) => logToFile('⚠️ Non-blocking capstone offer failed', { moduleId: moduleIdNum, error: err?.message }));
-  }
-
-  // If the teacher is REVIEWING an already-fully-complete course (all modules
-  // had progress rows before this tap), advance to the next module by
-  // order_index instead of falling back to `deliverNextModule` which would
-  // loop back to the first module. When we hit the end, tell them politely.
-  const { data: allMods } = await supabase
-    .from('training_modules')
-    .select('id, order_index')
-    .eq('course_id', mod.course_id)
-    .eq('is_active', true)
-    .order('order_index', { ascending: true });
-  const { data: progressRows } = await supabase
-    .from('teacher_training_progress')
-    .select('module_id')
-    .eq('user_id', userId)
-    .in('module_id', (allMods || []).map(m => m.id));
-  const doneIds = new Set((progressRows || []).map(p => p.module_id));
-  const allDone = (allMods || []).every(m => doneIds.has(m.id));
-
-  if (allDone) {
-    // Review mode: pick the module with order_index strictly greater than
-    // the one we just watched. If none, we've reached the end.
-    const next = (allMods || []).find(m => m.order_index > mod.order_index);
-    if (!next) {
-      await WhatsAppService.sendMessage(
-        phoneNumber,
-        `📘 You've reviewed the whole course. Send /training to pick a different course or check your next level.`
-      );
-      return true;
+    logToFile('🎓 Module quiz gates completion — sending quiz, holding next module', {
+      userId, moduleId: moduleIdNum, questions: quizQCount,
+    });
+    try {
+      await QuizDelivery.startTrainingQuiz(userId, moduleIdNum, phoneNumber);
+    } catch (err) {
+      // If the quiz can't be delivered the teacher would be stranded with no
+      // way forward, so fall back to the legacy tap-completion. Logged loudly
+      // — this is a real failure, not a normal path.
+      logToFile('❌ Module quiz failed to start — falling back to tap-completion', {
+        userId, moduleId: moduleIdNum, error: err?.message,
+      });
+      await markModuleComplete(userId, moduleIdNum);
+      await WhatsAppService.sendMessage(phoneNumber, `✅ *${mod.title}* — marked done. Loading next module…`);
+      return await deliverNextModule(userId, mod.course_id, phoneNumber);
     }
-    // Deliver the next module (bypass "find uncompleted" logic — just send it).
-    return await deliverModuleById(next.id, phoneNumber, { reviewMode: true, courseId: mod.course_id });
+    return true;
   }
 
-  // Normal path — advance through uncompleted modules.
-  await WhatsAppService.sendMessage(phoneNumber, `✅ *${mod.title}* — marked done. Loading next module…`);
-  return await deliverNextModule(userId, mod.course_id, phoneNumber);
+  // No quiz on this module — the tap is the only completion signal available.
+  await markModuleComplete(userId, moduleIdNum);
+  logToFile('🎓 Module marked done (no quiz)', { userId, moduleId: moduleIdNum, courseId: mod.course_id, title: mod.title });
+
+  // bd-2472/2473 — one shared post-completion step for BOTH paths.
+  return onModuleCompleted(userId, moduleIdNum, phoneNumber);
 }
 
 /**
@@ -392,8 +485,10 @@ async function deliverModuleById(moduleId, phoneNumber, opts = {}) {
   const { count: totalCount } = await supabase.from('training_modules').select('id', { count: 'exact', head: true }).eq('course_id', courseId).eq('is_active', true);
   const courseTitle = course?.title || `Course #${courseId}`;
   const label = reviewMode ? `Review · ${m.order_index} of ${totalCount}` : `${m.order_index} of ${totalCount}`;
-  const caption = `📘 *${courseTitle}* — ${label}\n\n*${m.title}*\n\n` +
-    (reviewMode ? 'Watch and tap ▶ Next video to continue reviewing.' : 'Watch and tap ✓ Done for the next module.');
+  // bd-2446 — see deliverNextModule: the button must name what the tap does.
+  const hasQuiz = (await countActiveQuestions(m.id)) > 0;
+  const cta = moduleCta(m, hasQuiz, reviewMode);
+  const caption = `📘 *${courseTitle}* — ${label}\n\n*${m.title}*\n\n${cta.trailer}`;
   if (isPdfModule(m)) {
     // PDF module — send the header caption, then the PDF as a document.
     // See deliverPdfModule for the delivery mechanics.
@@ -413,18 +508,20 @@ async function deliverModuleById(moduleId, phoneNumber, opts = {}) {
     logToFile('⚠️ Module has no video_url — sending "no video available" text (deliverModuleById)', { moduleId: m.id, courseId });
     await WhatsAppService.sendMessage(
       phoneNumber,
-      `📘 *${courseTitle}* — ${label}\n\n*${m.title}*\n\nNo video is available for this module yet. Tap ▶ Next video to continue.`
+      `📘 *${courseTitle}* — ${label}\n\n*${m.title}*\n\nNo file is available for this module yet. ${cta.trailer}`
     );
   }
   await new Promise(resolve => setTimeout(resolve, 1000));
   await WhatsAppService.sendInteractiveButtons(phoneNumber, {
-    body: `Finished watching "${m.title}"?`,
+    body: cta.body,
     buttons: [
-      { id: `training_module_done_${m.id}`, title: '▶ Next video' },
+      { id: `training_module_done_${m.id}`, title: cta.title },
       { id: `training_pause`, title: '⏸ Pause' },
     ],
   });
   return true;
 }
 
-module.exports = { deliverNextModule, handleModuleDone, deliverModuleById, deliverPdfModule, isPdfModule };
+// markModuleComplete is re-exported for the existing callers/tests that reach
+// for it here; progress.service.js is the definition.
+module.exports = { deliverNextModule, handleModuleDone, onModuleCompleted, advanceAfterModule, deliverModuleById, deliverPdfModule, isPdfModule, markModuleComplete };

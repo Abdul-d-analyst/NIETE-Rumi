@@ -86,11 +86,12 @@ function buildGuidePrompt(v2Analysis, options = {}) {
     const prevBlock = previousFocus
       ? `\nPREVIOUS VISIT (cross-session closure): last time the focus was "${previousFocus.title_sw || previousFocus.title || ''}" — the try was "${previousFocus.try_this_tomorrow_sw || previousFocus.try_this_tomorrow || ''}". Step 2 MUST open by returning to that commitment ("Last time you said you would try…") before any new praise — the teacher should see their journey.\n`
       : '';
-    return `You are Rumi, preparing a school officer for their debrief conversation with a teacher they just observed. Build a SHORT 6-step conversation guide from the observation data below (scores have been deliberately removed — the guide must NEVER contain or imply a number, score or percentage).
+    return `You are the NIETE Teaching Assistant, preparing a school officer for their debrief conversation with a teacher they just observed. Build a SHORT 6-step conversation guide from the observation data below (scores have been deliberately removed — the guide must NEVER contain or imply a number, score or percentage).
 
 The 6 steps, in order: (1) open with intent, (2) praise ONE real moment with its evidence — quote the teacher's own words where possible, (3) ask ONE reflective question then STAY SILENT 30–60 seconds, (4) offer exactly ONE improvement framed as a teaching MOVE (never about the person), (5) invite the teacher to say an if-then commitment in their OWN words, (6) agree a return day.
 ${prevBlock}
 Rules: warm, specific, anchored ONLY to real moments in the data — if the data doesn't clearly support a step, keep it generic rather than inventing a moment. Write ALL text in ${langName}. Keep it SHORT: the whole guide, rendered, must stay under ${guideBudget(language)} characters — tight lines, no filler.
+GENDER (mandatory): the officer AND the teacher may each be a man or a woman (مرد بھی ہو سکتے ہیں اور خاتون بھی) — never assume. Every "say_this" line is spoken TO the teacher, so it must be gender-neutral: in Urdu use the respectful آپ-imperative (بتائیں، کریں), past with نے (آپ نے کروایا), or the respectful plural (آپ کرتے ہیں) — NEVER feminine singular stems (کرتی ہیں، کریں گی، سکتی ہیں). The same applies to instructions about the teacher (استاد چاہتے ہیں، not چاہتی ہیں).
 
 Return JSON EXACTLY: { "intro": "<one opening line to the officer>", "steps": [ { "n": 1, "title": "<short title>", "body": "<short instruction to the officer>", "say_this": "<word-for-word example to say>" }, ... 6 steps ... ], "outro": "<closing line: no number to hand over — one true praise and one try>" }
 

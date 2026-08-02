@@ -22,7 +22,11 @@ const { getUserLanguage } = require('../../utils/language-cache');
 const { TEMP_DIR } = require('../../utils/constants');
 const { NUM_REFLECTIVE_QUESTIONS } = require('../../config/coaching-debrief.config');
 const { getCoachingMessage } = require('../../config/coaching-messages');
+const { generateAcknowledgement } = require('./reflective-acknowledgement');
 const path = require('path');
+
+// Language name for the acknowledgement prompt (bd-2374).
+const ACK_LANG_NAME = { en: 'English', ur: 'Urdu', ar: 'Arabic', sw: 'Kiswahili' };
 
 class ReflectiveConversationService {
   /**
@@ -309,18 +313,40 @@ class ReflectiveConversationService {
 
         if (sessionData) {
           const languageCode = await getUserLanguage(sessionData.user_id);
-          // The voice path strips the trailing emoji (TTS reads ":pray:" otherwise);
-          // the text path keeps it.
-          const localised = getCoachingMessage('reflectionsThanks', languageCode);
-          const spokenForm = localised.replace(/\s*🙏\s*$/u, '');
+
+          // bd-2374 + bd-2414: the closing VOICE note is the contextual
+          // acknowledgement — reflecting what SHE said — spoken in HER language,
+          // NOT a generic English "thank you". Best-effort: on any failure we
+          // fall back to a localized thanks (now translated to Urdu). We do NOT
+          // also send the acknowledgement as a separate text message.
+          let ackLine = null;
+          try {
+            const currentQuestion = (questions[questionIndex] && questions[questionIndex].question) || '';
+            ackLine = await generateAcknowledgement(response, currentQuestion, languageCode, {
+              langName: ACK_LANG_NAME[String(languageCode || 'en').slice(0, 2)] || 'English',
+              generator: async (prompt) => {
+                const r = await GPT5MiniService.openai.chat.completions.create({
+                  model: 'gpt-5-mini-2025-08-07',
+                  messages: [{ role: 'user', content: prompt }],
+                });
+                return r.choices?.[0]?.message?.content || '';
+              },
+            });
+          } catch (ackError) {
+            logToFile('⚠️  Reflective acknowledgement failed (non-fatal)', { error: ackError.message });
+          }
+
+          // The voice path strips the trailing emoji (TTS reads ":pray:" otherwise).
+          const closingText = (ackLine && ackLine.trim()) || getCoachingMessage('reflectionsThanks', languageCode);
+          const spokenForm = closingText.replace(/\s*🙏\s*$/u, '');
 
           try {
             const voiceBuffer = await ElevenLabsService.generateSpeechForLanguage(spokenForm, languageCode);
             await WhatsAppService.sendAudio(from, voiceBuffer, TEMP_DIR);
           } catch (voiceError) {
             // Fallback to text if voice fails
-            logToFile('⚠️  Voice generation failed for thank you message, sending text', { error: voiceError.message });
-            await WhatsAppService.sendMessage(from, localised);
+            logToFile('⚠️  Voice generation failed for reflection closer, sending text', { error: voiceError.message });
+            await WhatsAppService.sendMessage(from, closingText);
           }
         } else {
           // Session row missing — language unknown, default to English.

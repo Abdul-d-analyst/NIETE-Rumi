@@ -154,56 +154,115 @@ async function maybeOfferCapstone(userId, moduleId, phoneNumber) {
 // ─── 2. start ───────────────────────────────────────────────────────────────
 
 async function handleCapstoneButton(userId, buttonId, phoneNumber) {
-  const m = new RegExp(`^${BUTTON_PREFIX}(\\d+)$`).exec(buttonId || '');
-  if (!m) return false;
-  const levelId = parseInt(m[1], 10);
+  try {
+    // bd-2476 — this function had FOUR paths that returned false without a word
+    // to the teacher and, in two cases, without a log line either. A tester
+    // tapped "Start Grand Quiz", saw a typing indicator, and got nothing back;
+    // by the time we looked, Railway had already rolled the logs (~3 minutes of
+    // retention on this service) and there was no evidence left to read.
+    // Every exit now logs, and anything unexpected also tells the teacher.
+    logToFile('🎓 Capstone button tapped', { userId, buttonId, phoneNumber });
 
-  const quiz = await loadCapstoneQuiz(levelId);
-  if (!quiz) {
-    logToFile('⚠️ Capstone start for level without capstone', { userId, levelId });
-    return false;
-  }
-  const questions = await loadCapstoneQuestions(quiz.id);
-  if (questions.length === 0) return false;
+    const m = new RegExp(`^${BUTTON_PREFIX}(\\d+)$`).exec(buttonId || '');
+    if (!m) {
+      logToFile('⚠️ Capstone button id did not match the expected shape', { userId, buttonId, expected: `${BUTTON_PREFIX}<levelId>` });
+      return false;
+    }
+    const levelId = parseInt(m[1], 10);
 
-  const { data: assignment } = await supabase
-    .from('teacher_training_assignments')
-    .select('program_id')
-    .eq('user_id', userId)
-    .eq('is_active', true)
-    .limit(1)
-    .maybeSingle();
-  if (!assignment) {
-    await WhatsAppService.sendMessage(phoneNumber, 'No training assignment found — please contact NIETE support.');
+    const quiz = await loadCapstoneQuiz(levelId);
+    if (!quiz) {
+      logToFile('⚠️ Capstone start for level without capstone', { userId, levelId });
+      await WhatsAppService.sendMessage(phoneNumber, 'This level has no written exam set up yet. Please contact NIETE support.');
+      return true;
+    }
+    const questions = await loadCapstoneQuestions(quiz.id);
+    logToFile('🎓 Capstone resolved', { userId, levelId, quizId: quiz.id, questions: questions.length });
+    if (questions.length === 0) {
+      logToFile('⚠️ Capstone has no active questions', { userId, levelId, quizId: quiz.id });
+      await WhatsAppService.sendMessage(phoneNumber, 'This exam has no questions set up yet. Please contact NIETE support.');
+      return true;
+    }
+
+    // bd-2454 — re-check the SAME preconditions maybeOfferCapstone checks before
+    // offering. WhatsApp interactive buttons live in chat history forever, so a
+    // button offered months ago (or offered legitimately and then tapped after
+    // the teacher's progress changed) would otherwise start a capstone with the
+    // level unfinished, or a second one on a level already passed. The offer
+    // being gated is not the same as the start being gated.
+    const { data: alreadyPassed } = await supabase
+      .from('training_assessment_attempts')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('level_id', levelId)
+      .eq('quiz_kind', KIND_CAPSTONE)
+      .eq('is_passed', true)
+      .maybeSingle();
+    if (alreadyPassed) {
+      logToFile('🎓 Capstone start refused — already passed', { userId, levelId });
+      await WhatsAppService.sendMessage(
+        phoneNumber,
+        'You have already passed this level\'s Grand Quiz — your certificate is in your records.'
+      );
+      return true;
+    }
+    if (!(await levelFullyComplete(userId, levelId))) {
+      logToFile('🎓 Capstone start refused — level incomplete', { userId, levelId });
+      await WhatsAppService.sendMessage(
+        phoneNumber,
+        'Finish every module in this level first — the Grand Quiz unlocks once the level is complete.'
+      );
+      return true;
+    }
+
+    const { data: assignment } = await supabase
+      .from('teacher_training_assignments')
+      .select('program_id')
+      .eq('user_id', userId)
+      .eq('is_active', true)
+      .limit(1)
+      .maybeSingle();
+    if (!assignment) {
+      await WhatsAppService.sendMessage(phoneNumber, 'No training assignment found — please contact NIETE support.');
+      return true;
+    }
+
+    const now = new Date().toISOString();
+    const { data: attempt, error } = await supabase
+      .from('training_assessment_attempts')
+      .insert({
+        user_id: userId,
+        program_id: assignment.program_id,
+        quiz_kind: KIND_CAPSTONE,
+        grand_quiz_id: quiz.id,
+        level_id: levelId,
+        current_question_index: 0,
+        total_questions: questions.length,
+        total_score: questions.length * POINTS_PER_QUESTION,
+        status: 'in_progress',
+        started_at: now,
+        last_activity_at: now,
+      })
+      .select('id')
+      .single();
+    if (error || !attempt) {
+      logToFile('❌ Capstone attempt insert failed', { userId, levelId, error: error?.message });
+      return true;
+    }
+
+    logToFile('🎓 Capstone attempt created — sending Q1', { userId, levelId, attemptId: attempt.id, total: questions.length });
+    logEvent('training_capstone_started', { user_uuid: userId, level_row_id: levelId, attempt_uuid: attempt.id });
+    await WhatsAppService.sendMessage(phoneNumber, questionMessage(0, questions.length, questions[0].question_text));
+    return true;
+  } catch (error) {
+    // Never let this present as silence again. The teacher tapped a button;
+    // they get an answer either way, and we get a stack in the logs.
+    logToFile('❌ handleCapstoneButton threw', { userId, buttonId, error: error?.message, stack: String(error?.stack || '').slice(0, 500) });
+    try {
+      await WhatsAppService.sendMessage(phoneNumber, 'Something went wrong starting your exam. Please try again in a moment.');
+    } catch (_) { /* the send itself failed — the log above is what matters */ }
     return true;
   }
-
-  const now = new Date().toISOString();
-  const { data: attempt, error } = await supabase
-    .from('training_assessment_attempts')
-    .insert({
-      user_id: userId,
-      program_id: assignment.program_id,
-      quiz_kind: KIND_CAPSTONE,
-      grand_quiz_id: quiz.id,
-      level_id: levelId,
-      current_question_index: 0,
-      total_questions: questions.length,
-      total_score: questions.length * POINTS_PER_QUESTION,
-      status: 'in_progress',
-      started_at: now,
-      last_activity_at: now,
-    })
-    .select('id')
-    .single();
-  if (error || !attempt) {
-    logToFile('❌ Capstone attempt insert failed', { userId, levelId, error: error?.message });
-    return true;
-  }
-
-  logEvent('training_capstone_started', { user_uuid: userId, level_row_id: levelId, attempt_uuid: attempt.id });
-  await WhatsAppService.sendMessage(phoneNumber, questionMessage(0, questions.length, questions[0].question_text));
-  return true;
 }
 
 // ─── 3. answers ─────────────────────────────────────────────────────────────
@@ -278,7 +337,12 @@ async function routeTextAnswer(phoneNumber, text) {
   }
 
   const { score, feedback } = await scoreAnswer(q, trimmed);
-  await supabase.from('training_assessment_answers').upsert(
+  // bd-2478 — CHECK the write. This upsert silently failed for every capstone
+  // answer ever submitted: is_correct was NOT NULL and a written answer has no
+  // binary correctness, so Postgres rejected all eight rows of the first real
+  // attempt. Nothing checked the error, finalizeAttempt then summed an empty
+  // set, and a teacher who answered well scored 2/40.
+  const { error: answerErr } = await supabase.from('training_assessment_answers').upsert(
     {
       attempt_id: attempt.id,
       question_index: attempt.current_question_index,
@@ -292,6 +356,18 @@ async function routeTextAnswer(phoneNumber, text) {
     },
     { onConflict: 'attempt_id,question_index' }
   );
+  if (answerErr) {
+    // Do not let the teacher keep writing into a void. Their work is not being
+    // recorded and the final score would be wrong; stop here and say so.
+    logToFile('❌ Capstone answer failed to save — aborting the attempt', {
+      attemptId: attempt.id, questionIndex: attempt.current_question_index, error: answerErr.message,
+    });
+    await WhatsAppService.sendMessage(
+      phoneNumber,
+      'Sorry — your answer could not be saved, so I have stopped the exam here rather than score it wrongly. Please contact NIETE support.'
+    );
+    return true;
+  }
   await WhatsAppService.sendMessage(phoneNumber, `📝 *${score}/5* — ${feedback}`);
 
   const nextIdx = attempt.current_question_index + 1;
@@ -318,6 +394,23 @@ async function finalizeAttempt(attempt, user, phoneNumber, { lastScore } = {}) {
   const byIdx = new Map((answers || []).map(a => [a.question_index, a.answer_score || 0]));
   if (lastScore !== undefined && !byIdx.has(attempt.current_question_index - 1)) {
     byIdx.set(attempt.current_question_index - 1, lastScore);
+  }
+  // bd-2478 — a short answer set means rows did not persist, and scoring it
+  // anyway is how a teacher who answered eight questions well was told they
+  // scored 2/40. The lastScore fallback above is for ONE row that may not be
+  // readable yet in the same tick; anything more missing is a fault, not a lag.
+  if (byIdx.size < attempt.total_questions) {
+    logToFile('❌ Capstone finalize: answers missing — refusing to score', {
+      attemptId: attempt.id, found: byIdx.size, expected: attempt.total_questions,
+    });
+    await supabase.from('training_assessment_attempts')
+      .update({ status: 'in_progress', last_activity_at: new Date().toISOString() })
+      .eq('id', attempt.id);
+    await WhatsAppService.sendMessage(
+      phoneNumber,
+      'Sorry — some of your answers were not saved, so I cannot score this fairly. Your attempt is still open. Please contact NIETE support.'
+    );
+    return true;
   }
   const score = [...byIdx.values()].reduce((s, v) => s + (v || 0), 0);
   const passBar = Math.ceil(attempt.total_score * PASS_PCT);
@@ -346,19 +439,38 @@ async function finalizeAttempt(attempt, user, phoneNumber, { lastScore } = {}) {
 
   if (isPassed) {
     let certLine = '';
+    let earned = null;
     if (await levelFullyComplete(attempt.user_id, attempt.level_id)) {
-      const cert = await issueCertificate(supabase, {
+      earned = await issueCertificate(supabase, {
         userId: attempt.user_id,
         programId: attempt.program_id,
         levelId: attempt.level_id,
         attemptId: attempt.id,
       });
-      certLine = `\n\n🏆 Your *${cert.level_name}* certificate is earned!\nCertificate code: \`${cert.certificate_code}\`\nYou can also download it from your portal.`;
+      certLine = `\n\n🏆 Your *${earned.level_name}* certificate is earned!\nCertificate code: \`${earned.certificate_code}\`\nYou can also download it from your portal.`;
     }
     await WhatsAppService.sendMessage(
       phoneNumber,
       `🎉 *Grand Quiz passed!*\n\nYour score: *${score}/${attempt.total_score}* (needed ${passBar}).${certLine}`
     );
+
+    // Hand over the actual file. Best effort and strictly after the message:
+    // a certificate whose PDF never rendered (`pdf_r2_key` null) still reaches
+    // the teacher as a code, which is how it has always worked.
+    if (earned && earned.pdf_r2_key) {
+      try {
+        const { sendCertificateDocument } = require('./certificate-pdf.service');
+        await sendCertificateDocument(phoneNumber, {
+          certificate_code: earned.certificate_code,
+          level_name: earned.level_name,
+          pdf_r2_key: earned.pdf_r2_key,
+        });
+      } catch (err) {
+        logToFile('❌ Capstone certificate PDF delivery failed', {
+          certificateCode: earned.certificate_code, error: err.message,
+        });
+      }
+    }
   } else {
     await WhatsAppService.sendMessage(
       phoneNumber,
@@ -376,4 +488,9 @@ module.exports = {
   // exported for the certificate trigger tests
   levelFullyComplete,
   BUTTON_PREFIX,
+  // bd-2489 — the portal's capstone result card used to hardcode "70%". It is
+  // the same number as this constant, which made the copy correct by
+  // coincidence rather than by construction. Exported so the portal endpoint
+  // can send the bar it is ACTUALLY graded against, and the two cannot drift.
+  CAPSTONE_PASS_PCT: PASS_PCT,
 };

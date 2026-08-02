@@ -96,10 +96,15 @@ describe('buildScreenPrefill', () => {
     expect(data.scale).toHaveLength(4);
   });
 
-  test('caps prefill text at 300 chars (D15)', () => {
+  test('caps prefill text at the Meta TextArea limit (600, per bd-2217)', () => {
+    // bd-2217 raised PREFILL_TEXT_CAP 300→600: a 300 cap cut every Evidence note
+    // mid-sentence (Warda + Mubashar, ICT). The Flow TextArea's Meta default is
+    // 600, so that is the belt-and-braces cap. bd-2369 keeps this as a safety net
+    // under the ≤500-char evidence_summary the analysis now emits.
     mockSessionRow.analysis_data.domains.introduction.indicators[0].evidence_sw = 'x'.repeat(900);
     const data = ObserveDraft.buildScreenPrefill(mockSessionRow.analysis_data, 'introduction');
-    expect(data.e_A1_1.length).toBeLessThanOrEqual(300);
+    expect(data.e_A1_1.length).toBeLessThanOrEqual(600);
+    expect(data.e_A1_1.length).toBe(600);
   });
 
   test('missing indicator tolerated → score 0, empty texts', () => {

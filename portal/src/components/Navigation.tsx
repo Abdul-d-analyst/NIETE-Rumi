@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { WHATSAPP_URL } from '@/lib/whatsapp';
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import rumiLogo from "@/assets/rumi-logo.png";
@@ -10,7 +11,7 @@ import WhatsAppIcon from "@/components/icons/WhatsAppIcon";
 const Navigation = () => {
   const { t } = useTranslation();
   const [isScrolled, setIsScrolled] = useState(false);
-  const whatsappUrl = getWhatsAppUrl('https://wa.me/message/WCYNS4DTDB2MD1');
+  const whatsappUrl = getWhatsAppUrl(WHATSAPP_URL);
 
   const handleCtaClickTracking = () => {
     trackCtaClick('navigation');

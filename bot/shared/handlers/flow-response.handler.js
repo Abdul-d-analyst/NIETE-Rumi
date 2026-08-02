@@ -81,6 +81,11 @@ const ENDPOINT_ONLY_FLOWS = [
   { name: 'Student Videos',    envVar: 'STUDENT_VIDEOS_FLOW_ID',    endpoint: '/api/flows/student-videos' },
   { name: 'Pic-to-LP Confirm', envVar: 'PIC_LP_FLOW_ID',            endpoint: '/api/flows/pic-lp' },
   { name: 'Quiz Manager',      envVar: 'QUIZ_FLOW_ID',              endpoint: '/api/flows/quiz' },
+  // Training multi-answer question. Listed here so a submission that reaches
+  // handleFlowResponse (rather than the flowType switch in whatsapp-bot.js,
+  // which owns the real handling) is acknowledged instead of warning "Unknown
+  // flow ID". The answer itself is recorded by that switch — this is a no-op.
+  { name: 'Training MSQ',      envVar: 'TRAINING_MSQ_FLOW_ID',      endpoint: '/api/flows/training-msq' },
 ];
 
 // Legacy reference — keep the symbol exported so any downstream import
@@ -814,8 +819,8 @@ async function handleRegistrationFlow(message, phoneNumber, userId) {
     const userLang = country === 'PK' ? 'ur' : 'en';
 
     const confirmMessagesWithPortal = {
-      en: `Thank you for registering, ${firstName}! You're all set to use Rumi.\n\n🔗 *Set up your Rumi Portal:*\n${portalUrl}\n\nThis link expires in 7 days. What would you like to work on?`,
-      ur: `رجسٹریشن کا شکریہ، ${firstName}! آپ اب Rumi استعمال کر سکتے ہیں۔\n\n🔗 *اپنا Rumi پورٹل سیٹ اپ کریں:*\n${portalUrl}\n\nیہ لنک 7 دنوں میں ختم ہو جائے گی۔ آپ کس پر کام کرنا چاہیں گے؟`
+      en: `Thank you for registering, ${firstName}! You're all set to use NIETE.\n\n🔗 *Set up your NIETE Portal:*\n${portalUrl}\n\nThis link expires in 7 days. What would you like to work on?`,
+      ur: `رجسٹریشن کا شکریہ، ${firstName}! آپ اب NIETE استعمال کر سکتے ہیں۔\n\n🔗 *اپنا NIETE پورٹل سیٹ اپ کریں:*\n${portalUrl}\n\nیہ لنک 7 دنوں میں ختم ہو جائے گی۔ آپ کس پر کام کرنا چاہیں گے؟`
     };
     const confirmMessagesNoPortal = {
       en: `Thank you for registering, ${firstName}! You're all set. What would you like to work on?`,
@@ -891,8 +896,92 @@ async function handleTeacherTrainingFlow(message, phoneNumber, userId) {
     const QuizDelivery = require('../services/training/quiz-delivery.service');
     return await QuizDelivery.startGrandQuiz(userId, levelOrder, phoneNumber);
   }
-  // Default: teacher just closed the flow, or hit an error screen.
+  // bd-2451 — a refusal used to land here and fall through to `return true`,
+  // so the bot said nothing at all. The Flow's SUCCESS screen is terminal, so
+  // from the teacher's side the Flow just closed and the chat stayed silent —
+  // reported as "I tapped the locked one and it never replied to me". The
+  // endpoint now sends the reason out with the closure; relay it.
+  if (trainingAction === 'error') {
+    const reason = payload.error_message;
+    if (reason) {
+      await WhatsAppService.sendMessage(phoneNumber, String(reason));
+    } else {
+      logToFile('⚠️ Training flow closed on error with no error_message', { phoneNumber, userId });
+    }
+    return true;
+  }
+  // Default: teacher just closed the flow.
   return true;
+}
+
+/**
+ * bd-2432 (port of main-bot FEAT-116 bd-2301) — the observe-visit picker
+ * completion. The "Start observation" tap arrives here via the nfm_reply
+ * webhook (flowType 'observe_visit' from the detector). Binds the picked
+ * teacher (VisitHandler 'complete') and sends the capture prompt naming her
+ * and the live framework. Degrades to a plain English prompt on ANY error —
+ * a coach is never dead-ended mid-visit.
+ */
+async function handleObserveVisitFlow(message, phoneNumber, userId) {
+  const { buildVisitCapturePrompt, buildScheduleDoneAck, observeLang } = require('../services/observe/observe-strings');
+  const { getObservePack } = require('../services/observe/observe-framework');
+  const VisitHandler = require('./observe-visit-flow.handler');
+  const WhatsAppService = require('../services/whatsapp.service');
+  try {
+    const responseJson = JSON.parse(message.interactive.nfm_reply.response_json || '{}');
+    const flowToken = responseJson.flow_token || userId;
+    // bd-2444: three exits — 'start' (bind + capture prompt, the legacy path),
+    // 'debrief' (hand off to the chat debrief), 'done' (localized schedule ack).
+    const visitAction = responseJson.observe_visit_action
+      || ((responseJson.step || 'start') === 'start' ? 'start' : null);
+    if (!visitAction) return true; // non-terminal steps are endpoint-side no-ops
+
+    let user = null;
+    try {
+      const { data } = await supabase
+        .from('users')
+        .select('id, role, preferences, preferred_language, region')
+        .eq('id', userId)
+        .single();
+      user = data || null;
+    } catch (_) { /* arm falls back inside the handler */ }
+
+    if (visitAction === 'debrief') {
+      const ObserveDebrief = require('../services/observe/observe-debrief.service');
+      await ObserveDebrief.startDebrief(responseJson.session_id, phoneNumber, user);
+      return true;
+    }
+
+    if (visitAction === 'done') {
+      await WhatsAppService.sendMessage(phoneNumber, buildScheduleDoneAck(observeLang(user || {}), {
+        teacherName: responseJson.teacher_name,
+        date: responseJson.sched_date,
+        slot: responseJson.sched_slot,
+      }));
+      return true;
+    }
+
+    const result = await VisitHandler.handle(userId, 'complete', 'BRIEF', responseJson, flowToken, user);
+
+    const framework = ((getObservePack().key) || 'fico').toUpperCase();
+    const teacherName = result && result.boundTeacher && result.boundTeacher.teacher_name;
+    await WhatsAppService.sendMessage(
+      phoneNumber,
+      buildVisitCapturePrompt(observeLang(user || {}), { teacherName, framework })
+    );
+    return true;
+  } catch (error) {
+    logToFile('❌ observe-visit completion failed — degrading to plain capture prompt', {
+      userId, error: error.message,
+    });
+    try {
+      await WhatsAppService.sendMessage(
+        phoneNumber,
+        '🎙️ When the lesson starts, record it and send me the audio — I\'ll draft the observation form for you.'
+      );
+    } catch (_) { /* nothing left to degrade to */ }
+    return true;
+  }
 }
 
 module.exports = {
@@ -902,6 +991,7 @@ module.exports = {
   handleAttendanceMarkingFlow,
   handleRegistrationFlow,
   handleTeacherTrainingFlow,
+  handleObserveVisitFlow,
   mapLevelToPassageType,
   READING_ASSESSMENT_FLOW_ID,
   ATTENDANCE_SETUP_FLOW_ID,

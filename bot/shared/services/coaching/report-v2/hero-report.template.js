@@ -21,8 +21,8 @@ const ASSET = (p) => {
   catch { return ''; }
 };
 const A = {
-  logoWhite: ASSET('assets/rumi-mark-white.png'),
-  logoNavy: ASSET('assets/rumi-mark-navy.png'),
+  logoWhite: ASSET('assets/niete-mark-ondark.png'),
+  logoNavy: ASSET('assets/niete-mark-onlight.png'),
   lexR: ASSET('fonts/Lexend-Regular.ttf'),
   lexB: ASSET('fonts/Lexend-Bold.ttf'),
   frauR: ASSET('fonts/Fraunces-Regular.ttf'),
@@ -31,6 +31,45 @@ const A = {
   nastB: ASSET('fonts/NotoNastaliqUrdu-Bold.ttf'),
   naskR: ASSET('fonts/NotoNaskhArabic-Regular.ttf'),
   naskB: ASSET('fonts/NotoNaskhArabic-Bold.ttf'),
+};
+
+/**
+ * Brand palettes (bd-2452). `vm.brand` selects one; default keeps the original
+ * navy/gold design byte-for-byte. `niete` = the NIETE deployment's identity:
+ * Green #47BA7D + Navy Slate #333748 (official wrt. brand book, reconciled in
+ * the niete-brand skill 2026-08-01 — the book navy, NOT the portal charcoal
+ * #32373C). Supporting tints are derived for contrast, not invented brand
+ * colours; the amber/red scorecard-bar colours stay semantic across brands.
+ */
+const PALETTES = {
+  default: {
+    pageBg: '#eef1f7', text: '#1c2438',
+    deep: '#0c1a4e', mid: '#1b2f7a',
+    overlayA: 'rgba(12,26,78,.5)', overlayB: 'rgba(12,26,78,.45)', overlayC: 'rgba(12,26,78,.92)',
+    eyebrow: '#9db0ff', scoreSub: '#bcc8ff', who: '#dfe5ff',
+    ink: '#26304d', inkHead: '#16213e', note: '#5a647e', quiet: '#6a748f', faint: '#8a93ad',
+    barBg: '#e7ebf3', barHigh: '#3aa775',
+    momentBg: '#f7f9ff',
+    pillStrengthBg: '#fff4d6', pillStrengthText: '#9a6b00',
+    pillHorizonBg: '#eef3ff', pillHorizonText: '#1b2f7a',
+    tryGrad: 'linear-gradient(135deg,#0c1a4e,#1b2f7a)', tryLabel: '#9db0ff',
+    footBorder: '#eef0f6',
+    trendArea: 'rgba(245,179,1,.16)', trendPeak: '#f5b301',
+  },
+  niete: {
+    pageBg: '#eef1f0', text: '#232733',
+    deep: '#333748', mid: '#2f7d55',
+    overlayA: 'rgba(51,55,72,.5)', overlayB: 'rgba(51,55,72,.45)', overlayC: 'rgba(51,55,72,.92)',
+    eyebrow: '#a9e3c4', scoreSub: '#c6e9d5', who: '#e2e5ea',
+    ink: '#2b3040', inkHead: '#232735', note: '#5a6272', quiet: '#6a7284', faint: '#8a92a0',
+    barBg: '#e8ece9', barHigh: '#47BA7D',
+    momentBg: '#f3faf6',
+    pillStrengthBg: '#e4f5ec', pillStrengthText: '#1f7a4b',
+    pillHorizonBg: '#eceef2', pillHorizonText: '#333748',
+    tryGrad: 'linear-gradient(135deg,#333748,#47BA7D)', tryLabel: '#a9e3c4',
+    footBorder: '#eaeeeb',
+    trendArea: 'rgba(71,186,125,.16)', trendPeak: '#47BA7D',
+  },
 };
 
 const MARKS_WORD = { sw: ' alama', en: ' marks', ur: ' نمبر', ar: ' درجة' };
@@ -63,7 +102,7 @@ function fontFaces() {
 }
 
 /** Always-LTR trend with English date labels, regardless of report language. */
-function ltrTrend(points, peak, w = 700, h = 110) {
+function ltrTrend(points, peak, P, w = 700, h = 110) {
   if (!points || points.length < 2) return '';
   const pad = 24, lo = 35, hi = 95, base = h - 28;
   const xs = (i) => pad + (i * (w - pad * 2)) / (points.length - 1);
@@ -73,10 +112,10 @@ function ltrTrend(points, peak, w = 700, h = 110) {
   const peakI = points.findIndex((p) => p.pct === peak);
   const mon = (d) => { const x = new Date(String(d) + 'T00:00:00'); return Number.isNaN(x.getTime()) ? '' : `${x.getDate()} ${EN_MON[x.getMonth()]}`; };
   const dots = points.map((p, i) =>
-    `<circle cx="${xs(i)}" cy="${ys(p.pct)}" r="${i === peakI ? 6 : 4}" fill="${i === peakI ? '#f5b301' : '#0c1a4e'}"/>`
-    + (i === peakI ? `<text x="${xs(i)}" y="${ys(p.pct) - 12}" text-anchor="middle" font-size="14" font-weight="700" fill="#0c1a4e" font-family="Lexend">${p.pct}%</text>` : '')
-    + `<text x="${xs(i)}" y="${base + 19}" text-anchor="middle" font-size="12" fill="#8a93ad" font-family="Lexend">${mon(p.date)}</text>`).join('');
-  return `<div style="direction:ltr"><svg viewBox="0 0 ${w} ${h}" width="100%" height="${h}"><polygon points="${area}" fill="rgba(245,179,1,.16)"/><polyline points="${line}" fill="none" stroke="#0c1a4e" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>${dots}</svg></div>`;
+    `<circle cx="${xs(i)}" cy="${ys(p.pct)}" r="${i === peakI ? 6 : 4}" fill="${i === peakI ? P.trendPeak : P.deep}"/>`
+    + (i === peakI ? `<text x="${xs(i)}" y="${ys(p.pct) - 12}" text-anchor="middle" font-size="14" font-weight="700" fill="${P.deep}" font-family="Lexend">${p.pct}%</text>` : '')
+    + `<text x="${xs(i)}" y="${base + 19}" text-anchor="middle" font-size="12" fill="${P.faint}" font-family="Lexend">${mon(p.date)}</text>`).join('');
+  return `<div style="direction:ltr"><svg viewBox="0 0 ${w} ${h}" width="100%" height="${h}"><polygon points="${area}" fill="${P.trendArea}"/><polyline points="${line}" fill="none" stroke="${P.deep}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>${dots}</svg></div>`;
 }
 
 /**
@@ -85,8 +124,13 @@ function ltrTrend(points, peak, w = 700, h = 110) {
  */
 function buildHeroReportHtml(vm) {
   const lang = vm.language || 'en';
+  const P = PALETTES[vm.brand] || PALETTES.default;
   const RTL = lang === 'ur' || lang === 'ar';
-  const C = CHROME[lang] || CHROME.en;
+  // The fixed CHROME (celebration eyebrow, section labels, "one thing to try next
+  // class") always renders in English, even for ur/ar/sw reports. Only the
+  // LLM-generated BODY (affirmation, moment, strength copy) stays in `lang`, and
+  // layout stays RTL for ur/ar. The card heading is chrome, so it is English too.
+  const C = CHROME.en;
   const headFam = RTL ? (lang === 'ar' ? `'NaskhArabic',serif` : `'NastaliqUrdu',serif`) : `'Fraunces',serif`;
   const bodyFam = RTL ? (lang === 'ar' ? `'NaskhArabic',serif` : `'NastaliqUrdu',serif`) : `'Lexend',sans-serif`;
   const dir = RTL ? 'rtl' : 'ltr';
@@ -105,28 +149,28 @@ function buildHeroReportHtml(vm) {
   const peak = (vm.trend && vm.trend.length) ? Math.max(...vm.trend.map((t) => t.pct)) : score.overall;
   const marksLine = (score.marks != null && score.max != null) ? `${score.marks}/${score.max}${MARKS_WORD[lang] || ''}` : '';
   const moment = (n.moments || [])[0];
-  const logo = (b64, cls) => b64 ? `<img class="${cls}" src="data:image/png;base64,${b64}" alt="Rumi">` : '';
+  const logo = (b64, cls) => b64 ? `<img class="${cls}" src="data:image/png;base64,${b64}" alt="NIETE">` : '';
 
   // Domain-altitude scorecard (e.g. MEWAKA: 6 rows w/ proportional bar). Indicator-altitude
   // frameworks render rows the same way (score/max + bar).
   const scorecard = (vm.groups || []).map((g) => `
     <div class="sc-row">
       <div class="sc-h"><span class="sc-n">${T(g.name)}</span><span class="sc-s">${g.score}/${g.max}</span></div>
-      <div class="pbar"><div class="pfill" style="width:${g.pct}%;background:${g.pct >= 80 ? '#3aa775' : g.pct >= 50 ? '#e0a52e' : '#dd7a5c'}"></div></div>
+      <div class="pbar"><div class="pfill" style="width:${g.pct}%;background:${g.pct >= 80 ? P.barHigh : g.pct >= 50 ? '#e0a52e' : '#dd7a5c'}"></div></div>
     </div>`).join('');
 
   return `<!doctype html><html dir="${dir}" lang="${lang}"><head><meta charset="utf-8"><style>${fontFaces()}
   *{margin:0;padding:0;box-sizing:border-box}
-  body{background:#eef1f7}
-  .report{width:794px;background:#fff;font-family:${bodyFam};color:#1c2438}
+  body{background:${P.pageBg}}
+  .report{width:794px;background:#fff;font-family:${bodyFam};color:${P.text}}
   .ltr{font-family:'Lexend',sans-serif;font-weight:600}
   /* hero grows with the affirmation (2-4 lines) — never clipped */
-  .hero{position:relative;min-height:210px;overflow:hidden;background:#0c1a4e;padding:26px 42px 30px}
+  .hero{position:relative;min-height:210px;overflow:hidden;background:${P.deep};padding:26px 42px 30px}
   .hero>.bg{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:.4}
-  .hero::after{content:'';position:absolute;inset:0;background:linear-gradient(180deg,rgba(12,26,78,.5),rgba(12,26,78,.45) 45%,rgba(12,26,78,.92))}
+  .hero::after{content:'';position:absolute;inset:0;background:linear-gradient(180deg,${P.overlayA},${P.overlayB} 45%,${P.overlayC})}
   .hero-in{position:relative;z-index:2;color:#fff}
   .hrow{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:16px;gap:18px}
-  .eyebrow{font-size:12px;letter-spacing:${RTL ? '0' : '.2em'};${RTL ? '' : 'text-transform:uppercase;'}color:#9db0ff;font-weight:700;margin-top:6px}
+  .eyebrow{font-size:12px;letter-spacing:${RTL ? '0' : '.2em'};${RTL ? '' : 'text-transform:uppercase;'}color:${P.eyebrow};font-weight:700;margin-top:6px}
   .logo{width:62px;opacity:.95;display:block}
   /* headline + score share ONE row, top-aligned — the cap of the score sits on the same
      line as the cap of the affirmation's first line. */
@@ -134,31 +178,31 @@ function buildHeroReportHtml(vm) {
   .hero h1{font-family:${headFam};font-size:${RTL ? '26px' : '31px'};line-height:${RTL ? '1.6' : '1.15'};font-weight:600;flex:1;max-width:560px;margin:0}
   .hscore{flex-shrink:0;text-align:${RTL ? 'left' : 'right'};line-height:1}
   .hscore .p{font-family:'Lexend';font-weight:700;font-size:44px;letter-spacing:-.02em;margin-top:4px}
-  .hscore .s{font-family:'Lexend';font-size:12.5px;color:#bcc8ff;margin-top:6px;letter-spacing:.05em}
-  .who{margin-top:14px;font-size:14px;color:#dfe5ff}.who b{color:#fff}
+  .hscore .s{font-family:'Lexend';font-size:12.5px;color:${P.scoreSub};margin-top:6px;letter-spacing:.05em}
+  .who{margin-top:14px;font-size:14px;color:${P.who}}.who b{color:#fff}
   .pad{padding:${RTL ? '14px' : '13px'} 42px}
-  .identity{font-family:${headFam};font-size:${RTL ? '17px' : '18px'};line-height:${RTL ? '1.6' : '1.45'};color:#26304d;font-weight:400}
+  .identity{font-family:${headFam};font-size:${RTL ? '17px' : '18px'};line-height:${RTL ? '1.6' : '1.45'};color:${P.ink};font-weight:400}
   .cols{display:flex;align-items:flex-start;gap:28px;padding:${RTL ? '8px' : '14px'} 42px 0}
   .col-l{flex:1.25}.col-r{flex:1}
-  .label{font-size:11px;letter-spacing:${RTL ? '0' : '.14em'};${RTL ? '' : 'text-transform:uppercase;'}color:#0c1a4e;opacity:.55;font-weight:700;margin-bottom:13px}
-  .ov{color:#0c1a4e;opacity:1}
+  .label{font-size:11px;letter-spacing:${RTL ? '0' : '.14em'};${RTL ? '' : 'text-transform:uppercase;'}color:${P.deep};opacity:.55;font-weight:700;margin-bottom:13px}
+  .ov{color:${P.deep};opacity:1}
   .sc-row{margin-bottom:12px}
   .sc-h{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:5px}
-  .sc-n{font-size:13px;font-weight:700;color:#1b2f7a}.sc-s{font-family:'Lexend';font-size:13px;font-weight:700;color:#0c1a4e}
-  .pbar{height:8px;border-radius:5px;background:#e7ebf3;overflow:hidden}.pfill{height:100%;border-radius:5px}
-  .moment{background:#f7f9ff;border-radius:14px;padding:16px 18px;margin-bottom:14px}
-  .m-q{font-family:${headFam};font-size:16px;line-height:${RTL ? '1.7' : '1.4'};color:#26304d}
-  .m-w{font-size:12.5px;color:#6a748f;margin-top:6px;line-height:${RTL ? '1.7' : '1.45'}}
-  .sh{margin-bottom:16px}.sh .pill{display:inline-block;font-size:11px;font-weight:700;padding:3px 11px;border-radius:14px;margin-bottom:7px;background:#fff4d6;color:#9a6b00}
-  .sh.h .pill{background:#eef3ff;color:#1b2f7a}
-  .sh h3{font-family:${headFam};font-size:15px;color:#16213e;font-weight:600;margin-bottom:5px;line-height:${RTL ? '1.6' : '1.3'}}
-  .sh .nt{font-size:12.5px;color:#5a647e;line-height:${RTL ? '1.7' : '1.45'}}
-  .journey{padding:14px 42px 0}.j-cap{font-size:12.5px;color:#5a647e;line-height:${RTL ? '1.7' : '1.5'};margin-top:2px}
-  .try{margin:16px 42px 0;background:linear-gradient(135deg,#0c1a4e,#1b2f7a);color:#fff;border-radius:16px;padding:18px 24px}
-  .try .label{color:#9db0ff;opacity:1;margin-bottom:6px}
+  .sc-n{font-size:13px;font-weight:700;color:${P.mid}}.sc-s{font-family:'Lexend';font-size:13px;font-weight:700;color:${P.deep}}
+  .pbar{height:8px;border-radius:5px;background:${P.barBg};overflow:hidden}.pfill{height:100%;border-radius:5px}
+  .moment{background:${P.momentBg};border-radius:14px;padding:16px 18px;margin-bottom:14px}
+  .m-q{font-family:${headFam};font-size:16px;line-height:${RTL ? '1.7' : '1.4'};color:${P.ink}}
+  .m-w{font-size:12.5px;color:${P.quiet};margin-top:6px;line-height:${RTL ? '1.7' : '1.45'}}
+  .sh{margin-bottom:16px}.sh .pill{display:inline-block;font-size:11px;font-weight:700;padding:3px 11px;border-radius:14px;margin-bottom:7px;background:${P.pillStrengthBg};color:${P.pillStrengthText}}
+  .sh.h .pill{background:${P.pillHorizonBg};color:${P.pillHorizonText}}
+  .sh h3{font-family:${headFam};font-size:15px;color:${P.inkHead};font-weight:600;margin-bottom:5px;line-height:${RTL ? '1.6' : '1.3'}}
+  .sh .nt{font-size:12.5px;color:${P.note};line-height:${RTL ? '1.7' : '1.45'}}
+  .journey{padding:14px 42px 0}.j-cap{font-size:12.5px;color:${P.note};line-height:${RTL ? '1.7' : '1.5'};margin-top:2px}
+  .try{margin:16px 42px 0;background:${P.tryGrad};color:#fff;border-radius:16px;padding:18px 24px}
+  .try .label{color:${P.tryLabel};opacity:1;margin-bottom:6px}
   .try-text{font-family:${headFam};font-size:17px;line-height:${RTL ? '1.7' : '1.4'}}
-  .foot{display:flex;align-items:center;justify-content:space-between;padding:16px 42px 24px;margin-top:14px;border-top:1px solid #eef0f6;color:#8a93ad;font-size:12px}
-  .brand{display:flex;align-items:center;gap:8px;font-weight:700;color:#0c1a4e;font-size:15px;font-family:'Lexend'}.brand img{width:30px}
+  .foot{display:flex;align-items:center;justify-content:space-between;padding:16px 42px 24px;margin-top:14px;border-top:1px solid ${P.footBorder};color:${P.faint};font-size:12px}
+  .brand{display:flex;align-items:center;gap:8px;font-weight:700;color:${P.deep};font-size:15px;font-family:'Lexend'}.brand img{width:30px}
   </style></head><body>
   <div class="report">
     <div class="hero">${vm.photoB64 ? `<img class="bg" src="data:image/jpeg;base64,${vm.photoB64}">` : ''}
@@ -183,9 +227,9 @@ function buildHeroReportHtml(vm) {
         <div class="sh h"><span class="pill">${T(C.horizon)}</span><h3>${T(n.horizon_title || '')}</h3><div class="nt">${T(n.horizon_note || '')}</div></div>
       </div>
     </div>
-    ${(vm.trend && vm.trend.length >= 2) ? `<div class="journey"><div class="label">${T(C.journey(vm.trend.length))}</div>${ltrTrend(vm.trend, peak)}<div class="j-cap">${T(n.journey_note || '')}</div></div>` : ''}
+    ${(vm.trend && vm.trend.length >= 2) ? `<div class="journey"><div class="label">${T(C.journey(vm.trend.length))}</div>${ltrTrend(vm.trend, peak, P)}<div class="j-cap">${T(n.journey_note || '')}</div></div>` : ''}
     ${vm.tryNext ? `<div class="try"><div class="label">${T(C.trynext)}</div><div class="try-text">${T(vm.tryNext)}</div></div>` : ''}
-    <div class="foot"><div class="brand">${logo(A.logoNavy, '')}Rumi</div><div>${T(C.made(vm.teacherName || ''))}</div></div>
+    <div class="foot"><div class="brand">${logo(A.logoNavy, '')}NIETE</div><div>${T(C.made(vm.teacherName || ''))}</div></div>
   </div>
   </body></html>`;
 }

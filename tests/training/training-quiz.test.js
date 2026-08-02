@@ -199,25 +199,28 @@ describe('training-module quiz — content-delivery wiring', () => {
     spy.mockRestore();
   });
 
-  it('handleModuleDone does NOT block next-module delivery on quiz completion', async () => {
-    // The training quiz is fire-and-forget — even if it hangs, deliverNextModule
-    // still runs. We simulate a slow quiz and verify handleModuleDone returns
-    // before the quiz resolves.
+  it('handleModuleDone GATES next-module delivery on the quiz (bd-2390)', async () => {
+    // Inverted by bd-2390. The quiz used to be fire-and-forget, so the next
+    // module was delivered in parallel and the progress row was written on
+    // the button tap — "completed" meant "tapped ▶ Next video". The quiz is
+    // now a gate: handleModuleDone sends it and stops. Progress + the next
+    // module are released by gradeAttempt only once the teacher passes.
+    // Full contract: tests/training/module-quiz-gates-progress.test.js
     setupModule();
     setupModuleQuestions(2);
 
-    let quizResolve;
-    const slowQuiz = new Promise((r) => { quizResolve = r; });
-    const spy = jest.spyOn(QuizDelivery, 'startTrainingQuiz').mockReturnValue(slowQuiz);
+    const spy = jest.spyOn(QuizDelivery, 'startTrainingQuiz').mockResolvedValue(true);
 
-    const result = await ContentDelivery.handleModuleDone('user-1', 42, '9203206281951');
+    await ContentDelivery.handleModuleDone('user-1', 42, '9203206281951');
 
-    // handleModuleDone must have returned WITHOUT waiting for the quiz.
-    expect(spy).toHaveBeenCalled();
-    expect(result).not.toBe(undefined);
-    // Now let the quiz resolve — nothing should throw.
-    quizResolve(true);
-    await slowQuiz;
+    expect(spy).toHaveBeenCalledWith('user-1', 42, '9203206281951');
+    // No progress row on the tap.
+    const writes = (tableStates.teacher_training_progress?._mutations || [])
+      .filter(m => m.op === 'upsert' || m.op === 'insert');
+    expect(writes).toHaveLength(0);
+    // No "loading next module" announcement — the teacher is held at the quiz.
+    const said = whatsappSend.mock.calls.map(c => String(c[1])).join('\n');
+    expect(said).not.toMatch(/Loading next module/i);
     spy.mockRestore();
   });
 });

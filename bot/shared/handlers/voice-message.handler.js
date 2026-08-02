@@ -22,6 +22,8 @@ const {
 } = require('../database/bot-helpers');
 const { uploadAudio } = require('../storage/r2');
 const supabase = require('../config/supabase');
+const { shouldDeferNewClassroomAudio } = require('../services/coaching/coaching-inflight-guard');
+const { getCoachingMessage } = require('../config/coaching-messages');
 // Import language detection for content generation
 const { detectRequestedLanguage } = require('../utils/language-detection');
 // Language cache for ASR routing based on user preference
@@ -784,6 +786,35 @@ async function handleVoiceMessage(message, from, user = null) {
 
         // Route to classroom coaching flow
         if (user && sessionId) {
+          // bd-2376: if an analysis is ALREADY running for her, a second
+          // recording must NOT start a fresh session and repeat the questions
+          // (M. Salman, ICT, DC-5). Defer with an ack instead; a stale/finished
+          // session still lets a genuine new recording through.
+          try {
+            const { data: latestCoaching } = await supabase
+              .from('coaching_sessions')
+              .select('id, status, created_at')
+              .eq('user_id', user.id)
+              .order('created_at', { ascending: false })
+              .limit(1)
+              .maybeSingle();
+
+            if (shouldDeferNewClassroomAudio(latestCoaching)) {
+              const deferLang = await getUserLanguage(user.id);
+              await WhatsAppService.sendMessage(from, getCoachingMessage('coaching_stillAnalysing', deferLang));
+              logToFile('⏳ New classroom audio deferred — analysis already in flight', {
+                userId: user.id,
+                existingSessionId: latestCoaching.id,
+                status: latestCoaching.status,
+              });
+              return;
+            }
+          } catch (guardErr) {
+            // Non-fatal: if the guard check fails, fall through to normal start
+            // rather than blocking a legitimate recording.
+            logToFile('⚠️ In-flight coaching guard check failed (non-fatal)', { error: guardErr.message });
+          }
+
           await CoachingService.initiateCoachingSession(
             user.id,
             sessionId,
@@ -878,7 +909,7 @@ async function handleVoiceMessage(message, from, user = null) {
     }
 
     // Check for explicit language switch command in voice transcription
-    const { detectLanguageOverride } = require('../utils/language-detector');
+    const { detectLanguageOverride, isMarketLanguage } = require('../utils/language-detector');
 
     // Get current language preference using user ID
     const currentUserLanguage = user ? await getUserLanguage(user.id) : 'en';
@@ -902,8 +933,14 @@ async function handleVoiceMessage(message, from, user = null) {
       });
     }
 
-    // Check if user said a language switch command
-    const overrideLanguage = detectLanguageOverride(transcription);
+    // Check if user said a language switch command. bd-2413 (row 11): only a
+    // MARKET language (en/ur) may flip the conversation; an off-market request
+    // (e.g. Punjabi) is ignored so Rumi stays on en/ur.
+    const rawVoiceOverride = detectLanguageOverride(transcription);
+    const overrideLanguage = isMarketLanguage(rawVoiceOverride) ? rawVoiceOverride : null;
+    if (rawVoiceOverride && !overrideLanguage) {
+      logToFile('🌐 Off-market voice language override ignored (keeping en/ur)', { requested: rawVoiceOverride, userId: user?.id });
+    }
     if (overrideLanguage && overrideLanguage !== currentUserLanguage) {
       // Update user's language preference using user ID
       if (user) {

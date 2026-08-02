@@ -1,15 +1,28 @@
+import { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Home, BookOpen, Library, GraduationCap, MessageSquare, TrendingUp, LogOut } from 'lucide-react';
+import { Home, BookOpen, Library, GraduationCap, MessageSquare, TrendingUp, LogOut, Users, CalendarDays, MoreHorizontal } from 'lucide-react';
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
 import { useAuth } from '../hooks/useAuth';
+import { isLeader } from '../lib/leaderRole';
 import { cn } from '@/lib/utils';
 import nieteLogo from '@/assets/niete-logo.png';
 
 const PortalNavigation = () => {
+  const [moreOpen, setMoreOpen] = useState(false);
   const location = useLocation();
   const { logout, user } = useAuth();
   const currentPath = location.pathname;
 
-  const navItems = [
+  // bd-2434 (Leader Portal): the school-leader family gets the leader nav
+  // (My Patch / Teachers); teachers keep today's nav unchanged. The NIETE logo
+  // + wordmark below are identical for both. Leader-family only.
+  const leaderNav = [
+    { title: 'My Patch', path: '/portal/leader', icon: Home },
+    { title: 'Teachers', path: '/portal/leader/teachers', icon: Users },
+    // bd-2455 — schedule + debriefs + completed observations.
+    { title: 'Observations', path: '/portal/leader/observations', icon: CalendarDays },
+  ];
+  const teacherNav = [
     { title: 'Dashboard', path: '/portal/dashboard', icon: Home },
     { title: 'Curriculum', path: '/portal/curriculum', icon: Library },
     { title: 'Training', path: '/portal/training', icon: GraduationCap },
@@ -17,6 +30,23 @@ const PortalNavigation = () => {
     { title: 'Coaching', path: '/portal/coaching', icon: MessageSquare },
     { title: 'Analytics', path: '/portal/coaching/analytics', icon: TrendingUp },
   ];
+
+  const navItems = isLeader(user) ? leaderNav : teacherNav;
+
+  // bd-2466 — the mobile bar rendered every nav item plus Logout in one flex
+  // row: seven cells for teachers, each ~52px wide on a 360px screen, so the
+  // labels cropped. Keep the four the operator named as primary and put the
+  // rest behind a tray. Desktop is unaffected — it has the width.
+  const MOBILE_PRIMARY = ['Dashboard', 'Curriculum', 'Training', 'Coaching'];
+  const primaryNav = navItems.filter((i) => MOBILE_PRIMARY.includes(i.title));
+  // Anything not named primary overflows — including leader nav, whose titles
+  // don't appear in the list above, so it degrades to "all in the tray" rather
+  // than silently dropping items.
+  const overflowNav = navItems.filter((i) => !MOBILE_PRIMARY.includes(i.title));
+  // Fall back to the first four when nothing matched, so a future rename can
+  // never leave the bar empty.
+  const mobileNav = primaryNav.length > 0 ? primaryNav : navItems.slice(0, 4);
+  const mobileOverflow = primaryNav.length > 0 ? overflowNav : navItems.slice(4);
 
   const isActive = (path: string) => currentPath === path;
 
@@ -67,31 +97,69 @@ const PortalNavigation = () => {
         </div>
       </nav>
 
-      {/* Mobile Navigation - Bottom */}
+      {/* Mobile Navigation - Bottom (bd-2466) */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-border shadow-lg z-50">
         <div className="flex items-center justify-around h-16">
-          {navItems.map((item) => (
+          {mobileNav.map((item) => (
             <Link
               key={item.path}
               to={item.path}
               className={cn(
-                "flex flex-col items-center justify-center gap-1 px-3 py-2 flex-1 transition-colors",
-                isActive(item.path)
-                  ? "text-accent"
-                  : "text-muted-foreground"
+                "flex flex-col items-center justify-center gap-1 px-1 py-2 flex-1 min-w-0 transition-colors",
+                isActive(item.path) ? "text-accent" : "text-muted-foreground"
               )}
             >
-              <item.icon className={cn("w-5 h-5", isActive(item.path) && "text-accent")} />
-              <span className="text-xs">{item.title}</span>
+              <item.icon className={cn("w-5 h-5 shrink-0", isActive(item.path) && "text-accent")} />
+              <span className="text-xs w-full truncate text-center">{item.title}</span>
             </Link>
           ))}
-          <button
-            onClick={logout}
-            className="flex flex-col items-center justify-center gap-1 px-3 py-2 flex-1 text-muted-foreground transition-colors"
-          >
-            <LogOut className="w-5 h-5" />
-            <span className="text-xs">Logout</span>
-          </button>
+
+          <Sheet open={moreOpen} onOpenChange={setMoreOpen}>
+            <SheetTrigger asChild>
+              <button
+                type="button"
+                aria-label="More"
+                data-testid="mobile-nav-more"
+                className={cn(
+                  "flex flex-col items-center justify-center gap-1 px-1 py-2 flex-1 min-w-0 transition-colors",
+                  mobileOverflow.some((i) => isActive(i.path)) ? "text-accent" : "text-muted-foreground"
+                )}
+              >
+                <MoreHorizontal className="w-5 h-5 shrink-0" />
+                <span className="text-xs w-full truncate text-center">More</span>
+              </button>
+            </SheetTrigger>
+            <SheetContent side="bottom" className="rounded-t-xl">
+              <SheetHeader className="text-left">
+                <SheetTitle>More</SheetTitle>
+              </SheetHeader>
+              <div className="mt-4 flex flex-col">
+                {mobileOverflow.map((item) => (
+                  <Link
+                    key={item.path}
+                    to={item.path}
+                    onClick={() => setMoreOpen(false)}
+                    className={cn(
+                      "flex items-center gap-3 rounded-md px-3 py-3 text-sm transition-colors",
+                      isActive(item.path) ? "text-accent bg-accent/10" : "text-foreground hover:bg-muted"
+                    )}
+                  >
+                    <item.icon className="w-5 h-5 shrink-0" />
+                    <span className="truncate">{item.title}</span>
+                  </Link>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => { setMoreOpen(false); logout(); }}
+                  data-testid="mobile-nav-logout"
+                  className="flex items-center gap-3 rounded-md px-3 py-3 text-sm text-muted-foreground hover:bg-muted transition-colors"
+                >
+                  <LogOut className="w-5 h-5 shrink-0" />
+                  <span>Logout</span>
+                </button>
+              </div>
+            </SheetContent>
+          </Sheet>
         </div>
       </nav>
     </>

@@ -41,14 +41,22 @@ const KIE_API_KEY = process.env.KIE_API_KEY;
 // Pic-to-LP uses a dedicated Kie.ai key for rate-limit isolation; falls back
 // to the shared KIE_API_KEY when a feature-specific key isn't set.
 const KIE_API_KEY_PIC_LP = process.env.KIE_API_KEY_PIC_LP || process.env.KIE_API_KEY;
-// R2 object key for the Rumi brand mark used as the header logo in generated LPs.
-const RUMI_LOGO_R2_KEY = process.env.RUMI_LOGO_R2_KEY || 'brand/rumi-white-smile-v1.png';
+// R2 object key for the NIETE brand mark used as the header logo in generated LPs.
+// Defaults to the padded NIETE "N" mark (brand/niete-mark-ondark-v1.png, uploaded
+// to this deployment's R2 bucket) so the fork is correct-by-default without a
+// Railway env var; still overridable via RUMI_LOGO_R2_KEY. The padded variant
+// carries ~21% transparent margin so the mark never crops in the LP header bar.
+const RUMI_LOGO_R2_KEY = process.env.RUMI_LOGO_R2_KEY || 'brand/niete-mark-ondark-v1.png';
 // WhatsApp Flow ID for the pic-to-LP confirmation form (empty → text fallback).
 const PIC_LP_FLOW_ID = process.env.PIC_LP_FLOW_ID || '';
 // WhatsApp Flow ID for the Quiz Manager form (empty → text fallback / direct path).
 const QUIZ_FLOW_ID = process.env.QUIZ_FLOW_ID || '';
 // WhatsApp Flow ID for the Teacher Training home + level detail (empty → text fallback).
 const TEACHER_TRAINING_FLOW_ID = process.env.TEACHER_TRAINING_FLOW_ID || '';
+// WhatsApp Flow ID for multi-answer ("select all that apply") training quiz
+// questions. Empty → those questions fall back to the interactive-list +
+// "Done" delivery. Clearing this env var is the rollback lever for the Flow.
+const TRAINING_MSQ_FLOW_ID = process.env.TRAINING_MSQ_FLOW_ID || '';
 // WhatsApp Flow ID for the Exam Generator (empty → /exam is disabled and replies with a hint).
 const EXAM_GENERATOR_FLOW_ID = process.env.EXAM_GENERATOR_FLOW_ID || '';
 // WhatsApp Flow ID for the Assessment Generator Service (Orenda-Project/UG_EG).
@@ -81,6 +89,13 @@ const TEST_ENTRY_IDS = ['0', 0, null, undefined];
 // Timeout Constants
 const SONIOX_V3_TIMEOUT = 180; // 3 minutes
 const SONIOX_V2_TIMEOUT = 120; // 2 minutes
+
+// Soniox async model cascade (bd-2377, FEAT-106 #1). stt-async-v3 was RETIRED by
+// Soniox on 2026-02-28 — the code's old primary was a dead model. The current
+// recommended async model is stt-async-v5 (released 2026-06-11); stt-async-v4
+// aliases to v5. Env-overridable so a future model rename is a config fix.
+const SONIOX_PRIMARY_MODEL = process.env.SONIOX_PRIMARY_MODEL || 'stt-async-v5';
+const SONIOX_BACKUP_MODEL = process.env.SONIOX_BACKUP_MODEL || 'stt-async-v4';
 const GAMMA_MAX_ATTEMPTS = 60; // Maximum polling attempts for Gamma
 const GAMMA_POLL_INTERVAL = 5000; // 5 seconds between polls
 const KIE_MAX_ATTEMPTS = 60;    // Maximum polling attempts for Kie.ai (8s × 60 = 8 min ceiling)
@@ -102,6 +117,11 @@ const UPLIFT_BALOCHI_VOICE_ID = process.env.UPLIFT_VOICE_ID_BAL || 'v_bl1de2f7';
 const ELEVENLABS_VOICE_ID = process.env.ELEVENLABS_VOICE_ID || 'cgSgspJ2msm6clMCkdW9'; // Jessica voice (English)
 const ELEVENLABS_SPANISH_VOICE_ID = process.env.ELEVENLABS_VOICE_ID_ES || 'vYui54mlc1I9tFZBBz4i'; // Cony Iglesias (Spanish)
 const ELEVENLABS_ARABIC_VOICE_ID = process.env.ELEVENLABS_VOICE_ID_AR || '4wf10lgibMnboGJGCLrP'; // Farah (Arabic)
+// bd-2375 (FEAT-106 #4b): Urdu coaching voice is Sara — "Warm Storyteller, Urdu &
+// Hindi" on eleven_v3. This is the canonical Urdu voice locked by the LP-voicenotes
+// V20 work (Jessica + Roman-Urdu was wrong; Sara + Nastaliq is right). Replaces the
+// Uplift "Info/Education" voice that mangled code-switched English tokens.
+const ELEVENLABS_URDU_VOICE_ID = process.env.ELEVENLABS_VOICE_ID_UR || '9cI5mhBtM4WtQ9Fo6jWQ'; // Sara (Urdu)
 
 // Voice Model Routing Configuration
 // Tier 1: Full support (coaching + reading assessment)
@@ -109,7 +129,7 @@ const ELEVENLABS_ARABIC_VOICE_ID = process.env.ELEVENLABS_VOICE_ID_AR || '4wf10l
 const VOICE_MODELS = {
   // Tier 1: Full support
   en: { provider: 'elevenlabs', voiceId: ELEVENLABS_VOICE_ID, supportsEmotionTags: true, tier: 1 },
-  ur: { provider: 'uplift', voiceId: UPLIFT_VOICE_ID, supportsEmotionTags: false, tier: 1 },
+  ur: { provider: 'elevenlabs', voiceId: ELEVENLABS_URDU_VOICE_ID, supportsEmotionTags: false, tier: 1 }, // Sara / eleven_v3 (was Uplift v_8eelc901 — bd-2375)
 
   // Tier 2: Coaching only
   es: { provider: 'elevenlabs', voiceId: ELEVENLABS_SPANISH_VOICE_ID, supportsEmotionTags: true, tier: 2 },
@@ -164,6 +184,7 @@ module.exports = {
   PIC_LP_FLOW_ID,
   QUIZ_FLOW_ID,
   TEACHER_TRAINING_FLOW_ID,
+  TRAINING_MSQ_FLOW_ID,
   EXAM_GENERATOR_FLOW_ID,
   ASSESSMENT_GEN_FLOW_ID,
   PAKISTAN_LP_FLOW_ID,
@@ -182,6 +203,8 @@ module.exports = {
   // Timeouts
   SONIOX_V3_TIMEOUT,
   SONIOX_V2_TIMEOUT,
+  SONIOX_PRIMARY_MODEL,
+  SONIOX_BACKUP_MODEL,
   GAMMA_MAX_ATTEMPTS,
   GAMMA_POLL_INTERVAL,
   KIE_MAX_ATTEMPTS,

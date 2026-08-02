@@ -1,4 +1,5 @@
 import { Button } from "@/components/ui/button";
+import { WHATSAPP_URL } from '@/lib/whatsapp';
 import WhatsAppIcon from "@/components/icons/WhatsAppIcon";
 import heroImage from "@/assets/hero-sketch-2.png";
 import { getWhatsAppUrl, trackCtaClick } from "@/lib/funnelTracking";
@@ -6,7 +7,7 @@ import { useTranslation } from "react-i18next";
 
 const Hero = () => {
   const { t } = useTranslation();
-  const whatsappUrl = getWhatsAppUrl('https://wa.me/message/WCYNS4DTDB2MD1');
+  const whatsappUrl = getWhatsAppUrl(WHATSAPP_URL);
 
   const handleCtaClickTracking = () => {
     trackCtaClick('hero');

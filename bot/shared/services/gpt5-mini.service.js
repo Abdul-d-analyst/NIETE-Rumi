@@ -597,6 +597,40 @@ CONVERSATIONAL FRAMEWORK: S.T.I.C.K.S. PRINCIPLES
   }
 
   /**
+   * Generic single-shot JSON completion on gpt-5-mini — same conventions as
+   * analyzePedagogy (json_object mode, jsonrepair on parse, log+rethrow).
+   * FEAT-053 bd-22 / bd-2342: ported from the main bot. Consumers are the
+   * observer debrief-guide builder, coach-feedback, and teacher-notes — all of
+   * which were throwing "completeJson is not a function" (0/48 HITL debriefs
+   * completed) because this method was never ported to NIETE.
+   *
+   * @param {string} prompt   must contain the word "JSON" (json_object mode)
+   * @param {object} options  { maxTokens = 4000, label = 'completeJson' }
+   * @returns {Promise<{result: object, usage: object}>}
+   */
+  static async completeJson(prompt, options = {}) {
+    const { maxTokens = 4000, label = 'completeJson' } = options;
+    try {
+      const response = await this.openai.chat.completions.create({
+        model: 'gpt-5-mini-2025-08-07',
+        messages: [{ role: 'user', content: prompt }],
+        max_completion_tokens: maxTokens,
+        response_format: { type: 'json_object' },
+        // No temperature: GPT-5 mini only supports the default (1)
+      });
+      const choice = response.choices && response.choices[0];
+      if (choice && choice.finish_reason === 'length') {
+        logToFile(`⚠️ ${label}: response truncated at max_completion_tokens`, { maxTokens });
+      }
+      const result = this._safeJsonParse(choice.message.content);
+      return { result, usage: response.usage || {} };
+    } catch (error) {
+      logToFile(`❌ ${label} failed`, { error: error.message, stack: error.stack });
+      throw error;
+    }
+  }
+
+  /**
    * Safely parse JSON, attempting repair when payload is slightly malformed
    * @private
    */
@@ -804,7 +838,7 @@ ${transcript}
 TASK: Provide a comprehensive pedagogical analysis in JSON format using the OECD rubric with this EXACT structure:
 
 {
-  "executive_summary": "2-3 sentences summarizing lesson strengths and key growth area. CRITICAL: You MUST use the teacher's FIRST NAME (${teacherFirstName || 'the teacher'}) when referring to the teacher - NEVER use 'Rumi' or 'the teacher'.",
+  "executive_summary": "2-3 sentences summarizing lesson strengths and key growth area. CRITICAL: You MUST use the teacher's FIRST NAME (${teacherFirstName || 'the teacher'}) when referring to the teacher - NEVER use 'NIETE' or 'the teacher'.",
   "talk_time": {
     "teacher_percentage": <0-100>,
     "student_percentage": <0-100>,
@@ -956,7 +990,7 @@ ANALYSIS GUIDELINES:
 8. Make recommendations actionable and practical
 9. Consider resource constraints
 10. Be encouraging and growth-oriented
-11. In "executive_summary", you MUST use the teacher's FIRST NAME "${teacherFirstName || 'TEACHER_NAME'}" when referring to the teacher. NEVER use 'Rumi' or generic phrases like 'the teacher'.
+11. In "executive_summary", you MUST use the teacher's FIRST NAME "${teacherFirstName || 'TEACHER_NAME'}" when referring to the teacher. NEVER use 'NIETE' or generic phrases like 'the teacher'.
 12. Include CONCRETE NEXT-STEP SUGGESTIONS in executive_summary (e.g., "Next time, try using think-pair-share during counting activities to increase individual accountability")`;
   }
 
@@ -1666,6 +1700,12 @@ URDU LANGUAGE NOTES:
 - Avoid English jargon where possible
 - Use respectful form (آپ not تم)
 - Keep sentences flowing naturally for speech
+- GENDER — YOUR OWN voice (the coach speaking) is FEMALE. When you refer to
+  yourself in the first person, use FEMALE Urdu verb forms: "کر رہی ہوں" (not
+  "کر رہا ہوں"), "دیکھتی ہوں", "سمجھتی ہوں". NEVER the male "کر رہا ہوں / دیکھتا ہوں".
+- GENDER (teacher) — the teacher may be a man or a woman, so keep everything you
+  say ABOUT or TO the teacher gender-neutral: address as آپ and use the respectful
+  آپ-imperative (کریں، دیں، آزمائیں), never a gendered second-person verb stem.
 ` : `
 ENGLISH LANGUAGE NOTES:
 - Use simple, clear language

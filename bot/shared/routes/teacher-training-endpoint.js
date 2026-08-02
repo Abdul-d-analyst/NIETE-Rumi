@@ -31,6 +31,14 @@ const { logToFile } = require('../utils/logger');
 const supabase = require('../config/supabase');
 
 const SUPABASE_URL = process.env.SUPABASE_URL || '';
+
+// bd-2474 — the two shapes a LEVEL EXAM takes. Chain vendors (NIETE) sit an
+// MCQ 'grand_quiz'; all_modules vendors (Beacon House) sit a written,
+// LLM-scored 'capstone'. Both certify a level, so both must be recognised
+// wherever "does this level have an exam / did they pass it" is asked.
+// 'diagnostic' rows live in the same table and are NOT an exam.
+const EXAM_QUIZ_TYPES = ['grand_quiz', 'capstone'];
+const EXAM_QUIZ_KINDS = ['grand', 'capstone'];
 const BADGES_BUCKET = 'training-assets';
 
 function badgeUrl(name) {
@@ -45,20 +53,21 @@ async function handleTeacherTrainingInit(userId /*, flowToken */) {
   logToFile('🎓 Training Flow INIT', { userId });
   const catalog = await loadVisibleLevelsWithProgress(userId);
   const teacher = await loadTeacher(userId);
-  if (!teacher) return errorScreen('We could not find your training profile. Please contact NIETE support.');
+  if (!teacher) return entryErrorScreen('We could not find your training profile. Please contact NIETE support.');
   if (catalog.length === 0) {
-    return errorScreen(
+    return entryErrorScreen(
       `No training assigned yet, ${teacher.first_name || 'teacher'}. ` +
       'Please contact your NIETE program lead to enrol you.'
     );
   }
 
-  const vendors = partitionByVendor(catalog);
-  if (vendors.length > 1) {
-    return buildVendorPicker(userId, teacher, vendors);
-  }
-  // Single-vendor teacher — skip picker, go straight to home for that vendor.
-  return buildTrainingHome(userId, { vendorKey: vendors[0].vendor_key, teacher, catalog });
+  // BUG-144 — INIT must return a routing-model ENTRY POINT (a node with no
+  // incoming edges). VENDOR_PICKER is the only one; TRAINING_HOME has an
+  // incoming edge from it. The old single-vendor shortcut returned
+  // TRAINING_HOME to save a tap and the client rejected the whole Flow with
+  // "invalid-screen-transition ... already have incoming nodes". Always open
+  // on the picker — single-vendor teachers see a one-row list and tap through.
+  return buildVendorPicker(userId, teacher, partitionByVendor(catalog));
 }
 
 /**
@@ -73,6 +82,9 @@ async function handleTeacherTrainingDataExchange(userId, screen, screenData /*, 
     if (action === 'open_vendor') {
       const vendorKey = String(screenData._vendor_key || '').trim();
       if (!vendorKey) return createErrorResponse('Missing vendor');
+      // BUG-144 — the placeholder row emitted by entryErrorScreen. Nothing to
+      // open; close cleanly instead of resolving it to an arbitrary vendor.
+      if (vendorKey === 'none') return buildSuccessScreen('No training assigned yet.');
       return buildTrainingHome(userId, { vendorKey });
     }
     if (action === 'close') return buildSuccessScreen('See you soon!');
@@ -108,6 +120,11 @@ async function handleTeacherTrainingDataExchange(userId, screen, screenData /*, 
     const action = screenData._action;
     const vendorKey = String(screenData._vendor_key || '').trim() || null;
     if (action === 'open_module') {
+      // bd-2448 — the gate. Without this the dropdown was a free jump to any
+      // module in the level, bypassing the sequential order the bot's own
+      // deliverNextModule enforces.
+      const gate = await checkModuleUnlocked(userId, screenData.module_id);
+      if (!gate.ok) return errorScreen(gate.message);
       return buildSuccessScreen('Opening module…', {
         trainingAction: 'open_module',
         moduleId: screenData.module_id,
@@ -121,14 +138,14 @@ async function handleTeacherTrainingDataExchange(userId, screen, screenData /*, 
       });
     }
     if (action === 'start_grand_quiz') {
-      // WhatsApp Flow's on-click-action.payload doesn't interpolate ${data.*} —
-      // only literals and ${form.*} — so LEVEL_DETAIL can't pass level_order back
-      // through the button. Infer it from server state (scoped to the current
-      // vendor when we know it) instead: only ONE level can be in
-      // 'ready_for_quiz' at a time within a chain-locked vendor, so lookup is
-      // unambiguous.
-      let levelOrder = screenData._level_order;
-      if (!levelOrder) {
+      // bd-2452 — `if (!levelOrder)` was the wrong guard. If ${data.level_order}
+      // ever failed to interpolate, the LITERAL string "${data.level_order}" is
+      // truthy, so the fallback never fired and the literal sailed through to
+      // parseInt -> NaN. Only an actual number may be trusted; anything else
+      // falls through to inference.
+      const rawOrder = String(screenData._level_order ?? '').trim();
+      let levelOrder = /^\d+$/.test(rawOrder) ? parseInt(rawOrder, 10) : null;
+      if (levelOrder === null) {
         const catalog = await loadVisibleLevelsWithProgress(userId);
         const scoped = vendorKey
           ? (catalog || []).filter(l => l.vendor_key === vendorKey)
@@ -137,12 +154,24 @@ async function handleTeacherTrainingDataExchange(userId, screen, screenData /*, 
         if (readyLevels.length === 1) {
           levelOrder = readyLevels[0].order_index + 1;
           logToFile('🎓 Inferred levelOrder from ready state', { userId, vendorKey, levelOrder });
+        } else if (scoped.length === 1) {
+          // No level is ready, but the scope is unambiguous — resolve to it so
+          // assertCanStartGrandQuiz can explain WHY rather than dead-ending on
+          // "open the level again", which just loops the teacher.
+          levelOrder = scoped[0].order_index + 1;
         } else {
           logToFile('❌ Cannot infer levelOrder for start_grand_quiz', {
-            userId, vendorKey, readyCount: readyLevels.length,
+            userId, vendorKey, rawOrder, readyCount: readyLevels.length, scopedCount: scoped.length,
           });
           return errorScreen('Please open the level again and tap Take exam.');
         }
+      }
+      // bd-2452 — THE GATE. The "🔒 Locked" / "✓ Passed" / blank CTA are all
+      // tappable links; this is what actually refuses them.
+      const gate = await assertCanStartGrandQuiz(userId, levelOrder, vendorKey);
+      if (!gate.ok) {
+        logToFile('🎓 Refused grand-quiz start', { userId, levelOrder, reason: gate.reason });
+        return errorScreen(gate.message);
       }
       return buildSuccessScreen('Starting your exam…', {
         trainingAction: 'start_grand_quiz',
@@ -167,10 +196,9 @@ async function handleTeacherTrainingBack(userId, screen /*, flowToken */) {
   // No vendor key is carried through the raw BACK gesture — recompute from state.
   const catalog = await loadVisibleLevelsWithProgress(userId);
   const teacher = await loadTeacher(userId);
-  if (!teacher) return errorScreen('We could not find your training profile. Please contact NIETE support.');
-  const vendors = partitionByVendor(catalog);
-  if (vendors.length > 1) return buildVendorPicker(userId, teacher, vendors);
-  return buildTrainingHome(userId, { vendorKey: vendors[0]?.vendor_key, teacher, catalog });
+  if (!teacher) return entryErrorScreen('We could not find your training profile. Please contact NIETE support.');
+  // BUG-144 — same entry-point rule as INIT; always land on the picker.
+  return buildVendorPicker(userId, teacher, partitionByVendor(catalog));
 }
 
 // ─── Builders ──────────────────────────────────────────────────────────────
@@ -341,10 +369,15 @@ async function buildLevelDetail(userId, levelOrder, opts = {}) {
       // data_exchange keeps the vendor scope. Falls back to '' for single-
       // vendor teachers whose level rows don't carry a resolved key.
       vendor_key:     String(lvl.vendor_key || ''),
+      // bd-2448 — the description carries the lock state. It is advisory: the
+      // published item schema has no `enabled` field, so the row stays
+      // tappable and checkModuleUnlocked does the actual refusing.
+      // "Passed" replaces the old "✓ Watched", which read as "you opened the
+      // video" when since bd-2390 it means the quick check was passed.
       module_list:    modules.map(m => ({
         id:          String(m.id),
         title:       m.title.length > 40 ? `${m.title.slice(0, 37)}…` : m.title,
-        description: `${m.course_title} · ${m.done ? '✓ Watched' : 'Not started'}`,
+        description: `${m.course_title} · ${moduleLockLabel(m)}`,
       })),
       grand_quiz_body:      grandQuiz.body,
       grand_quiz_caption:   grandQuiz.caption,
@@ -374,12 +407,85 @@ async function loadModulesWithProgress(userId, levelId) {
     if (ca !== cb) return ca - cb;
     return (a.order_index || 0) - (b.order_index || 0);
   });
-  return levelModules.map(m => ({
+  return annotateModuleLocks(levelModules.map(m => ({
     id: m.id,
     title: m.title,
     course_title: courseById.get(m.course_id).title,
     done: doneIds.has(m.id),
-  }));
+  })));
+}
+
+/**
+ * bd-2448 — mark each module in level order as passed / next / locked.
+ *
+ * The bot's delivery path has always been sequential (deliverNextModule takes
+ * the lowest order_index module without a progress row), but the Flow's module
+ * dropdown drove around it: every module was listed and `open_module` handed
+ * the id straight to deliverModuleById. A teacher could open the last module
+ * of the last course on day one.
+ *
+ * The rule — already-passed modules stay open for review, exactly one unpassed
+ * module ("next up") is open, everything after it is locked — lives HERE and
+ * nowhere else. Both the picker that renders the list and the gate that
+ * refuses the tap call this one function; two copies of "which module is next"
+ * is exactly how a label and its handler drift apart (bd-2446).
+ *
+ * @param {Array<{id:number,title:string,course_title:string,done:boolean}>} orderedModules
+ *        modules in level order (course order_index, then module order_index)
+ * @returns {Array<object>} the same rows, each with `lock`: 'passed'|'next'|'locked'
+ */
+function annotateModuleLocks(orderedModules) {
+  let nextTaken = false;
+  return orderedModules.map(m => {
+    if (m.done) return { ...m, lock: 'passed' };
+    if (!nextTaken) {
+      nextTaken = true;
+      return { ...m, lock: 'next' };
+    }
+    return { ...m, lock: 'locked' };
+  });
+}
+
+/**
+ * bd-2448 — may this teacher open this module right now?
+ *
+ * The gate, not the label. The published Flow's module_list item schema is
+ * {id, title, description} with no `enabled` field, and per
+ * .claude/skills/whatsapp-flows a published Flow's JSON cannot be edited in
+ * place — so a locked row is still tappable on the client and the server has
+ * to be the thing that says no.
+ *
+ * @returns {Promise<{ok: boolean, message?: string}>}
+ */
+async function checkModuleUnlocked(userId, moduleId) {
+  const moduleIdNum = parseInt(String(moduleId), 10);
+  if (!Number.isFinite(moduleIdNum)) return { ok: false, message: 'That module could not be found.' };
+
+  const { data: mod } = await supabase
+    .from('training_modules').select('id, course_id').eq('id', moduleIdNum).maybeSingle();
+  if (!mod?.course_id) {
+    logToFile('⚠️ open_module for an unknown module', { userId, moduleId });
+    return { ok: false, message: 'That module is not part of your training.' };
+  }
+  const { data: course } = await supabase
+    .from('training_courses').select('id, level_id').eq('id', mod.course_id).maybeSingle();
+  if (!course?.level_id) return { ok: false, message: 'That module is not part of your training.' };
+
+  const modules = await loadModulesWithProgress(userId, course.level_id);
+  const target = modules.find(m => m.id === moduleIdNum);
+  if (!target) return { ok: false, message: 'That module is not part of your training.' };
+  if (target.lock !== 'locked') return { ok: true };
+
+  const nextUp = modules.find(m => m.lock === 'next');
+  logToFile('🎓 Refused a locked module', {
+    userId, moduleId: moduleIdNum, nextUp: nextUp?.id || null,
+  });
+  return {
+    ok: false,
+    message: nextUp
+      ? `Finish "${nextUp.title}" first — modules open one at a time.`
+      : 'That module is locked until you finish the ones before it.',
+  };
 }
 
 // ─── Data loaders ──────────────────────────────────────────────────────────
@@ -405,6 +511,25 @@ async function loadTeacher(userId) {
  * so this returns the 4 TALEEMABAD levels — but we walk the Programs → Scopes →
  * Levels graph so multi-Vendor is supported for free from day one.
  */
+/**
+ * bd-2391 — does this attempt row represent a passed LEVEL EXAM?
+ *
+ * `training_assessment_attempts` stores both the per-module quick check
+ * (quiz_kind='training_module') and the level exam (quiz_kind='grand'), and
+ * BOTH carry level_id. Only the latter may certify a level or satisfy a
+ * chain-lock. Rows with a missing quiz_kind are treated as grand: they predate
+ * the column, when the table held level exams only.
+ *
+ * @param {object} a attempt row (needs is_passed, quiz_kind)
+ * @returns {boolean}
+ */
+function isGrandPass(a) {
+  if (!a || a.is_passed !== true) return false;
+  // bd-2474 — a capstone IS the level exam for all_modules vendors. Rows with
+  // no quiz_kind predate the column, when the table held level exams only.
+  return EXAM_QUIZ_KINDS.includes(a.quiz_kind || 'grand');
+}
+
 async function loadVisibleLevelsWithProgress(userId) {
   // 1. Active program assignments for this teacher
   const { data: assignments, error: aErr } = await supabase
@@ -456,42 +581,95 @@ async function loadVisibleLevelsWithProgress(userId) {
 
   // 4. Progress: courses complete + grand-quiz pass state per level
   const levelIds = visibleLevels.map(l => l.id);
-  const [{ data: courses }, { data: progressRows }, { data: attempts }, { data: quizzes }] = await Promise.all([
+  const [{ data: courses }, { data: progressRows }, { data: attempts }, { data: quizzes }, { data: certRows }] = await Promise.all([
     supabase.from('training_courses').select('id, level_id, is_active').in('level_id', levelIds),
-    supabase.from('teacher_training_progress').select('module_id, module:training_modules(course_id)').eq('user_id', userId),
-    supabase.from('training_assessment_attempts').select('level_id, status, is_passed, cooldown_until, completed_at').eq('user_id', userId).in('level_id', levelIds),
-    supabase.from('training_grand_quizzes').select('id, level_id, quiz_type').in('level_id', levelIds).eq('quiz_type', 'grand_quiz'),
+    supabase.from('teacher_training_progress').select('module_id').eq('user_id', userId),
+    // bd-2391 — LEVEL-EXAM attempts only. Per-module quick-check attempts also
+    // carry a level_id and set is_passed=true on a perfect score, so an
+    // unfiltered read makes one 9-question module quiz certify the whole level
+    // (hiding the real exam behind a "Review" CTA and chain-unlocking the next
+    // level).
+    //
+    // bd-2485 — but "level exam" is BOTH kinds. This filtered on 'grand' alone,
+    // which bd-2474 missed when it widened isGrandPass and EXAM_QUIZ_TYPES: the
+    // in-memory guard accepted a capstone the query had already thrown away. A
+    // capstone pass never set state='certified', so the level stayed
+    // re-sittable (a second pass mints a duplicate certificate — issueCertificate
+    // dedupes per attempt_id, not per level) and a chain vendor's next level
+    // stayed locked. `quiz_kind` is selected because isGrandPass discriminates
+    // on it; widening the filter without it leaves the guard blind.
+    supabase.from('training_assessment_attempts').select('level_id, status, is_passed, cooldown_until, completed_at, quiz_kind').eq('user_id', userId).in('quiz_kind', EXAM_QUIZ_KINDS).in('level_id', levelIds),
+    supabase.from('training_grand_quizzes').select('id, level_id, quiz_type').in('level_id', levelIds).in('quiz_type', EXAM_QUIZ_TYPES).eq('is_active', true),
+    // bd-2503 — some levels have NO exam at all (Oxbridge). For an all_modules
+    // vendor with no capstone, maybeIssueQuizScoreCertificate certifies the
+    // level off completed modules alone, so the certificate row is the ONLY
+    // record that the teacher finished. Without reading it, a 7/7 level sat in
+    // 'ready_for_quiz' forever, waiting for an exam that does not exist.
+    supabase.from('training_certificates').select('level_id').eq('user_id', userId).in('level_id', levelIds),
   ]);
+  const certifiedLevelIds = new Set((certRows || []).map(c => c.level_id));
 
-  // Course completion = every active course under a level has ≥1 module completed
-  // Phase 1: simpler proxy — a course is "started" if any of its modules is in teacher_training_progress
-  const progressByCourse = new Map();
-  for (const p of progressRows || []) {
-    const cid = p?.module?.course_id;
-    if (cid) progressByCourse.set(cid, (progressByCourse.get(cid) || 0) + 1);
+  // bd-2447 — a course is complete when EVERY active module under it is done.
+  //
+  // This used to be a phase-1 proxy: "complete" meant ≥1 module had a progress
+  // row, and that count shipped out as `courses_completed`. One module done in
+  // each of five courses rendered "5/5 courses ✓ · Ready for exam" off five
+  // modules out of sixty, and offered the level exam to a teacher who had
+  // barely started. The proxy's own note said it stood in "until the
+  // module-completion path is wired" — bd-2390 wired it. A
+  // teacher_training_progress row now means the module's quick check was
+  // PASSED (or the module had no quiz), so "all modules have rows" is exactly
+  // "all modules passed".
+  const activeCourseIds = (courses || []).filter(c => c.is_active).map(c => c.id);
+  const { data: levelModules } = activeCourseIds.length
+    ? await supabase
+      .from('training_modules')
+      .select('id, course_id')
+      .in('course_id', activeCourseIds)
+      .eq('is_active', true)
+    : { data: [] };
+  const modulesByCourse = new Map();
+  for (const m of levelModules || []) {
+    if (!modulesByCourse.has(m.course_id)) modulesByCourse.set(m.course_id, []);
+    modulesByCourse.get(m.course_id).push(m.id);
   }
+  const doneModuleIds = new Set((progressRows || []).map(p => p.module_id));
 
   return visibleLevels.map(lv => {
-    const lvCourses = (courses || []).filter(c => c.level_id === lv.id && c.is_active);
-    const coursesStarted = lvCourses.filter(c => (progressByCourse.get(c.id) || 0) > 0);
-    // NOTE: full "course completed" requires all modules of the course to be in progress; phase 1
-    // uses "started" as a proxy until the module-completion path is wired.
-    const passedAttempt = (attempts || []).find(a => a.level_id === lv.id && a.is_passed === true);
+    // A course with no active modules is excluded from the denominator
+    // entirely: counting it as incomplete would strand the level forever,
+    // counting it as complete would hand out a free pass to the exam.
+    const lvCourses = (courses || []).filter(c =>
+      c.level_id === lv.id && c.is_active && (modulesByCourse.get(c.id) || []).length > 0);
+    const lvModuleIds = lvCourses.flatMap(c => modulesByCourse.get(c.id) || []);
+    const coursesCompleted = lvCourses.filter(c =>
+      (modulesByCourse.get(c.id) || []).every(id => doneModuleIds.has(id)));
+    // "Touched" only decides in_progress vs not_started — it must never gate
+    // the exam. Keeping it separate from coursesCompleted is what stops the
+    // two meanings collapsing back into one number.
+    const coursesTouched = lvCourses.filter(c =>
+      (modulesByCourse.get(c.id) || []).some(id => doneModuleIds.has(id)));
+    // bd-2391 — `isGrandPass` also guards in memory, not just in the query, so
+    // the "only a level exam certifies a level" rule survives a caller that
+    // hands us unfiltered rows.
+    const passedAttempt = (attempts || []).find(a => a.level_id === lv.id && isGrandPass(a));
     const cooldownAttempt = (attempts || []).find(a => a.level_id === lv.id && a.status === 'failed' && a.cooldown_until && new Date(a.cooldown_until) > new Date());
     const vendor = vendorById.get(lv.vendor_id);
     const chainLocked = vendor?.unlock_logic === 'chain';
     const prevLevel = visibleLevels
       .filter(l => l.vendor_id === lv.vendor_id)
       .find(l => l.order_index === lv.order_index - 1);
-    const prevPassed = !prevLevel || !!(attempts || []).find(a => a.level_id === prevLevel.id && a.is_passed === true);
+    const prevPassed = !prevLevel || !!(attempts || []).find(a => a.level_id === prevLevel.id && isGrandPass(a));
     const isFirst = !prevLevel;
     const grand = (quizzes || []).find(q => q.level_id === lv.id) || null;
 
     let state;
     if (chainLocked && !prevPassed && !isFirst) state = 'locked';
-    else if (passedAttempt) state = 'certified';
-    else if (coursesStarted.length === lvCourses.length && lvCourses.length > 0) state = 'ready_for_quiz';
-    else if (coursesStarted.length > 0) state = 'in_progress';
+    // bd-2503 — a held certificate is terminal whether it came from passing an
+    // exam or from completing every module of an exam-less level.
+    else if (passedAttempt || certifiedLevelIds.has(lv.id)) state = 'certified';
+    else if (coursesCompleted.length === lvCourses.length && lvCourses.length > 0) state = 'ready_for_quiz';
+    else if (coursesTouched.length > 0) state = 'in_progress';
     else state = 'not_started';
 
     return {
@@ -506,13 +684,172 @@ async function loadVisibleLevelsWithProgress(userId) {
       unlock_logic: vendor?.unlock_logic || 'chain',
       state,
       courses_total: lvCourses.length,
-      courses_completed: coursesStarted.length,
-      pct_complete: lvCourses.length === 0 ? 0 : Math.round((coursesStarted.length / lvCourses.length) * 100),
+      courses_completed: coursesCompleted.length,
+      // Module-based, so a teacher part-way through every course still sees
+      // movement ("0/5 courses · 25% done") instead of a flat 0%.
+      pct_complete: lvModuleIds.length === 0
+        ? 0
+        : Math.round((lvModuleIds.filter(id => doneModuleIds.has(id)).length / lvModuleIds.length) * 100),
       passed_at: passedAttempt?.completed_at || null,
       cooldown_until: cooldownAttempt?.cooldown_until || null,
+      // bd-2479 — which level a teacher must clear to open this one, in the
+      // 0-based display numbering ladder vendors use (bd-2235). Emitted here so
+      // the portal renders the same number the Flow does instead of deriving
+      // its own; a second copy of this arithmetic is how the two surfaces
+      // started disagreeing about lock state. Null when nothing precedes it.
+      previous_level_order: isFirst ? null : lv.order_index - 1,
       grand_quiz_id: grand?.id || null,
     };
   });
+}
+
+/**
+ * bd-2452/2453 — the ONE precondition check for starting a level exam.
+ *
+ * Every "locked" state in this Flow used to live only in the CTA text. A
+ * WhatsApp Flow `EmbeddedLink` has no disabled state and the published item
+ * schema can't add one, so "🔒 Locked" was always tappable — and the
+ * start_grand_quiz branch had no check at all. Reproduced live: a level at
+ * 38/40 modules rendered "🔒 Locked", the teacher tapped it, and the exam
+ * started and recorded an answer.
+ *
+ * The rule this encodes: the label is advisory, the handler is the gate.
+ *
+ * Reasons are derived from the SAME level state the UI renders
+ * (loadVisibleLevelsWithProgress), so the refusal can never disagree with the
+ * badge the teacher is looking at.
+ *
+ * @param {string} userId
+ * @param {number} levelOrder 1-based level order as sent by the Flow
+ * @param {string|null} vendorKey scope, when known
+ * @returns {Promise<{ok: boolean, level?: object, reason?: string, message?: string}>}
+ */
+async function assertCanStartGrandQuiz(userId, levelOrder, vendorKey = null) {
+  const idx = (typeof levelOrder === 'number' ? levelOrder : parseInt(levelOrder, 10)) - 1;
+  if (!Number.isFinite(idx) || idx < 0) {
+    return { ok: false, reason: 'bad_level', message: 'Please open the level again and tap Take exam.' };
+  }
+  const catalog = await loadVisibleLevelsWithProgress(userId);
+  const scoped = vendorKey ? (catalog || []).filter(l => l.vendor_key === vendorKey) : (catalog || []);
+  const candidates = scoped.filter(l => l.order_index === idx);
+  // bd-2392 — order_index is per-vendor and therefore not unique. Prefer a
+  // level the teacher is actually ready to sit, then one that has an exam.
+  const level =
+    candidates.find(l => l.state === 'ready_for_quiz' && l.grand_quiz_id) ||
+    candidates.find(l => l.grand_quiz_id) ||
+    candidates[0] || null;
+
+  if (!level) {
+    return { ok: false, reason: 'not_in_program', message: 'That level is not part of your program.' };
+  }
+  if (level.state === 'locked') {
+    return {
+      ok: false, reason: 'level_locked', level,
+      // Display numbers are 0-based for ladder vendors (bd-2235), so the
+      // previous level reads as order_index - 1.
+      message: `You need to pass Level ${level.order_index - 1}'s exam before this level opens.`,
+    };
+  }
+  if (!level.grand_quiz_id) {
+    return {
+      ok: false, reason: 'no_exam', level,
+      message: 'There is no level exam set up for this level yet. Please contact NIETE support.',
+    };
+  }
+  // bd-2453 — a pass closes the exam for good. Re-sitting created a second
+  // attempt, and issueCertificate dedupes per attempt_id (not per level), so
+  // re-passing minted a duplicate certificate for an already-certified level.
+  if (level.state === 'certified') {
+    return {
+      ok: false, reason: 'already_passed', level,
+      message: 'You have already passed this level exam — your certificate is in your records.',
+    };
+  }
+  if (level.cooldown_until && new Date(level.cooldown_until) > new Date()) {
+    const hours = Math.max(1, Math.round((new Date(level.cooldown_until) - Date.now()) / 3_600_000));
+    return {
+      ok: false, reason: 'cooldown', level,
+      message: `You attempted this exam recently. Please try again in about ${hours} hours.`,
+    };
+  }
+  if (level.state !== 'ready_for_quiz') {
+    return {
+      ok: false, reason: 'incomplete', level,
+      message: `Finish every module in this level first — the exam unlocks once all ${level.courses_total} courses are complete.`,
+    };
+  }
+  return { ok: true, level };
+}
+
+/**
+ * bd-2479 — may this teacher open this level's contents right now?
+ *
+ * The level-scoped sibling of checkModuleUnlocked. The Flow asks this
+ * implicitly at line ~353 when a locked level is opened; the portal asks it
+ * explicitly before serving courses, modules, questions or quiz submissions.
+ * Both must get the same answer, so the rule lives here once.
+ *
+ * Derived from loadVisibleLevelsWithProgress — the same state the UI renders —
+ * so a refusal can never disagree with the badge the teacher is looking at.
+ *
+ * The message and the number are the Flow's, deliberately: display order is
+ * 0-based for ladder vendors (bd-2235), so the previous level reads as
+ * `order_index - 1`. Inventing a second phrasing here is how the portal ended
+ * up with a copy that drifted in the first place.
+ *
+ * @param {string} userId
+ * @param {number|string} levelId
+ * @returns {Promise<{ok: boolean, status?: number, level?: object,
+ *                    message?: string, previous_level_order?: number}>}
+ */
+async function checkLevelUnlocked(userId, levelId) {
+  const idNum = parseInt(String(levelId), 10);
+  if (!Number.isFinite(idNum)) return { ok: false, status: 404, message: 'Level not found' };
+
+  const catalog = await loadVisibleLevelsWithProgress(userId);
+  const level = (catalog || []).find(l => l.id === idNum);
+  // Not in the catalogue means not in this teacher's programme — same answer
+  // as "does not exist", and deliberately not distinguished for the caller.
+  if (!level) return { ok: false, status: 404, message: 'Level not found' };
+  if (level.state !== 'locked') return { ok: true, level };
+
+  // Read the number off the level state rather than recomputing it — one
+  // definition, so the refusal can never cite a different level than the card.
+  const previousOrder = level.previous_level_order;
+  logToFile('🎓 Refused a locked level', { userId, levelId: idNum, previousOrder });
+  return {
+    ok: false,
+    status: 403,
+    level,
+    message: `Pass Level ${previousOrder}'s grand quiz first to unlock this level.`,
+    previous_level_order: previousOrder,
+  };
+}
+
+/**
+ * bd-2483 — the exam gate, addressed by level ID.
+ *
+ * assertCanStartGrandQuiz takes a 1-based level ORDER plus a vendor key,
+ * because that is what the Flow has in hand. The portal has a level id. This
+ * resolves one to the other and delegates; it adds no rule of its own, so the
+ * two surfaces cannot answer "may I sit this exam?" differently.
+ *
+ * @returns {Promise<{ok: boolean, level?: object, reason?: string, message?: string}>}
+ */
+async function assertCanStartExamForLevel(userId, levelId) {
+  const idNum = parseInt(String(levelId), 10);
+  if (!Number.isFinite(idNum)) {
+    return { ok: false, reason: 'bad_level', message: 'Please open the level again and tap Take exam.' };
+  }
+  const catalog = await loadVisibleLevelsWithProgress(userId);
+  const level = (catalog || []).find(l => l.id === idNum);
+  if (!level) {
+    return { ok: false, reason: 'not_in_program', message: 'That level is not part of your program.' };
+  }
+  // order_index is 0-based in the catalogue; assertCanStartGrandQuiz expects
+  // the Flow's 1-based order. Scoping by vendor_key keeps the lookup correct
+  // when two vendors share an order_index (bd-2392).
+  return assertCanStartGrandQuiz(userId, level.order_index + 1, level.vendor_key);
 }
 
 async function loadCoursesWithProgress(userId, levelId) {
@@ -535,35 +872,98 @@ async function loadCoursesWithProgress(userId, levelId) {
 }
 
 async function loadGrandQuizState(userId, levelId) {
-  const [{ data: catalog }, { data: attempts }, { data: courses }, { data: modules }, { data: progressRows }] = await Promise.all([
-    supabase.from('training_grand_quizzes').select('id, quiz_type').eq('level_id', levelId).eq('quiz_type', 'grand_quiz').eq('is_active', true).maybeSingle(),
-    supabase.from('training_assessment_attempts').select('status, is_passed, cooldown_until').eq('user_id', userId).eq('level_id', levelId),
+  const [{ data: catalog }, { data: attempts }, { data: courses }, { data: modules }, { data: progressRows }, { data: levelCert }] = await Promise.all([
+    // bd-2474 — resolve the level's exam by LEVEL, not by type. Beacon House
+    // levels carry quiz_type='capstone'; filtering to 'grand_quiz' meant every
+    // BH level reported "No level exam" even though capstones 29-32 are active.
+    // 'diagnostic' rows are NOT an exam and stay excluded.
+    supabase.from('training_grand_quizzes').select('id, quiz_type').eq('level_id', levelId).in('quiz_type', EXAM_QUIZ_TYPES).eq('is_active', true).maybeSingle(),
+    // bd-2391 — EXAM attempts only (see isGrandPass). Without this a passed
+    // module quick check rendered "🏆 You passed this level exam" and replaced
+    // the CTA with "✓ Passed". bd-2474 widens 'grand' to both exam kinds so a
+    // passed capstone is recognised the same way.
+    supabase.from('training_assessment_attempts').select('status, is_passed, cooldown_until, quiz_kind').eq('user_id', userId).in('quiz_kind', EXAM_QUIZ_KINDS).eq('level_id', levelId),
     supabase.from('training_courses').select('id').eq('level_id', levelId).eq('is_active', true),
     supabase.from('training_modules').select('id, course_id').eq('is_active', true),
     supabase.from('teacher_training_progress').select('module_id').eq('user_id', userId),
+    // bd-2503 — the same signal loadVisibleLevelsWithProgress reads. Both
+    // surfaces must agree on what "complete" means, or HOME and LEVEL_DETAIL
+    // contradict each other again — which is the bug being fixed.
+    supabase.from('training_certificates').select('id').eq('user_id', userId).eq('level_id', levelId).maybeSingle(),
   ]);
-  if (!catalog) return { badge: 'badge_quiz_available', body: '🎓 No level exam — finish all sessions to complete this level.', caption: ' ', cta: ' ' };
-
-  const passed = (attempts || []).some(a => a.is_passed === true);
+  const passed = (attempts || []).some(isGrandPass);
   const cooldown = (attempts || []).find(a => a.status === 'failed' && a.cooldown_until && new Date(a.cooldown_until) > new Date());
   const doneIds = new Set((progressRows || []).map(r => r.module_id));
   const courseIds = new Set((courses || []).map(c => c.id));
-  // Match the "ready_for_quiz" criterion in loadVisibleLevelsWithProgress: a level is
-  // ready when every course has ≥1 module completed (not every module in the level).
-  // Keeping these two checks aligned prevents the "HOME says ready, LEVEL_DETAIL says
-  // locked" mismatch seen with imported historical progress.
-  const startedCourseIds = new Set(
-    (modules || []).filter(m => courseIds.has(m.course_id) && doneIds.has(m.id)).map(m => m.course_id)
-  );
-  const allDone = courseIds.size > 0 && startedCourseIds.size === courseIds.size;
+  // Match the "ready_for_quiz" criterion in loadVisibleLevelsWithProgress —
+  // bd-2447 tightened both together, from "every course has ≥1 module done" to
+  // "every module in the level is done". Keeping these two checks aligned is
+  // what prevents the "HOME says ready, LEVEL_DETAIL says locked" mismatch, so
+  // they must never be changed apart. tests/training/
+  // level-ready-requires-all-modules.test.js asserts the alignment directly.
+  const levelModules = (modules || []).filter(m => courseIds.has(m.course_id));
+  // Courses with no active modules are excluded on both sides; a level whose
+  // courses are all empty is not "done", it is unbuilt.
+  const coursesWithModules = new Set(levelModules.map(m => m.course_id));
+  const allDone = coursesWithModules.size > 0 && levelModules.every(m => doneIds.has(m.id));
+
+  // bd-2503 — the no-exam level. Moved BELOW allDone so the copy can tell the
+  // truth: a teacher at 100% was being told to "finish all sessions" directly
+  // under a line reading "7/7 modules done · 100%".
+  if (!catalog) {
+    // Only promise a certificate when one actually exists. A level can be
+    // finished without being certified — maybeIssueQuizScoreCertificate skips
+    // vendors on the chain ladder — and telling a teacher to look for a
+    // certificate that was never issued is worse than saying nothing.
+    if (levelCert) {
+      return { badge: 'badge_quiz_passed', body: '🏆 Level complete — you have finished every session.', caption: 'Certificate available in your records.', cta: '✓ Complete' };
+    }
+    if (allDone) {
+      return { badge: 'badge_quiz_passed', body: '🏆 Level complete — you have finished every session.', caption: ' ', cta: '✓ Complete' };
+    }
+    return { badge: 'badge_quiz_available', body: '🎓 No level exam — finish all sessions to complete this level.', caption: ' ', cta: ' ' };
+  }
 
   if (passed) return { badge: 'badge_quiz_passed', body: '🏆 Grand Quiz — You passed this level exam.', caption: 'Certificate available in your records.', cta: '✓ Passed' };
   if (cooldown) {
     const hoursLeft = Math.max(1, Math.round((new Date(cooldown.cooldown_until) - Date.now()) / 3_600_000));
     return { badge: 'badge_quiz_cooldown', body: '⏳ Grand Quiz — Locked after a recent failed attempt.', caption: `Try again in about ${hoursLeft} hours.`, cta: `⏳ Cooldown (${hoursLeft}h)` };
   }
-  if (!allDone) return { badge: 'badge_quiz_locked', body: '🔒 Grand Quiz — Unlocks when all courses are complete.', caption: '62 questions · 100% required · 24h cooldown on fail', cta: '🔒 Locked' };
-  return { badge: 'badge_quiz_available', body: '📝 Grand Quiz — Ready. Start your level exam.', caption: '100% required to pass · 24h cooldown on fail', cta: 'Start exam' };
+  // bd-2393 — the pass bar is per-vendor (NIETE 80%, Beacon House 70%), and the
+  // question count is per-quiz. Both were hardcoded ("62 questions · 100%
+  // required"), which was wrong on every level.
+  const [{ count: bankCount }, { data: lvRow }] = await Promise.all([
+    supabase.from('training_questions').select('id', { count: 'exact', head: true })
+      .eq('grand_quiz_id', catalog.id).eq('is_active', true),
+    supabase.from('training_levels').select('vendor_id').eq('id', levelId).maybeSingle(),
+  ]);
+  let passPct = 100;
+  let examCap = null;
+  if (lvRow?.vendor_id) {
+    const { data: vendor } = await supabase
+      .from('training_vendors').select('passing_pct, exam_question_cap').eq('id', lvRow.vendor_id).maybeSingle();
+    const p = Number(vendor?.passing_pct);
+    if (Number.isFinite(p) && p > 0 && p <= 100) passPct = p;
+    const cap = Number(vendor?.exam_question_cap);
+    if (Number.isFinite(cap) && cap > 0) examCap = cap;
+  }
+
+  // bd-2499 — advertise the paper the teacher will actually sit.
+  //
+  // bd-2495 capped NIETE exams at `exam_question_cap` randomly-sampled
+  // questions, but this caption still counted the whole bank: Skilled
+  // Practitioner offered "72 questions" and then served 20. The count is what
+  // a teacher plans their evening around, so it has to be the served one.
+  const servedCount = examCap ? Math.min(bankCount || 0, examCap) : (bankCount || 0);
+  const qPart = servedCount ? `${servedCount} questions · ` : '';
+
+  // bd-2475 — capstones have no cooldown. capstone-delivery never writes
+  // cooldown_until, so claiming one here was simply false; the clause is
+  // dropped rather than shown as "0h".
+  const coolPart = catalog.quiz_type === 'capstone' ? '' : ' · 24h cooldown on fail';
+
+  if (!allDone) return { badge: 'badge_quiz_locked', body: '🔒 Grand Quiz — Unlocks when all courses are complete.', caption: `${qPart}${passPct}% required${coolPart}`, cta: '🔒 Locked' };
+  return { badge: 'badge_quiz_available', body: '📝 Grand Quiz — Ready. Start your level exam.', caption: `${qPart}${passPct}% to pass${coolPart}`, cta: 'Start exam' };
 }
 
 // ─── Presentation helpers ──────────────────────────────────────────────────
@@ -655,8 +1055,13 @@ function levelOptionTitle(lv) {
 // `visible` bindings hide them once the asset update ships) and keeps a
 // neutral title so clients on the OLD flow version see a single dash line
 // instead of the phantom "🔒 Level N — Not part of this program" category.
+// BUG-144 — `progress` must be a SPACE, never ''. WhatsApp validates the whole
+// data payload against the screen schema BEFORE applying `visible`, so an empty
+// string bound to a TextBody fails the render and the client shows "Something
+// went wrong" — even though the row is hidden. Same rule loadGrandQuizState
+// already follows with its `caption: ' '` / `cta: ' '` no-quiz case.
 function ghostSlotData(slot) {
-  return { title: '·', progress: '', visible: false };
+  return { title: '·', progress: ' ', visible: false };
 }
 
 function levelEmoji(lv) {
@@ -673,6 +1078,13 @@ function ctaForLevel(lv) {
   if (lv.state === 'ready_for_quiz') return 'Take exam';
   if (lv.state === 'in_progress') return 'Continue';
   return 'Start';
+}
+
+// bd-2448 — the teacher-facing name for each lock state.
+function moduleLockLabel(m) {
+  if (m.lock === 'passed') return '✓ Passed';
+  if (m.lock === 'next') return '▶ Next up';
+  return '🔒 Locked';
 }
 
 function courseProgressLabel(c) {
@@ -710,7 +1122,45 @@ function buildSuccessScreen(message, extras = {}) {
 function errorScreen(message) {
   return {
     screen: 'SUCCESS',
-    data: { message, extension_message_response: { params: { training_action: 'error' } } },
+    data: {
+      message,
+      extension_message_response: {
+        params: {
+          training_action: 'error',
+          // bd-2451 — carry the reason out with the Flow closure. SUCCESS is a
+          // terminal screen, so a refusal ends the Flow; without this the bot's
+          // handler had nothing to say and returned silently, which is what a
+          // teacher experiences as "it just never replied to me".
+          error_message: String(message || ''),
+        },
+      },
+    },
+  };
+}
+
+/**
+ * BUG-144 — an error shown as the FIRST screen (from INIT or a raw BACK).
+ *
+ * errorScreen() renders on SUCCESS, which has incoming edges from all three
+ * other screens, so it is not a legal entry point: returning it from INIT
+ * fails with "invalid-screen-transition" and the teacher sees "Something went
+ * wrong" instead of the message. VENDOR_PICKER is the only entry node, so
+ * first-screen errors render there with the reason in the caption. Mid-Flow
+ * errors keep using errorScreen().
+ *
+ * vendor_options carries ONE placeholder row rather than []: the
+ * RadioButtonsGroup is `required: true`, and an empty data-source is itself a
+ * payload-validation failure — which would just swap this bug for another.
+ */
+function entryErrorScreen(message) {
+  return {
+    screen: 'VENDOR_PICKER',
+    data: {
+      hero_title:    'Teacher Training',
+      hero_subtitle: ' ',
+      hero_caption:  message,
+      vendor_options: [{ id: 'none', title: 'No programs available', description: message }],
+    },
   };
 }
 
@@ -729,4 +1179,21 @@ module.exports = {
   levelOptionTitle,
   ghostSlotData,
   levelProgressLine,
+  // bd-2391 — level-state computation, exported so the "a module quiz must not
+  // certify the level" contract can be asserted directly.
+  loadVisibleLevelsWithProgress,
+  loadGrandQuizState,
+  // bd-2448 — the module sequencing rule. annotateModuleLocks is pure; export
+  // it so the "exactly one unpassed module is open" contract can be asserted
+  // without a DB fixture.
+  annotateModuleLocks,
+  checkModuleUnlocked,
+  // bd-2479 — the level-scoped gate, exported so the portal can ask the bot
+  // instead of keeping its own copy (which had already drifted).
+  checkLevelUnlocked,
+  // bd-2452/2453 — the single precondition check for starting a level exam,
+  // shared by the Flow branch and quiz-delivery.startGrandQuiz.
+  assertCanStartGrandQuiz,
+  // bd-2483 — the same gate, addressed by level id (what the portal has).
+  assertCanStartExamForLevel,
 };

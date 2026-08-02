@@ -1,11 +1,12 @@
 import Navigation from "@/components/Navigation";
+import { WHATSAPP_URL } from '@/lib/whatsapp';
 import { Button } from "@/components/ui/button";
 import WhatsAppIcon from "@/components/icons/WhatsAppIcon";
 import rumiLogo from "@/assets/rumi-logo.png";
 import { getWhatsAppUrl, trackCtaClick } from "@/lib/funnelTracking";
 
 const HowItWorks = () => {
-  const whatsappUrl = getWhatsAppUrl('https://wa.me/message/WCYNS4DTDB2MD1');
+  const whatsappUrl = getWhatsAppUrl(WHATSAPP_URL);
 
   const handleCtaClickTracking = () => {
     trackCtaClick('how-it-works');

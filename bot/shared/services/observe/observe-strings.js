@@ -37,7 +37,7 @@ const STRINGS = {
     flow_header: 'MEWAKA — rasimu',
     flow_body: 'Nimejaza fomu ya MEWAKA kutoka rekodi yako — kila kiashiria lina alama, ushahidi na ushauri. Fungua, hakiki, na ubadilishe unavyoona inafaa, kisha wasilisha.',
     flow_button: 'Fungua fomu',
-    flow_fallback: 'Uchambuzi umekamilika ✅ — lakini fomu ya kuhariri bado haijawashwa kwenye mfumo huu. Wasiliana na timu ya Rumi.',
+    flow_fallback: 'Uchambuzi umekamilika ✅ — lakini fomu ya kuhariri bado haijawashwa kwenye mfumo huu. Wasiliana na timu ya NIETE.',
     submitted_ack: '✅ Asante! Uchunguzi wako wa MEWAKA umehifadhiwa pamoja na marekebisho yako.',
     // ── bd-21: debrief entry points ──────────────────────────────────
     debrief_choice_body:
@@ -123,10 +123,12 @@ const STRINGS = {
     send_cancel_ack: 'Sawa — sijatuma chochote. Ukibadili mawazo, andika /observe na uchague uchunguzi huo.',
     send_already_sent: '✅ Ripoti ya uchunguzi huo imeshatumwa kwa mwalimu.',
     send_done_fo: '✅ Ripoti imefika kwa mwalimu. Asante kwa kazi nzuri ya ukocha! 🌱',
+    // bd-2411: delivery to the teacher failed on the worker; tell the coach so it isn't a silent drop.
+    send_failed_fo: '⚠️ Samahani — ripoti haikuweza kutumwa kwa mwalimu sasa hivi. Andika /observe, chagua uchunguzi huo, na ujaribu tena kutuma (📨).',
     send_template_queued_fo:
       '📨 Mwalimu hajanitumia ujumbe hivi karibuni, kwa hivyo nimemtumia mwaliko rasmi — akiubonyeza, ripoti yake itamfikia mara moja. Nitakujulisha.',
     send_operator_review_fo:
-      '🔎 Ripoti imepelekwa kwa timu ya Rumi kwa ukaguzi wa mwisho (utaratibu wa majaribio). Ikithibitishwa, itamfikia mwalimu.',
+      '🔎 Ripoti imepelekwa kwa timu ya NIETE kwa ukaguzi wa mwisho (utaratibu wa majaribio). Ikithibitishwa, itamfikia mwalimu.',
     report_caption_teacher:
       'Ripoti yako ya somo 🌱 Imeandaliwa kutokana na uchunguzi wa {fo} — pamoja na kumbukumbu za mazungumzo yenu.',
     companion_from_label: 'Kutoka kwa',
@@ -212,6 +214,8 @@ const STRINGS = {
     send_cancel_ack: 'ٹھیک ہے، نہیں بھیجی۔ تفصیلات محفوظ ہیں — جب چاہیں /observe سے دوبارہ۔',
     send_already_sent: 'یہ رپورٹ پہلے ہی بھیجی جا چکی ہے۔ ✅',
     send_done_fo: '✅ رپورٹ استاد کو پہنچ گئی۔',
+    // bd-2411: delivery failed on the worker — surface it to the coach, never silent.
+    send_failed_fo: '⚠️ معذرت — رپورٹ ابھی استاد کو نہیں بھیجی جا سکی۔ /observe لکھیں، وہ مشاہدہ منتخب کریں، اور دوبارہ بھیجنے کی کوشش کریں (📨)۔',
     send_template_queued_fo: '📨 استاد نے حال میں مجھے پیغام نہیں بھیجا، اس لیے انہیں دعوت بھیجی ہے — ایک ٹیپ پر رپورٹ مل جائے گی۔ میں بتاؤں گی۔',
     send_operator_review_fo: '📨 رپورٹ جائزے کے لیے بھیج دی گئی ہے — منظوری پر استاد کو پہنچے گی۔',
     report_caption_teacher: '🌱 آپ کے سبق پر مبارک ہو! یہ رہی آپ کی رپورٹ۔',
@@ -247,7 +251,7 @@ const STRINGS = {
     flow_header: 'FICO — draft',
     flow_body: "I've pre-filled the FICO form from your recording — every indicator has a rating, evidence, and an improvement note. Open it, review, change anything you disagree with, then submit.",
     flow_button: 'Open the form',
-    flow_fallback: 'Analysis complete ✅ — but the editable form is not yet enabled on this deployment. Please contact the Rumi team.',
+    flow_fallback: 'Analysis complete ✅ — but the editable form is not yet enabled on this deployment. Please contact the NIETE team.',
     submitted_ack: '✅ Thank you! Your FICO observation is saved, with your edits.',
     // ── bd-21: debrief entry points ──────────────────────────────────
     debrief_choice_body:
@@ -333,15 +337,19 @@ const STRINGS = {
     send_cancel_ack: "Okay — nothing was sent. If you change your mind, type /observe and pick that observation.",
     send_already_sent: '✅ That observation\'s report has already been sent to the teacher.',
     send_done_fo: '✅ The report reached the teacher. Beautiful coaching work! 🌱',
+    // bd-2411: delivery failed on the worker — surface it to the coach, never silent.
+    send_failed_fo: "⚠️ Sorry — the report couldn't be sent to the teacher just now. Type /observe, pick that observation, and try sending again (📨).",
     send_template_queued_fo:
       "📨 The teacher hasn't messaged me recently, so I sent them an official invite — one tap and the report arrives. I'll let you know.",
     send_operator_review_fo:
-      '🔎 The report went to the Rumi team for a final check (pilot procedure). Once approved, it reaches the teacher.',
+      '🔎 The report went to the NIETE team for a final check (pilot procedure). Once approved, it reaches the teacher.',
     report_caption_teacher:
       'Your lesson report 🌱 Prepared from {fo}\'s visit — with notes from your conversation together.',
     companion_from_label: 'From',
     companion_commitment_label: 'Your commitment',
-    companion_closing: 'We are proud of your work. Tuko pamoja. 💛',
+    // bd-2405: was 'We are proud of your work. Tuko pamoja. 💛' — the Swahili
+    // "Tuko pamoja" leaked into the English set and reached NIETE teachers.
+    companion_closing: 'We are proud of your work. We are with you. 💛',
   },
 };
 
@@ -373,4 +381,59 @@ function observeLang(user) {
   return 'en';
 }
 
-module.exports = { observeStrings, observeLang };
+// ── Visit-picker capture prompt (bd-2432, port of main-bot bd-2328) ──────────
+// Sent right after the coach taps "Start observation" in the visit Flow: names
+// the BOUND teacher and the live framework (FICO on NIETE — never hardcode
+// MEWAKA). en/ur only (NIETE market, Rule 20/bd-2405).
+const VISIT_CAPTURE_TEMPLATES = {
+  en: {
+    withName: '🎙️ You\'re observing *{name}*. When the lesson starts, record it and send me the audio — I\'ll draft the {fw} form for you.',
+    noName: '🎙️ When the lesson starts, record it and send me the audio — I\'ll draft the {fw} form for you.',
+  },
+  ur: {
+    withName: '🎙️ آپ *{name}* کا مشاہدہ کر رہے ہیں۔ سبق شروع ہو تو ریکارڈ کر کے آڈیو مجھے بھیجیں — میں آپ کے لیے {fw} فارم تیار کر دوں گی۔',
+    noName: '🎙️ سبق شروع ہو تو ریکارڈ کر کے آڈیو مجھے بھیجیں — میں آپ کے لیے {fw} فارم تیار کر دوں گی۔',
+  },
+};
+
+/**
+ * @param {string} lang     coach language ('ur' | anything-else→en)
+ * @param {{teacherName?:string, framework?:string}} [opts]
+ */
+function buildVisitCapturePrompt(lang, opts = {}) {
+  const l = lang === 'ur' ? 'ur' : 'en';
+  const fw = String(opts.framework || 'FICO').toUpperCase();
+  const t = VISIT_CAPTURE_TEMPLATES[l];
+  const template = opts.teacherName ? t.withName : t.noName;
+  return template.replace('{name}', opts.teacherName || '').replace('{fw}', fw);
+}
+
+// ── Scheduling "done" exit ack (bd-2444, operator 2026-07-31) ────────────────
+// Sent in chat after "I'm done for now" on CONFIRM_SCHEDULED: recap the saved
+// schedule in the coach's preferred/locked language + the /observe re-entry.
+const SCHEDULE_DONE_TEMPLATES = {
+  en: '✅ Observation scheduled for *{name}* on {date} at {slot}. Tap /observe anytime to see your schedule.',
+  ur: '✅ *{name}* کا مشاہدہ {date}، {slot} کے لیے شیڈول ہو گیا۔ اپنے تمام شیڈول دیکھنے کے لیے کبھی بھی /observe لکھیں۔',
+};
+
+const _ACK_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+function _ackDate(ymd) {
+  const ms = Date.parse(`${ymd}T00:00:00Z`);
+  if (!Number.isFinite(ms)) return String(ymd || '');
+  const d = new Date(ms);
+  return `${d.getUTCDate()} ${_ACK_MONTHS[d.getUTCMonth()]}`;
+}
+
+/**
+ * @param {string} lang  coach language ('ur' | anything-else→en)
+ * @param {{teacherName?:string, date?:string, slot?:string}} [opts] date = YYYY-MM-DD
+ */
+function buildScheduleDoneAck(lang, opts = {}) {
+  const l = lang === 'ur' ? 'ur' : 'en';
+  return SCHEDULE_DONE_TEMPLATES[l]
+    .replace('{name}', opts.teacherName || '')
+    .replace('{date}', _ackDate(opts.date))
+    .replace('{slot}', opts.slot || '');
+}
+
+module.exports = { observeStrings, observeLang, buildVisitCapturePrompt, buildScheduleDoneAck };

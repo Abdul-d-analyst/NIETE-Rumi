@@ -15,7 +15,7 @@
  *                             all_modules vendor: "📚 English"           (no ladder label)
  *   levelOptionTitle(lvl)   → chain:      "Level 2 · Emerging Practitioner — Continue"
  *                             all_modules: "English — Start"
- *   ghostSlotData(slot)     → { title: hidden-safe placeholder, progress: '',
+ *   ghostSlotData(slot)     → { title: hidden-safe placeholder, progress: ' ',
  *                               visible: false } so the Flow can hide the row
  *                               (real levels get visible: true via
  *                               levelSlotVisible(lvl) === true).
@@ -98,7 +98,10 @@ describe('bd-2137 — vendor-aware level labels', () => {
   test('ghost slots are marked hidden for the Flow', () => {
     const ghost = ghostSlotData(3);
     expect(ghost.visible).toBe(false);
-    expect(ghost.progress).toBe('');
+    // BUG-144 — blank-but-not-empty. An '' here fails WhatsApp's payload
+    // validation and breaks the whole screen; see
+    // training-home-ghost-slot-nonempty.test.js.
+    expect(ghost.progress).toBe(' ');
   });
 
   test('state emoji still tracks progress state for both vendor kinds', () => {

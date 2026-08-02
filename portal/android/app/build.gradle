@@ -1,5 +1,21 @@
 apply plugin: 'com.android.application'
 
+// Release signing, sourced from the environment or gradle.properties — NEVER committed.
+//
+// Play App Signing is enabled for this listing, so this is the UPLOAD key: we sign
+// with it, Google verifies, strips our signature, and re-signs with the app-signing
+// key it holds. Anything that pins a certificate (Google Sign-In, App Links
+// assetlinks.json) must use the APP-SIGNING fingerprint, not this one.
+//
+// Set NIETE_KEYSTORE_PATH / NIETE_KEYSTORE_PASSWORD / NIETE_KEY_ALIAS /
+// NIETE_KEY_PASSWORD, or the matching keys in a gitignored keystore.properties.
+// See keystore.properties.template.
+def nieteKeystore = System.getenv('NIETE_KEYSTORE_PATH') ?: findProperty('NIETE_KEYSTORE_PATH')
+def nieteStorePass = System.getenv('NIETE_KEYSTORE_PASSWORD') ?: findProperty('NIETE_KEYSTORE_PASSWORD')
+def nieteAlias = System.getenv('NIETE_KEY_ALIAS') ?: findProperty('NIETE_KEY_ALIAS')
+def nieteKeyPass = System.getenv('NIETE_KEY_PASSWORD') ?: findProperty('NIETE_KEY_PASSWORD')
+def hasNieteSigning = nieteKeystore && nieteStorePass && nieteAlias && nieteKeyPass
+
 android {
     namespace = "pk.edu.niete"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -7,8 +23,8 @@ android {
         applicationId "pk.edu.niete"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1200
-        versionName "1200"
+        versionCode 1202
+        versionName "1202"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         // Default launcher label; the debug build type overrides it.
         manifestPlaceholders = [appLabel: "NIETE"]
@@ -16,6 +32,16 @@ android {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
              // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
+        }
+    }
+    signingConfigs {
+        if (hasNieteSigning) {
+            release {
+                storeFile file(nieteKeystore)
+                storePassword nieteStorePass
+                keyAlias nieteAlias
+                keyPassword nieteKeyPass
+            }
         }
     }
     buildTypes {
@@ -38,6 +64,11 @@ android {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            // NO applicationIdSuffix here — release MUST stay exactly `pk.edu.niete`,
+            // the package Play uses to identify the existing listing.
+            if (hasNieteSigning) {
+                signingConfig signingConfigs.release
+            }
         }
     }
 }

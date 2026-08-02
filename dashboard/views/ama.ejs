@@ -3,18 +3,18 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title><%= title %> - Rumi Observability Portal</title>
+  <title><%= title %> - NIETE Observability Portal</title>
   <link rel="stylesheet" href="/css/main.css">
-  <link rel="icon" type="image/png" href="/images/rumi-logo.png">
+  <link rel="icon" type="image/png" href="/images/niete-logo.png">
   <!-- Chart.js for visualizations -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <style>
     /* AMA-specific styles - Claude-inspired minimalism */
     :root {
-      /* Rumi Brand Colors */
-      --ama-primary: #1D2025;  /* Rumi dark blue */
+      /* NIETE Brand Colors (bd-2458) */
+      --ama-primary: #333748;  /* NIETE navy-slate */
       --ama-primary-hover: #2a2f36;
-      --ama-accent: #E86B4A;  /* Rumi coral/orange */
+      --ama-accent: #47BA7D;  /* NIETE green */
       --ama-accent-light: #f5ebe8;
       --ama-bg: #ffffff;
       --ama-bg-secondary: #f8f9fa;
@@ -677,7 +677,7 @@
       <div class="ama-chat-container" id="chatContainer">
         <!-- Welcome Screen (shown when no active conversation) -->
         <div class="ama-welcome" id="welcomeScreen">
-          <img src="/images/rumi-logo.png" alt="Rumi" class="ama-welcome-icon">
+          <img src="/images/niete-logo.png" alt="NIETE" class="ama-welcome-icon">
           <% if (locals.isAdminView) { %>
           <h1 class="ama-greeting">
             <span class="ama-greeting-accent">AMA Chats</span> Admin View
@@ -687,7 +687,7 @@
           <h1 class="ama-greeting">
             <span class="ama-greeting-accent"><%= username %></span> <span id="greetingVariation">Returns!</span>
           </h1>
-          <p class="ama-subgreeting">How can Rumi help you analyze your data today?</p>
+          <p class="ama-subgreeting">How can NIETE help you analyze your data today?</p>
           <% } %>
 
           <% if (!locals.isAdminView) { %>

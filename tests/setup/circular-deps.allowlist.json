@@ -12,5 +12,12 @@
       "bot/shared/services/audio.service.js"
     ],
     "reason": "Pre-existing cross-dependency between the TTS service and the audio-processing service. Both lazy-require each other inside their respective methods (audio.service.js does it 4× for different TTS variants). Works at runtime."
+  },
+  {
+    "cycle": [
+      "bot/shared/services/training/content-delivery.service.js",
+      "bot/shared/services/training/quiz-delivery.service.js"
+    ],
+    "reason": "bd-2390 made the module quiz a gate, so the two halves of the loop call each other: content-delivery.handleModuleDone lazy-requires quiz-delivery to send the quiz, and quiz-delivery.gradeAttempt lazy-requires content-delivery.deliverNextModule to release the next module once the teacher passes. BOTH requires are inside function bodies, never at module top level, so neither ever observes a half-initialised `{}`. The progress-row write — the one piece both genuinely share — was extracted to training/progress.service.js rather than crossing this edge."
   }
 ]

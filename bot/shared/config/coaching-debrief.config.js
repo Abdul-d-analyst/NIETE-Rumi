@@ -25,7 +25,10 @@
  */
 
 // Number of reflective questions in a debrief conversation.
-const NUM_REFLECTIVE_QUESTIONS = 3;
+// One reflection question per observation (was 3). The debrief loop gates on this
+// constant and the question generator sizes its arms from it, so this value is the
+// single source of the count — no other edit is needed to change how many are asked.
+const NUM_REFLECTIVE_QUESTIONS = 1;
 
 /**
  * The coaching model that governs how reflective questions are framed.

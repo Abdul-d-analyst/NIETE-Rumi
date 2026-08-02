@@ -29,7 +29,7 @@ const { getClient } = require('../services/llm-client');
 
 const openai = getClient();
 // Import REAL language detection utilities for command detection
-const { detectLanguageOverride } = require('../utils/language-detector');
+const { detectLanguageOverride, isMarketLanguage } = require('../utils/language-detector');
 const { getUserLanguage, setUserLanguage } = require('../utils/language-cache');
 // Import language detection for content generation
 const { detectRequestedLanguage, parseSubjectAndGrade } = require('../utils/language-detection');
@@ -140,6 +140,10 @@ async function tryCurriculumLessonPlanServe(from, topic, user, language) {
 
 const { evaluateHomeworkTrigger } = require('./homework-trigger');
 const { detectEditClassIntent } = require('./edit-class-trigger');
+const {
+  parseCertificateCommand,
+  deliverCertificateByCode,
+} = require('../services/training/certificate-pdf.service');
 
 async function handleTextMessage(message, from, messageBody, user = null) {
   logToFile(`Processing TEXT message: ${messageBody}`);
@@ -259,7 +263,13 @@ async function handleTextMessage(message, from, messageBody, user = null) {
   // ============================================================
   // FEATURE-BASED REGISTRATION: Check if waiting for name
   // ============================================================
-  if (user) {
+  // bd-2447: `/register` is exempt from the pending-name intercept below —
+  // otherwise the literal text "/register" gets swallowed as a name answer.
+  // It falls through to the /register command branch, which always opens the
+  // registration Flow.
+  const isRegisterCommand = (messageBody || '').trim().toLowerCase() === '/register';
+
+  if (user && !isRegisterCommand) {
     try {
       const isPendingName = await FeatureRegistrationService.isPendingName(user.id);
       if (isPendingName) {
@@ -305,8 +315,18 @@ async function handleTextMessage(message, from, messageBody, user = null) {
   const currentLanguage = user ? await getUserLanguage(user.id) : 'en';
   logToFile('Current user language preference', { language: currentLanguage, userId: user?.id });
 
-  // Check for explicit language switch command FIRST
-  const overrideLanguage = detectLanguageOverride(messageBody);
+  // Check for explicit language switch command FIRST.
+  // bd-2413 (row 11): only honour a switch to a MARKET language (en/ur). A
+  // request for Punjabi (or any off-market language) is ignored — Rumi stays on
+  // the teacher's current en/ur, rather than locking the whole conversation to
+  // an unsupported language.
+  const rawOverride = detectLanguageOverride(messageBody);
+  const overrideLanguage = isMarketLanguage(rawOverride) ? rawOverride : null;
+  if (rawOverride && !overrideLanguage) {
+    logToFile('🌐 Off-market language override ignored (keeping en/ur)', {
+      requested: rawOverride, userId: user?.id,
+    });
+  }
   let responseLanguage = currentLanguage;
   let languageSwitched = false;
 
@@ -668,11 +688,22 @@ async function handleTextMessage(message, from, messageBody, user = null) {
   }
 
   // ============================================================
-  // CERTIFICATES COMMAND: /certificates — list the teacher's earned
-  // grand-quiz certifications. Text-only (PDF delivery is Layer 2).
+  // CERTIFICATES COMMAND
+  //   /certificates            → list the teacher's earned certifications
+  //   /certificate <CODE>      → send THAT certificate as a PDF document
+  //
+  // The PDF is fetched-or-minted through the same shared service the portal
+  // reaches over the internal API, so a certificate a teacher can download in
+  // the browser is exactly the one they get in chat — legacy certificates
+  // included, which render on first request either way.
+  //
+  // Parsing and delivery live in the service, not here: this handler pulls in
+  // ~40 services and cannot be booted in a test, so logic inlined in it is
+  // untestable by construction.
   // ============================================================
-  if (trimmedMessage === '/certificates' || trimmedMessage === '/certificate') {
-    logToFile('🏆 /certificates command detected', { userId: user?.id, phoneNumber: from });
+  const certCommand = parseCertificateCommand(trimmedMessage);
+  if (certCommand) {
+    logToFile('🏆 /certificates command detected', { userId: user?.id, phoneNumber: from, code: certCommand.code });
     if (!user) {
       typingController.stop();
       await WhatsAppService.sendMessage(
@@ -681,6 +712,24 @@ async function handleTextMessage(message, from, messageBody, user = null) {
       );
       return;
     }
+    // A named certificate: fetch-or-mint it and send the file itself.
+    if (certCommand.code) {
+      const result = await deliverCertificateByCode(supabase, {
+        userId: user.id,
+        phoneNumber: from,
+        certificateCode: certCommand.code,
+      });
+      typingController.stop();
+      if (result.ok) return;
+      await WhatsAppService.sendMessage(
+        from,
+        result.reason === 'not_found'
+          ? `I could not find a certificate with the code \`${certCommand.code}\` in your records.\n\nSend /certificates to see the ones you have earned.`
+          : "I could not prepare that certificate just now. Please try again in a moment — it is safe in your records either way."
+      );
+      return;
+    }
+
     const { data: certs } = await supabase
       .from('training_certificates')
       .select('certificate_code, teacher_name_snapshot, level_name_snapshot, issued_at, level_id, training_levels(order_index)')
@@ -706,7 +755,8 @@ async function handleTextMessage(message, from, messageBody, user = null) {
     const body =
       `🏆 *NIETE Certifications — ${teacherName}*\n\n` +
       lines.join('\n\n') +
-      `\n\n_Type /training to continue with your next level._`;
+      `\n\n_Send_ \`/certificate <code>\` _to get the PDF._` +
+      `\n_Type /training to continue with your next level._`;
     await WhatsAppService.sendMessage(from, body);
     logToFile('🏆 Sent certificates list', { userId: user.id, count: certs.length });
     return;
@@ -738,8 +788,14 @@ async function handleTextMessage(message, from, messageBody, user = null) {
       );
       return;
     }
+    // bd-2460 — the Assessment Generator is held OFF until it is ready on BOTH
+    // surfaces. The switch is one app_settings row shared with the portal, so
+    // neither side can claim the feature is live while the other says it isn't.
+    // Fail-closed: an absent row or a failed lookup reads as off.
+    const { isAssessmentGeneratorEnabled } = require('../config/feature-flags');
+    const assessmentLive = await isAssessmentGeneratorEnabled();
     const ASSESSMENT_GEN_FLOW_ID = process.env.ASSESSMENT_GEN_FLOW_ID || '';
-    if (ASSESSMENT_GEN_FLOW_ID) {
+    if (assessmentLive && ASSESSMENT_GEN_FLOW_ID) {
       typingController.stop();
       const flowToken = `${user.id}:assessment-gen:${Date.now()}`;
       const responseLanguage = await getUserLanguage(from) || 'en';
@@ -1450,6 +1506,34 @@ async function handleTextMessage(message, from, messageBody, user = null) {
       return;
     }
 
+    // bd-2447: conversational/deferred registration is DEPRECATED (matches the
+    // main Rumi bot). /register ALWAYS opens the registration Flow when one is
+    // configured — regardless of feature count, registration_pending_name, or
+    // any onboarding gate, and even when the users row doesn't exist yet.
+    // The legacy recovery/guide paths below only remain as fallbacks for
+    // deployments with no REGISTRATION_FLOW_ID (or a failed Flow send).
+    const REGISTRATION_FLOW_ID = process.env.REGISTRATION_FLOW_ID || '';
+    if (REGISTRATION_FLOW_ID) {
+      try {
+        await WhatsAppService.sendFlow(from, {
+          flowId: REGISTRATION_FLOW_ID,
+          flowToken: user?.id || from,
+          header: 'Welcome',
+          body: 'Quick setup — tell us a little about you.',
+          footer: 'Powered by NIETE',
+          buttonText: 'Get started',
+        });
+        logToFile('📝 Registration flow sent from /register command', { userId: user?.id, phoneNumber: from });
+        return;
+      } catch (error) {
+        logToFile('⚠️ Registration flow send failed from /register — falling back to legacy paths', {
+          userId: user?.id,
+          error: error.message,
+        });
+        // fall through to the legacy recovery/guide paths below
+      }
+    }
+
     // Check if user has features but missed registration (recovery path)
     // This handles users who used features but never got asked for name
     if (user?.id) {
@@ -1544,7 +1628,7 @@ async function handleTextMessage(message, from, messageBody, user = null) {
     const flowToken = `${user?.id}:settings:${Date.now()}`;
     await WhatsAppService.sendFlow(from, {
       flowId: SETTINGS_FLOW_ID,
-      header: 'Rumi Settings',
+      header: 'NIETE Settings',
       body: ({
         ur: 'اپنی زبان اور آبزرویشن ٹول کی ترجیحات اپ ڈیٹ کریں۔',
         sw: 'Sasisha mapendeleo yako ya lugha na zana ya uchunguzi.',
@@ -1578,7 +1662,7 @@ async function handleTextMessage(message, from, messageBody, user = null) {
           flowToken: user.id,
           header: "What's running",
           body: "See everything you have in flight — and stop any of it.",
-          footer: 'Powered by Rumi',
+          footer: 'Powered by NIETE',
           buttonText: 'Open status'
         });
         logToFile('✅ Status flow sent', { userId: user.id });
@@ -2710,5 +2794,5 @@ module.exports = {
   parseStyleFromButtonId,
   evaluateHomeworkTrigger, // exported for trigger unit tests
   tryCurriculumLessonPlanServe, // exported for intercept unit tests
-  handleLessonPlanRequest, // exported for the Oxbridge-picker "Generate Rumi LP" tap
+  handleLessonPlanRequest, // exported for the Oxbridge-picker "Generate NIETE LP" tap
 };

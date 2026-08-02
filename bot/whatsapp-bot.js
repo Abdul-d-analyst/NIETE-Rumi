@@ -43,6 +43,11 @@ app.use(express.json());
 app.use('/api/flows', flowEndpointRoutes);
 // Async result callbacks from external services (UG_EG assessment generator, …)
 app.use('/webhooks', assessmentGenCallbackRoutes);
+// bd-2461 — service-to-service API (portal → bot). Shared-secret auth lives
+// inside the router. Mounted before the inline /api/internal/send-password-reset
+// route below; Express falls through when no route in the router matches.
+const internalApiRoutes = require('./shared/routes/internal-api.routes');
+app.use('/api/internal', internalApiRoutes);
 
 // Create temp directory if it doesn't exist
 if (!fs.existsSync(constants.TEMP_DIR)) {
@@ -438,6 +443,15 @@ app.post('/webhook', async (req, res) => {
       }
       if (buttonId === 'training_pause') {
         await WhatsAppService.sendMessage(from, '⏸ Paused. Send /training when you want to pick up where you left off.');
+        return;
+      }
+      // bd-2390 — immediate retry of a failed module quiz. Must be matched
+      // BEFORE the generic `training_quiz_` answer handler below, whose id
+      // regex expects `training_quiz_<uuid>_<option>` and would reject this.
+      if (buttonId.startsWith('training_quiz_retry_')) {
+        const moduleId = buttonId.replace('training_quiz_retry_', '');
+        const QuizDelivery = require('./shared/services/training/quiz-delivery.service');
+        await QuizDelivery.startTrainingQuiz(user.id, parseInt(moduleId, 10), from);
         return;
       }
       if (buttonId.startsWith('training_quiz_')) {
@@ -1264,6 +1278,28 @@ app.post('/webhook', async (req, res) => {
           });
           await WhatsAppService.sendMessage(from, 'Sorry, something went wrong loading your training content. Please try /training again.');
         }
+      } else if (flowType === 'training_msq') {
+        // Training multi-answer question — the CheckboxGroup Flow's completion
+        // payload IS the answer. Unlike the other endpoint flows nothing was
+        // persisted during the exchange (the screen completes rather than
+        // round-tripping), so this branch owns the write: grade the set,
+        // advance the attempt, send the next question.
+        logToFile('🎓 Detected multi-answer training question submission', {
+          from,
+          responseFields: Object.keys(responseJson)
+        });
+        try {
+          const QuizDelivery = require('./shared/services/training/quiz-delivery.service');
+          const recorded = await QuizDelivery.handleQuizFlowSubmission(user.id, responseJson, from);
+          if (!recorded) {
+            logToFile('⚠️ Multi-answer submission was not recorded', { from });
+          }
+        } catch (msqError) {
+          logToFile('❌ Exception handling multi-answer training submission', {
+            from, error: msqError.message, stack: msqError.stack
+          });
+          await WhatsAppService.sendMessage(from, 'Sorry, something went wrong saving your answer. Please send /training to continue.');
+        }
       } else if (flowType === 'observe') {
         // FEAT-102: the editable FICO observation form was submitted. The
         // endpoint already applied the observer's v2 edits; ack + offer the
@@ -1287,6 +1323,17 @@ app.post('/webhook', async (req, res) => {
           logToFile('🔭 Observe FICO submission acknowledged', { from, sessionId: observeSessionId });
         } catch (observeAckErr) {
           logToFile('⚠️ observe ack failed (submission itself already persisted)', { error: observeAckErr.message });
+        }
+      } else if (flowType === 'observe_visit') {
+        // bd-2432 (port of main-bot FEAT-116 bd-2301): the visit picker's
+        // "Start observation" completion — bind the picked teacher and send
+        // the record prompt. Without this branch the completion falls to the
+        // generic "/menu" fallback below (the exact upstream bd-2294 failure).
+        logToFile('🔭 Detected observe-visit flow submission', { from, responseFields: Object.keys(responseJson) });
+        try {
+          await FlowResponseHandler.handleObserveVisitFlow(message, from, user?.id);
+        } catch (visitErr) {
+          logToFile('❌ observe-visit completion handler failed', { from, error: visitErr.message });
         }
       } else {
         // Unknown flow type
@@ -1610,14 +1657,21 @@ app.post('/webhook', async (req, res) => {
             await ObserveDebrief.startDebrief(parsed.sessionId, from, user);
           } else {
             // "new observation" — same arm as /observe's capture path.
-            // observeLang (NOT the main bot's sw/en test) — NIETE serves ur/en,
-            // and Riffat's list rendered in Urdu, so the sw test would have
-            // replied in English to an Urdu user.
-            const { observeStrings, observeLang } = require('./shared/services/observe/observe-strings');
-            const ObserveState = require('./shared/services/observe/observe-state.service');
-            const { getObserveArm } = require('./shared/services/observe/observe-gate');
-            await WhatsAppService.sendMessage(from, observeStrings(observeLang(user)).capture_prompt);
-            await ObserveState.setState(user.id, 'awaiting_audio', { arm: getObserveArm(user) });
+            // bd-2432 (upstream bd-2330): an assigned coach reaches the
+            // school→teacher→brief picker from THIS tap too — the pending-
+            // debrief list preempts /observe, so without this route a coach
+            // with a pending debrief could never reach the picker.
+            const { maybeLaunchVisitFlow } = require('./shared/handlers/observe-command.handler');
+            if (!(await maybeLaunchVisitFlow(user, from))) {
+              // observeLang (NOT the main bot's sw/en test) — NIETE serves ur/en,
+              // and Riffat's list rendered in Urdu, so the sw test would have
+              // replied in English to an Urdu user.
+              const { observeStrings, observeLang } = require('./shared/services/observe/observe-strings');
+              const ObserveState = require('./shared/services/observe/observe-state.service');
+              const { getObserveArm } = require('./shared/services/observe/observe-gate');
+              await WhatsAppService.sendMessage(from, observeStrings(observeLang(user)).capture_prompt);
+              await ObserveState.setState(user.id, 'awaiting_audio', { arm: getObserveArm(user) });
+            }
           }
         } else {
           logToFile('⚠️ observe debrief list tap without user/parse', { listId, hasUser: !!user });
@@ -1778,9 +1832,39 @@ async function handleDocumentMessage(message, from, user) {
 
         return; // Exit early - voice handler will process the audio
       } catch (durationError) {
+        // bd-2409 — enrich the log so the NEXT long-audio failure is fully
+        // diagnosable (Maria's 29:40 recording died here with no userId/mediaId
+        // logged, so the root could not be pinned; the truncation theory was
+        // disproven — no session row was ever created).
         logToFile('⚠️ Could not get audio duration, treating as regular document', {
-          error: durationError.message
+          error: durationError.message,
+          stack: durationError.stack,
+          userId: user && user.id,
+          from,
+          documentId,
+          mimeType,
+          fileSizeMB: audioClassification.sizeMB,
         });
+        // bd-2409 — INVARIANT: a school leader's long recording must NEVER fall
+        // through to the misleading "send a classroom audio first" reply. If the
+        // duration probe fails we cannot classify it as long, but a leader who
+        // sent an audio DOCUMENT almost certainly sent a classroom recording —
+        // route to /observe (dark-safe: inert unless OBSERVE is on). This upholds
+        // observe-audio-router's stated invariant even on a probe failure.
+        try {
+          const { isSchoolLeader } = require('./shared/services/observe/observe-gate');
+          if (isSchoolLeader(user)) {
+            const { routeLeaderAudio } = require('./shared/services/observe/observe-audio-router');
+            const observeHandled = await routeLeaderAudio({
+              user, from, audioId: documentId, sessionId: null, isLongAudio: true,
+            });
+            if (observeHandled) return;
+          }
+        } catch (routeErr) {
+          logToFile('⚠️ observe fallback on duration-probe failure errored', {
+            userId: user && user.id, error: routeErr.message,
+          });
+        }
         // Continue with regular document flow if duration check fails
       }
     }
@@ -1811,8 +1895,14 @@ async function handleDocumentMessage(message, from, user) {
       );
     }
   } catch (error) {
+    // bd-2409 — include userId + stack + documentId so a dropped recording is
+    // attributable (Maria's 29:40 recording left NO diagnosable trail because
+    // this catch logged only {error, from}).
     logToFile('❌ Error handling document', {
       error: error.message,
+      stack: error.stack,
+      userId: user && user.id,
+      documentId: message && message.document && message.document.id,
       from
     });
     await WhatsAppService.sendMessage(from, "Sorry, I encountered an error processing your document.");

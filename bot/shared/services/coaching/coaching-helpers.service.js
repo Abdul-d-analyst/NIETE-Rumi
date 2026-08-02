@@ -15,6 +15,7 @@ const OpenAI = require('openai');
 const supabase = require('../../config/supabase');
 const { logToFile } = require('../../utils/logger');
 const { OPENAI_API_KEY } = require('../../utils/constants');
+const { getUserLanguage } = require('../../utils/language-cache');
 
 class CoachingHelpersService {
   /**
@@ -57,40 +58,44 @@ class CoachingHelpersService {
   }
 
   /**
-   * Determine output language for voice debrief
-   * @param {string} userId - User ID
-   * @param {string} sessionId - Session ID
-   * @param {string} transcriptLanguage - Language detected in transcript
-   * @returns {Promise<string>} Language code ('ur', 'en', etc.)
+   * Determine output language for the report + voice debrief.
+   *
+   * bd-2413 (FEAT-106 rows 11,12): the teacher's PREFERRED/LOCKED language wins —
+   * NEVER the transient input language. Previously this read the most recent
+   * conversations.input_language and returned that, so a teacher who answered one
+   * reflection in English got an English voice debrief, and one who asked for
+   * Punjabi mid-flow got Punjabi output that then stuck. The report + voice must
+   * follow her chosen language (set + locked via /settings → preferred_language),
+   * clamped to a language the coaching pipeline can actually render.
+   *
+   * @param {string} userId
+   * @param {string} sessionId (unused now; kept for signature compatibility)
+   * @param {string} transcriptLanguage - fallback only, when no preference is set
+   * @returns {Promise<string>} Language code ('ur', 'en', …)
    */
   static async determineOutputLanguage(userId, sessionId, transcriptLanguage) {
     try {
-      // Get recent conversation messages to detect user's communication language
-      const { data: recentMessages } = await supabase
-        .from('conversations')
-        .select('input_language, output_language')
-        .eq('user_id', userId)
-        .eq('session_id', sessionId)
-        .order('created_at', { ascending: false })
-        .limit(5);
-
-      if (recentMessages && recentMessages.length > 0) {
-        // Find most recent user message language
-        for (const msg of recentMessages) {
-          if (msg.input_language && msg.input_language !== 'mixed') {
-            return msg.input_language;
-          }
-        }
-      }
-
-      // Fallback to transcript language
-      return transcriptLanguage || 'ur';
+      const preferred = await getUserLanguage(userId);
+      if (preferred) return CoachingHelpersService.clampCoachingLanguage(preferred);
+      // No stored preference — fall back to the transcript language, then Urdu.
+      return CoachingHelpersService.clampCoachingLanguage(transcriptLanguage || 'ur');
     } catch (error) {
       logToFile('Warning: Could not determine output language, defaulting to Urdu', {
-        error: error.message
+        error: error.message,
       });
       return 'ur';
     }
+  }
+
+  /**
+   * Clamp a language code to one the coaching report + TTS can render. Anything
+   * outside this set (e.g. a regional PK code, or a language the teacher wrote in
+   * once) collapses to Urdu — the deliberate floor for this market.
+   */
+  static clampCoachingLanguage(lang) {
+    const SUPPORTED = new Set(['en', 'ur', 'sw', 'ar']);
+    const code = String(lang || '').trim();
+    return SUPPORTED.has(code) ? code : 'ur';
   }
 
   /**

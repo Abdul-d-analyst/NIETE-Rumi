@@ -88,9 +88,9 @@ export async function trackCtaClick(buttonLocation: string): Promise<void> {
 export function addSessionIdToWhatsAppLink(whatsappUrl: string): string {
   const sessionId = getSessionId();
 
-  // WhatsApp URL format: https://wa.me/message/WCYNS4DTDB2MD1
+  // WhatsApp URL format: https://wa.me/<number>  (see lib/whatsapp.ts)
   // We need to add text parameter with session ID
-  // Final format: https://wa.me/message/WCYNS4DTDB2MD1?text=sessionId%3Dsession-xxx
+  // Final format: https://wa.me/<number>?text=sessionId%3Dsession-xxx
 
   const separator = whatsappUrl.includes('?') ? '&' : '?';
   const sessionParam = `text=sessionId%3D${sessionId}`;

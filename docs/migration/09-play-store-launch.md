@@ -36,7 +36,25 @@ Both are already satisfied by the existing Taleemabad `school-app` build, which 
 | Current `versionCode` (niete) | `1126` — **the new build must exceed this** |
 | minSdk / targetSdk | 24 / 35 (Play's target-35 requirement already met) |
 
-> **Confirm before building**: whether the listing uses **Play App Signing**. If it does, the local key is the *upload* key and Play re-signs; if not, the local key IS the app-signing key. Either way this keystore is the one to use — but it changes what happens if it is ever lost. Check Play Console → Test and release → Setup → App signing.
+> **CONFIRMED 2026-07-30 (operator, from Play Console → Setup → App signing):** the listing uses
+> **Play App Signing**, and the keystore we hold is the **upload key** — its SHA-256 is the
+> `DA:A4:A5:FB:…:2C` fingerprint shown as the *upload key certificate*. The **app-signing**
+> certificate is different and is held by Google; we neither have nor need it.
+>
+> Console shows each certificate as MD5 / SHA-1 / SHA-256 (2 certificates × 3 hashes, not 6 keys).
+> Compare on SHA-256.
+>
+> Three consequences:
+> - **We sign the AAB with `niete-app.jks`.** Google verifies, strips our signature, and re-signs with
+>   the app-signing key. Devices see Google's certificate, which is why it differs from ours.
+> - **Losing the upload key is recoverable** — Google can reset an upload key on request. This
+>   materially de-risks `bd-2351`: a leaked upload key is still serious (anyone with repo access can
+>   sign an upload as NIETE) but no longer permanent. The app-signing key, the irreplaceable one, is
+>   Google's.
+> - **Anything that pins a certificate must use the APP-SIGNING SHA-256, not ours.** Google Sign-In,
+>   Maps, Firebase, and Android App Links `assetlinks.json` all verify against the certificate the
+>   device sees. Nothing in the current wrapper uses these, but the zero-touch deep-link work
+>   (`bd-2357`) would — and using the upload fingerprint there silently breaks link verification.
 
 ### What "replace" means in practice
 
@@ -144,7 +162,7 @@ Effort is engineering time; Google review is calendar time that runs in parallel
 No code. Get these facts from Play Console before writing a build:
 
 1. Confirm the listing's package is `pk.edu.niete` and we have release access to it.
-2. Record whether **Play App Signing** is on, and the expected signing-cert SHA-256. Compare to the fingerprint above.
+2. ✅ **DONE 2026-07-30** — Play App Signing is ON; our keystore is the upload key and its SHA-256 matches the upload-key certificate. Also proven locally: the key signs our actual release build, producing a signature with `CN=NIETE` and the matching fingerprint.
 3. Note the highest `versionCode` Play has ever accepted (may exceed the repo's `1126`).
 4. *(Informational only, per D-013)* glance at active installs — for comms, not as a gate.
 
@@ -189,7 +207,7 @@ Upload to **internal testing** → verify login/session on real devices → **cl
 | Session cookie dies in WebView | Login loop; app is unusable while looking "shipped" | Prove on a physical device in phase 2, before store upload |
 | ~~Existing NIETE users get a different app~~ | **Retired by D-013** — data loss accepted, clean break, no migration | Optional courtesy notice only |
 | Fresh install lands on a password login | Contradicts the "install and it works" goal — the app is login-gated and credentials come from a WhatsApp one-time link, so a new user has no password to type | **Deliberately deferred (D-014, `bd-2357`)** — wrap first, then design the first-run flow. Not a wrap blocker |
-| Committed signing key | Anyone with repo access can sign as NIETE | `bd-2351`; do not propagate the pattern into this repo |
+| Committed signing key | Anyone with repo access can sign an **upload** as NIETE. Severity reduced by the 2026-07-30 finding that Play App Signing is on: this is the upload key, and Google can reset it. Still worth fixing, no longer catastrophic | `bd-2351`; do not propagate the pattern into this repo |
 | Data safety form inaccurate | Rejection or a compliance issue on teacher PII | Fill from the actual API surface, not from memory |
 | Review latency | ~days, and first submissions often bounce | Start phase 4 paperwork during phase 2 |
 
@@ -199,7 +217,7 @@ Offline caching / Dexie (D-012), push notifications, iOS (D-011, `bd-2352`), cam
 
 ## Open questions for the operator
 
-1. **Play App Signing on or off**, and do we hold release access to the existing listing?
+1. ~~Play App Signing on or off~~ — **answered 2026-07-30: ON, we hold the upload key.** Still open: do we have *release* permission on the listing (viewing the signing page only proves read access)?
 2. **How many active installs** does the old NIETE app have — and does replacing it need NIETE's explicit blessing?
 3. **Who owns the privacy policy / ToS text**, given it is also gating Meta verification?
 4. Is the old app's backend (`schools.niete.pk`) being retired, or do both need to coexist?

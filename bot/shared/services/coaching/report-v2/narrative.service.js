@@ -53,6 +53,10 @@ GENDER-NEUTRAL (teachers are men AND women — mandatory):
 - Instructions use the RESPECTFUL آپ-imperative (کریں، دیں، پوچھیں) — never the intimate تم (کرو، دو).
 
 CODE-SWITCH: keep pedagogical/technical/subject terms in ENGLISH (Latin letters) inline — never transliterate into Nastaliq (write "open-ended questions" not "کھلے سوال"; "scaffolding" not "اسکفولڈنگ"; "phonics", "context", "model" stay English).
+
+KEEP CONCEPT NAMES IN ENGLISH — do NOT translate the pedagogical concept names in "strength_name", "horizon_title", the moment titles, or any section/framework label. Write them in natural English exactly as a teacher would say them. Concretely: write "Warm Questions" NOT "واضح گرم سوالات"; "Classroom" NOT "جماعتی پڑھائی"; "open-ended questions" NOT "کھلے اور سیدھے سوالات"; "Peer and Self Assessment" NOT a literal Urdu translation; "High-Leverage Practice" stays English. The warm PROSE around them (strength_note, horizon_note) is Urdu; the concept NAME stays English.
+
+MOMENTS MUST BE SPECIFIC — every moment needs a real, meaningful detail or quote. Never a single vague word (e.g. "سادہ") that means nothing on its own.
 ${PRONOUN_RULE}`;
   }
   if (language === 'ar') {
@@ -80,8 +84,13 @@ const TRANSLIT_FIX = [
   [/کنٹیکسٹ/g, 'context'],
   [/اسکی?فولڈنگ/g, 'scaffolding'],
   [/فونکس/g, 'phonics'],
-  [/کھلے\s*سوالات?|اوپن\s*اینڈڈ\s*سوالات?/g, 'open-ended questions'],
+  [/کھلے\s*(?:اور\s*سیدھے\s*)?سوالات?|اوپن\s*اینڈڈ\s*سوالات?/g, 'open-ended questions'],
   [/گائیڈڈ\s*پریکٹس/g, 'guided practice'],
+  // bd-2415 (row 15): literal Urdu translations of pedagogical/section terms the
+  // LLM produced despite the code-switch rule — normalize back to English.
+  [/جماعتی\s*پڑھائی/g, 'classroom'],
+  [/(?:واضح\s*)?گرم\s*سوالات?/g, 'warm questions'],
+  [/پیر\s*اور\s*سیلف\s*اسسمنٹ/g, 'peer and self assessment'],
 ];
 
 function fixCodeswitch(s) {
@@ -130,11 +139,13 @@ function buildPrompt(analysis, { transcript, trend = [], language, teacherName }
     .map((m) => `- ${m.what_happened || ''} (${m.significance_reason_en || ''})`).join('\n');
   const weakest = pickWeakestDomain(a);
 
-  return `You are Rumi, a warm, perceptive instructional coach. Below is the FULL TRANSCRIPT of a real lesson by ${teacherName} plus its ${fw} rubric analysis. Write the words for a CELEBRATION report that makes this teacher feel truly SEEN — not graded like a medical report.
+  return `You are the NIETE Teaching Assistant, a warm, perceptive instructional coach. Below is the FULL TRANSCRIPT of a real lesson by ${teacherName} plus its ${fw} rubric analysis. Write the words for a CELEBRATION report that makes this teacher feel truly SEEN — not graded like a medical report.
 
 Use the TRANSCRIPT as source of truth. Find what is UNIQUELY hers — a signature move, how she talks to children, how she connects ideas — and ground every claim in something she actually did. Tie it to the ${fw} lens (clarity, student involvement, questioning, classroom management) honestly, but lead with humanity. Address her as "you".
 
 NEVER emit rubric IDs, snake_case tokens, or programmatic identifiers as prose. If the analysis mentions an indicator like "step_by_step" or "guided_practice", write it out naturally ("step by step", "guided practice"). If it mentions "1.2 Fidelity to LP Steps", say "lesson-plan fidelity", not "1.2". The teacher never sees the raw rubric shape.
+
+PLAIN LANGUAGE — avoid coach-jargon the teacher wouldn't use herself: "scaffolding", "extension", "differentiation", "formative assessment", "higher-order thinking", "metacognition", "gradual release". Especially in "horizon_note", describe the concrete move in plain words (e.g. "break the task into small steps", "a harder task for early finishers") rather than the jargon label.
 
 ${langRules(language)}
 
@@ -195,4 +206,4 @@ async function generateReportNarrative(analysis, opts = {}) {
   }
 }
 
-module.exports = { generateReportNarrative, buildPrompt, LANG_NAME };
+module.exports = { generateReportNarrative, buildPrompt, LANG_NAME, fixCodeswitch };

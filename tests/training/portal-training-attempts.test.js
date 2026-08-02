@@ -137,6 +137,8 @@ beforeEach(() => {
     from: supabaseFrom,
     rpc: jest.fn().mockResolvedValue({ error: null }),
   }));
+  const { installTrainingDelegation } = require('../fixtures/delegate-training-to-bot');
+  installTrainingDelegation(() => supabaseFrom);
 
   // R2 service is imported at module load; stub it so the route file loads.
   jest.doMock('../../dashboard/services/r2.service', () => ({
