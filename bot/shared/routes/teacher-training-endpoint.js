@@ -904,21 +904,38 @@ async function loadGrandQuizState(userId, levelId) {
   // bd-2393 — the pass bar is per-vendor (NIETE 80%, Beacon House 70%), and the
   // question count is per-quiz. Both were hardcoded ("62 questions · 100%
   // required"), which was wrong on every level.
-  const [{ count: qCount }, { data: lvRow }] = await Promise.all([
+  const [{ count: bankCount }, { data: lvRow }] = await Promise.all([
     supabase.from('training_questions').select('id', { count: 'exact', head: true })
       .eq('grand_quiz_id', catalog.id).eq('is_active', true),
     supabase.from('training_levels').select('vendor_id').eq('id', levelId).maybeSingle(),
   ]);
   let passPct = 100;
+  let examCap = null;
   if (lvRow?.vendor_id) {
     const { data: vendor } = await supabase
-      .from('training_vendors').select('passing_pct').eq('id', lvRow.vendor_id).maybeSingle();
+      .from('training_vendors').select('passing_pct, exam_question_cap').eq('id', lvRow.vendor_id).maybeSingle();
     const p = Number(vendor?.passing_pct);
     if (Number.isFinite(p) && p > 0 && p <= 100) passPct = p;
+    const cap = Number(vendor?.exam_question_cap);
+    if (Number.isFinite(cap) && cap > 0) examCap = cap;
   }
-  const qPart = qCount ? `${qCount} questions · ` : '';
-  if (!allDone) return { badge: 'badge_quiz_locked', body: '🔒 Grand Quiz — Unlocks when all courses are complete.', caption: `${qPart}${passPct}% required · 24h cooldown on fail`, cta: '🔒 Locked' };
-  return { badge: 'badge_quiz_available', body: '📝 Grand Quiz — Ready. Start your level exam.', caption: `${qPart}${passPct}% to pass · 24h cooldown on fail`, cta: 'Start exam' };
+
+  // bd-2499 — advertise the paper the teacher will actually sit.
+  //
+  // bd-2495 capped NIETE exams at `exam_question_cap` randomly-sampled
+  // questions, but this caption still counted the whole bank: Skilled
+  // Practitioner offered "72 questions" and then served 20. The count is what
+  // a teacher plans their evening around, so it has to be the served one.
+  const servedCount = examCap ? Math.min(bankCount || 0, examCap) : (bankCount || 0);
+  const qPart = servedCount ? `${servedCount} questions · ` : '';
+
+  // bd-2475 — capstones have no cooldown. capstone-delivery never writes
+  // cooldown_until, so claiming one here was simply false; the clause is
+  // dropped rather than shown as "0h".
+  const coolPart = catalog.quiz_type === 'capstone' ? '' : ' · 24h cooldown on fail';
+
+  if (!allDone) return { badge: 'badge_quiz_locked', body: '🔒 Grand Quiz — Unlocks when all courses are complete.', caption: `${qPart}${passPct}% required${coolPart}`, cta: '🔒 Locked' };
+  return { badge: 'badge_quiz_available', body: '📝 Grand Quiz — Ready. Start your level exam.', caption: `${qPart}${passPct}% to pass${coolPart}`, cta: 'Start exam' };
 }
 
 // ─── Presentation helpers ──────────────────────────────────────────────────
