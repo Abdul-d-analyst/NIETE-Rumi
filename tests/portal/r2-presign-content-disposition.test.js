@@ -210,6 +210,15 @@ describe('generatePresignedUrl — explicit attachment mode', () => {
     expect(commandInputs[0].ResponseContentType).toBeUndefined();
   });
 
+  it('a null options argument behaves like the default (never throws)', async () => {
+    // _resolveMediaUrl forwards whatever its caller passed; a null must not
+    // fall into the catch and silently return null instead of a URL.
+    const r2 = loadService();
+    const url = await r2.generatePresignedUrl(urlFor('a.pdf'), 3600, null);
+    expect(url).toBeTruthy();
+    expect(commandInputs[0].ResponseContentDisposition).toBe('inline');
+  });
+
   it('disposition:null opts out entirely (stored metadata wins)', async () => {
     const r2 = loadService();
     await r2.generatePresignedUrl(urlFor('a.pdf'), 3600, { disposition: null });

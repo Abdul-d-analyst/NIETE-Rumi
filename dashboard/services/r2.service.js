@@ -230,8 +230,9 @@ function _attachmentDisposition(filename) {
  * @param {string} [options.filename] - attachment filename (defaults to the key's basename)
  * @returns {object} Partial GetObjectCommand input ({} when nothing should be overridden)
  */
-function buildResponseOverrides(key, options = {}) {
-  const disposition = options.disposition === undefined ? 'inline' : options.disposition;
+function buildResponseOverrides(key, options) {
+  const opts = options || {}; // callers forward an optional arg — null must not throw
+  const disposition = opts.disposition === undefined ? 'inline' : opts.disposition;
   if (!disposition || disposition === 'none') return {};
 
   const contentType = getInlineContentTypeFromKey(key);
