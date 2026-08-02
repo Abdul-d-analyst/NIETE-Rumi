@@ -11,8 +11,11 @@
  *   { user_id, program_id, level_id, attempt_id, certificate_code,
  *     teacher_name_snapshot, level_name_snapshot, issued_at, pdf_r2_key }
  *
- * PDF rendering is a SEPARATE concern (pdf_r2_key stays null until a renderer
- * populates it) — this service only owns code generation + the row.
+ * PDF rendering lives in `certificate-pdf.service.js` and runs here as a
+ * BEST-EFFORT step AFTER the row is written. It can never block or fail
+ * issuance: if rendering or the upload throws, the row still stands and
+ * `pdf_r2_key` simply stays null — the state every certificate issued before
+ * this existed is in, and a permanently valid one.
  *
  * The Supabase client is injected by the caller so each surface uses its own
  * configured client (bot vs dashboard) against the same shared database —
@@ -61,13 +64,15 @@ function generateCertificateCode(now = new Date()) {
  * @param {string} params.programId - training_programs.id (uuid)
  * @param {number} params.levelId   - training_levels.id
  * @param {string} params.attemptId - training_assessment_attempts.id (uuid)
- * @returns {Promise<{certificate_code: string, teacher_name: string, level_name: string, issued_at: string, already_issued: boolean}>}
+ * @returns {Promise<{certificate_code: string, teacher_name: string, level_name: string, issued_at: string, already_issued: boolean, pdf_r2_key: string|null}>}
  */
 async function issueCertificate(supabase, { userId, programId, levelId, attemptId }) {
-  // Idempotency: one certificate per passed attempt.
+  // Idempotency: one certificate per passed attempt. A re-issue returns
+  // whatever PDF the existing row already has — it does NOT re-render, so a
+  // repeat call stays as cheap as it has always been.
   const { data: existing } = await supabase
     .from('training_certificates')
-    .select('certificate_code, teacher_name_snapshot, level_name_snapshot, issued_at')
+    .select('certificate_code, teacher_name_snapshot, level_name_snapshot, issued_at, pdf_r2_key')
     .eq('attempt_id', attemptId)
     .maybeSingle();
   if (existing) {
@@ -77,6 +82,7 @@ async function issueCertificate(supabase, { userId, programId, levelId, attemptI
       level_name: existing.level_name_snapshot,
       issued_at: existing.issued_at,
       already_issued: true,
+      pdf_r2_key: existing.pdf_r2_key || null,
     };
   }
 
@@ -104,12 +110,38 @@ async function issueCertificate(supabase, { userId, programId, levelId, attemptI
     logToFile('❌ Certificate insert failed', { userId, levelId, attemptId, error: error.message });
   }
 
+  // Best-effort PDF. Only attempted when the row actually landed — with no row
+  // there is nothing to attach a key to. The whole thing is wrapped again here
+  // (the service already swallows internally) so that even a require-time
+  // failure — a clone without pdfkit installed, say — cannot cost a teacher
+  // their certificate.
+  let pdfKey = null;
+  if (!error) {
+    try {
+      const { generateAndStoreCertificatePdf } = require('./certificate-pdf.service');
+      pdfKey = await generateAndStoreCertificatePdf(supabase, {
+        userId,
+        levelId,
+        certificateCode: code,
+        teacherName,
+        levelName,
+        issuedAt,
+      });
+    } catch (err) {
+      logToFile('❌ Certificate PDF step failed — row stands without a PDF', {
+        userId, levelId, attemptId, error: err.message,
+      });
+      pdfKey = null;
+    }
+  }
+
   return {
     certificate_code: code,
     teacher_name: teacherName,
     level_name: levelName,
     issued_at: issuedAt,
     already_issued: false,
+    pdf_r2_key: pdfKey || null,
   };
 }
 
@@ -192,7 +224,13 @@ async function maybeIssueQuizScoreCertificate(supabase, { userId, moduleId, atte
     const cert = await issueCertificate(supabase, {
       userId, programId, levelId: level.id, attemptId,
     });
-    return { issued: true, certificate_code: cert.certificate_code, level_name: cert.level_name, teacher_name: cert.teacher_name };
+    return {
+      issued: true,
+      certificate_code: cert.certificate_code,
+      level_name: cert.level_name,
+      teacher_name: cert.teacher_name,
+      pdf_r2_key: cert.pdf_r2_key || null,
+    };
   } catch (err) {
     logToFile('❌ maybeIssueQuizScoreCertificate failed', { userId, moduleId, error: err.message });
     return { issued: false };

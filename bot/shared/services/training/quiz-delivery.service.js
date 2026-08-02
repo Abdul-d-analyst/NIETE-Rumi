@@ -77,6 +77,32 @@ const COOLDOWN_HOURS = 24;
 const KIND_GRAND = 'grand';
 const KIND_TRAINING_MODULE = 'training_module';
 
+/**
+ * Hand the teacher the actual certificate file after the congratulation
+ * message. Purely additive: the message with the code has already gone out and
+ * remains the source of truth, so a certificate with no PDF (`pdf_r2_key`
+ * null — the state of every certificate issued before PDFs existed) simply
+ * gets no attachment. Never throws; delivery must not fail grading.
+ *
+ * @param {string} phoneNumber
+ * @param {{certificate_code?: string, level_name?: string, pdf_r2_key?: string|null}} cert
+ */
+async function deliverCertificatePdf(phoneNumber, cert) {
+  try {
+    if (!cert || !cert.pdf_r2_key) return;
+    const { sendCertificateDocument } = require('./certificate-pdf.service');
+    await sendCertificateDocument(phoneNumber, {
+      certificate_code: cert.certificate_code,
+      level_name: cert.level_name,
+      pdf_r2_key: cert.pdf_r2_key,
+    });
+  } catch (err) {
+    logToFile('❌ Certificate PDF delivery failed (message already sent)', {
+      certificateCode: cert && cert.certificate_code, error: err.message,
+    });
+  }
+}
+
 // bd-2138 — multi-answer ("msq") questions. A question is multi iff its
 // correct_option holds a comma-joined set ('1,3,5' — restored from the
 // legacy `answers` array). Selection accumulates on the answers row across
@@ -1002,6 +1028,7 @@ async function gradeAttempt(attemptId, phoneNumber) {
         `You completed every ${certRes.level_name} training with 70%+ on each quiz.\n\n` +
         `Certificate code: \`${certRes.certificate_code}\`\nYou can also download it from your portal.`
       );
+      await deliverCertificatePdf(phoneNumber, certRes);
     }
 
     // bd-2390 — the next module is released here, not on the button tap.
@@ -1051,6 +1078,7 @@ async function gradeAttempt(attemptId, phoneNumber) {
       `You passed the ${cert.level_name} grand quiz with *${score}/${attempt.total_questions}* (${Math.round(examPct)}%).\n\n` +
       `Certificate code: \`${cert.certificate_code}\`\n\nSend /training to continue to the next level.`
     );
+    await deliverCertificatePdf(phoneNumber, cert);
   } else {
     await WhatsAppService.sendMessage(
       phoneNumber,
