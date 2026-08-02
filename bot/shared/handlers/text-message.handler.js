@@ -1253,6 +1253,36 @@ async function handleTextMessage(message, from, messageBody, user = null) {
         .single();
 
       if (activeCoaching) {
+        // bd-2508 — a slash command ENDS the conversation and falls through.
+        //
+        // conducting_conversation was the only waiting state with no way out.
+        // The bot's own escape-path map tells teachers to "type /menu" to leave
+        // AWAITING_MENU_CHOICE / VIDEO_TOPIC / LESSON_PLAN / CLASSROOM_AUDIO —
+        // but CONDUCTING_CONVERSATION was never added to it, and this block
+        // swallowed the very command that map recommends. One teacher was held
+        // for 269 hours.
+        //
+        // Exempting the command is NOT enough on its own: the session would
+        // stay open and recapture the next free-text message, so the teacher
+        // escapes and is immediately caught again. The session has to end.
+        //
+        // Answers already given are preserved — they live in
+        // conversation_state.questions and are written as each one arrives, so
+        // ending the session discards nothing the teacher said.
+        if (trimmedMessage.startsWith('/')) {
+          logToFile('🎓 Slash command during coaching — ending the session and continuing', {
+            coachingSessionId: activeCoaching.id,
+            command: trimmedMessage.split(/\s+/)[0],
+          });
+          await supabase
+            .from('coaching_sessions')
+            .update({ status: 'abandoned', updated_at: new Date().toISOString() })
+            .eq('id', activeCoaching.id);
+          // Deliberately no extra chat message: the command's own reply lands
+          // immediately after this and a preamble in front of it is noise.
+          // Fall through — do NOT return — so the command runs normally.
+        } else {
+
         // Check if session is stuck (no update in last hour)
         const lastUpdate = new Date(activeCoaching.updated_at);
         const now = new Date();
@@ -1296,6 +1326,7 @@ async function handleTextMessage(message, from, messageBody, user = null) {
         );
 
         return; // Exit early - coaching flow handled
+        }
       }
     } catch (error) {
       // If no active coaching or error, continue with normal flow
