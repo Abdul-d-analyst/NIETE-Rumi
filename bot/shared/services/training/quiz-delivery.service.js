@@ -879,4 +879,4 @@ async function decideModuleQuizPass(moduleId, score, totalQuestions) {
   };
 }
 
-module.exports = { startGrandQuiz, startTrainingQuiz, sendQuestion, handleQuizButton, gradeAttempt, decideModuleQuizPass };
+module.exports = { startGrandQuiz, startTrainingQuiz, sendQuestion, handleQuizButton, gradeAttempt, decideModuleQuizPass, getVendorPassingPctByLevel };

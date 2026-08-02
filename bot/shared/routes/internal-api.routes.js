@@ -229,7 +229,13 @@ router.post('/training/exam-gate-by-level', requireInternalKey, trainingRoute('e
   if (levelId === null) return res.status(400).json({ success: false, error: 'levelId is required' });
 
   const gate = await Training.assertCanStartExamForLevel(userId, levelId);
-  return res.json({ success: true, ...gate });
+  // bd-2393 — the portal hardcoded pass_mark_pct: 100 in what it showed
+  // teachers. The real bar is per vendor (NIETE 80, Beacon House 70), and that
+  // fix shipped on WhatsApp only. Send the real number so the portal cannot
+  // invent one.
+  const QuizDelivery = require('../services/training/quiz-delivery.service');
+  const passPct = await QuizDelivery.getVendorPassingPctByLevel(levelId, 'exam');
+  return res.json({ success: true, pass_pct: passPct, ...gate });
 }));
 
 /**

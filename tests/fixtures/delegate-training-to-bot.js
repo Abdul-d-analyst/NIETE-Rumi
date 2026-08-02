@@ -76,7 +76,11 @@ function installTrainingDelegation(getSupabaseFrom) {
       checkLevelUnlocked: (uid, levelId) => bot.checkLevelUnlocked(uid, levelId),
       checkModuleUnlocked: (uid, moduleId) => bot.checkModuleUnlocked(uid, moduleId),
       checkExamGate: (uid, order, vendorKey) => bot.assertCanStartGrandQuiz(uid, order, vendorKey),
-      checkExamGateByLevel: (uid, levelId) => bot.assertCanStartExamForLevel(uid, levelId),
+      checkExamGateByLevel: async (uid, levelId) => {
+        const gate = await bot.assertCanStartExamForLevel(uid, levelId);
+        const qd = require('../../bot/shared/services/training/quiz-delivery.service');
+        return { pass_pct: await qd.getVendorPassingPctByLevel(levelId, 'exam'), ...gate };
+      },
       getGrandQuizState: (uid, levelId) => bot.loadGrandQuizState(uid, levelId),
       getModuleQuizVerdict: (moduleId, score, total) =>
         require('../../bot/shared/services/training/quiz-delivery.service')

@@ -2708,6 +2708,7 @@ async function _loadGrandQuizGate(userId, levelId) {
     reason: gate.reason || null,
     message: gate.message || null,
     unavailable: gate.unavailable === true,
+    passPct: typeof gate.pass_pct === 'number' ? gate.pass_pct : null,
     quiz: quizId ? { id: quizId, level_id: levelId } : null,
     passed: gate.reason === 'already_passed',
     passedAttempt: level && level.passed_at ? { completed_at: level.passed_at } : null,
@@ -2809,7 +2810,8 @@ router.get('/training/level/:id/grand-quiz', requirePortalAuth, async (req, res)
       grand_quiz: {
         state,
         question_count: gate.questionCount,
-        pass_mark_pct: 100,
+        // bd-2393 — was hardcoded 100. The bar is the vendor's.
+        pass_mark_pct: gate.passPct,
         cooldown_hours: GRAND_QUIZ_COOLDOWN_HOURS,
         cooldown_until: gate.cooldownUntil,
         courses_total: gate.coursesTotal,
@@ -2847,6 +2849,9 @@ router.get('/training/level/:id/grand-quiz/questions', requirePortalAuth, async 
     if (!lock.ok) return res.status(lock.status).json({ success: false, error: lock.error, previous_level_order: lock.previous_level_order });
 
     const gate = await _loadGrandQuizGate(userId, levelId);
+    if (gate.unavailable) {
+      return res.status(503).json({ success: false, code: 'unavailable', error: gate.message });
+    }
     const state = _grandQuizState(gate);
     if (state !== 'ready') {
       return res.status(state === 'no_quiz' ? 404 : 403).json({
@@ -2957,6 +2962,13 @@ router.post('/training/level/:id/grand-quiz/attempts', requirePortalAuth, async 
     //    started (the WhatsApp eligibility rule, checked server-side so a
     //    hand-crafted request can't skip the level's coursework).
     const gate = await _loadGrandQuizGate(userId, levelId);
+    // Checked BEFORE !gate.quiz. When the bot is unreachable there is no level
+    // and therefore no quiz id, so this would otherwise answer "No grand quiz
+    // configured for this level" — the exact misleading message bd-2476 fixed,
+    // reachable again through a transport failure. Say what is actually wrong.
+    if (gate.unavailable) {
+      return res.status(503).json({ success: false, code: 'unavailable', error: gate.message });
+    }
     if (!gate.quiz) {
       return res.status(404).json({ success: false, code: 'no_quiz', error: 'No grand quiz configured for this level' });
     }

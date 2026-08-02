@@ -254,13 +254,24 @@ describe('GET /api/portal/training/level/:id/grand-quiz', () => {
     expect(statusCode).toBe(401);
   });
 
-  it('state=ready when every course in the level has ≥1 completed module', async () => {
+  /**
+   * bd-2447 / bd-2393 — two corrections in one test.
+   *
+   * The title used to read ">=1 completed module": that was the eligibility
+   * PROXY bd-2447 replaced on the bot with "every module passed". The portal
+   * kept the proxy, so it offered the exam to teachers who had barely started.
+   *
+   * pass_mark_pct was also asserted as 100. It was hardcoded in the response,
+   * and bd-2393 ("the exam claimed 100% when the real bar is 80%") had only
+   * ever been fixed on WhatsApp. It is the vendor's bar now.
+   */
+  it('state=ready only when EVERY module in the level is passed', async () => {
     seedLevel({ completedModules: ['m1', 'm2'] });
     const { statusCode, payload } = await invoke({ method: 'get', path: GATE_PATH, userId: 'user-1', params: { id: '1' } });
     expect(statusCode).toBe(200);
     expect(payload.grand_quiz.state).toBe('ready');
     expect(payload.grand_quiz.question_count).toBe(3);
-    expect(payload.grand_quiz.pass_mark_pct).toBe(100);
+    expect(payload.grand_quiz.pass_mark_pct).toBe(80);
     expect(payload.grand_quiz.cooldown_hours).toBe(24);
   });
 
