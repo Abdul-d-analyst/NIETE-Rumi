@@ -1980,7 +1980,7 @@ router.get('/training/level/:id/capstone', requirePortalAuth, async (req, res) =
  *
  * Returns null for empty/non-http values (e.g. a local path row).
  *
- * bd-2492: `options` is forwarded to the presigner, which defaults to
+ * `options` is forwarded to the presigner, which defaults to
  * `inline` + a Content-Type inferred from the key so migrated videos/PDFs
  * render in the browser instead of downloading. Pass
  * `{ disposition: 'attachment', filename }` to presign the SAME object as an
