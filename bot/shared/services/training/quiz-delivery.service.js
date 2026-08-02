@@ -847,4 +847,36 @@ async function gradeAttempt(attemptId, phoneNumber) {
   return true;
 }
 
-module.exports = { startGrandQuiz, startTrainingQuiz, sendQuestion, handleQuizButton, gradeAttempt };
+/**
+ * bd-2483 — the module-quiz PASS decision, on its own.
+ *
+ * gradeAttempt owns grading AND WhatsApp delivery in one 176-line function, so
+ * the portal cannot reuse it without sending messages. But the only part the
+ * portal was getting wrong is the verdict: it used
+ * `is_passed = (score === total)` and wrote `status: 'passed'` unconditionally,
+ * where the bot applies training_vendors.module_passing_pct (NIETE 100, Beacon
+ * House / Oxbridge 70) and records a real failure. That mismatch is the root of
+ * bd-2450 — the portal marking modules complete off failed quizzes, which the
+ * bot then reads as passed because it treats any progress row as a pass.
+ *
+ * Extracting the verdict is enough to make both surfaces agree, and is far
+ * smaller than splitting delivery out of gradeAttempt. Kept byte-identical to
+ * gradeAttempt's own computation, including the `total > 0` guard, so there is
+ * one rule and not two that merely look alike.
+ *
+ * @returns {Promise<{is_passed: boolean, status: string, pass_pct: number, achieved_pct: number}>}
+ */
+async function decideModuleQuizPass(moduleId, score, totalQuestions) {
+  const passingPct = await getVendorPassingPct(moduleId, 'module');
+  const total = Number(totalQuestions) || 0;
+  const pct = total > 0 ? (Number(score) / total) * 100 : 0;
+  const isPassed = total > 0 && pct >= passingPct;
+  return {
+    is_passed: isPassed,
+    status: isPassed ? 'passed' : 'failed',
+    pass_pct: passingPct,
+    achieved_pct: Math.round(pct),
+  };
+}
+
+module.exports = { startGrandQuiz, startTrainingQuiz, sendQuestion, handleQuizButton, gradeAttempt, decideModuleQuizPass, getVendorPassingPctByLevel };

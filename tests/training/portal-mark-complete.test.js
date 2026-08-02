@@ -162,7 +162,19 @@ function seedModule({ moduleId = 42, courseId = 7, levelId = 1, questions = [] }
     rows: [{ id: courseId, level_id: levelId, title: 'C' }],
   };
   tableStates.training_levels = {
-    rows: [{ id: levelId, name: 'L1', order_index: 0, is_active: true }],
+    rows: [{ id: levelId, name: 'L1', order_index: 0, is_active: true, vendor_id: 'vendor-niete' }],
+  };
+  // bd-2469 — the bot's level catalogue is PROGRAM-SCOPED, so the gate needs an
+  // assignment + scope to see this level at all. The portal's old local gate
+  // read every active level and ignored scope entirely; that was bd-2468.
+  tableStates.training_vendors = {
+    rows: [{ id: 'vendor-niete', key: 'NIETE', name: 'NIETE', unlock_logic: 'chain', has_grand_quiz: true, passing_pct: 80, module_passing_pct: 100 }],
+  };
+  tableStates.teacher_training_assignments = {
+    rows: [{ user_id: 'user-1', program_id: 'prog-1', is_active: true }],
+  };
+  tableStates.training_program_scopes = {
+    rows: [{ program_id: 'prog-1', vendor_id: 'vendor-niete', level_ids: null }],
   };
   tableStates.training_questions = {
     rows: questions,
@@ -184,6 +196,8 @@ beforeEach(() => {
     from: supabaseFrom,
     rpc: jest.fn().mockResolvedValue({ error: null }),
   }));
+  const { installTrainingDelegation } = require('../fixtures/delegate-training-to-bot');
+  installTrainingDelegation(() => supabaseFrom);
   jest.doMock('../../dashboard/services/r2.service', () => ({
     generatePresignedUrl: jest.fn().mockResolvedValue(null),
     generatePresignedUrls: jest.fn().mockResolvedValue([]),
