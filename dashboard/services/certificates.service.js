@@ -15,8 +15,8 @@
  * `require('pdfkit')` searches bot/node_modules and then the repo root, and
  * never dashboard/node_modules — the dashboard declaring pdfkit itself makes
  * no difference. A portal-side render works in a dev tree where both installs
- * exist and fails on the deployed service. Same trap as bd-2461's queue
- * enqueue, which degraded silently for two days.
+ * exist and fails on the deployed service. Same trap the lesson-plan enqueue
+ * fell into, where the swallowed require degraded silently for two days.
  *
  * IDENTITY STAYS HERE
  * -------------------
