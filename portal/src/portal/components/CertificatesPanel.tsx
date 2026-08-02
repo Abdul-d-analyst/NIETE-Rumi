@@ -28,6 +28,36 @@
 import { useState, useCallback } from 'react';
 import { Award, Download, Loader2, AlertCircle } from 'lucide-react';
 import api from '../services/api';
+import { getApiBaseUrl } from '@/lib/runtime';
+
+/**
+ * Resolve the API's `download_url` for the environment we are actually in.
+ *
+ * bd-2397: the server sends a root-relative path, which is right on the web —
+ * portal and API share an origin, so it avoids CORS and third-party cookies.
+ * In the Capacitor app there is no such origin: the WebView serves the bundle
+ * from https://localhost, so the browser resolved the href to
+ * https://localhost/api/portal/... , the SPA router caught the unknown path,
+ * and the teacher landed on the 404 page whose only action is "Go to portal
+ * login" — indistinguishable from being logged out, on a valid session.
+ *
+ * The anchor is a plain navigation, so it never passes through the axios
+ * client and never picked up its baseURL. This applies the same base by hand.
+ *
+ * An already-absolute URL is returned untouched, so the day the server starts
+ * handing out a direct R2 link this keeps working rather than doubling up.
+ */
+export function resolveDownloadUrl(downloadUrl: string): string {
+  if (/^https?:\/\//i.test(downloadUrl)) return downloadUrl;
+
+  const base = getApiBaseUrl();
+  // Web: base is the relative '/api/portal' the path already carries.
+  if (!/^https?:\/\//i.test(base)) return downloadUrl;
+
+  // Native: base is absolute and ends in '/api/portal', which the path repeats.
+  const origin = base.replace(/\/api\/portal\/?$/, '');
+  return `${origin}${downloadUrl}`;
+}
 
 export type PortalCertificate = {
   id: string;
@@ -135,7 +165,7 @@ export default function CertificatesPanel() {
 
                   {c.download_url ? (
                     <a
-                      href={c.download_url}
+                      href={resolveDownloadUrl(c.download_url)}
                       target="_blank"
                       rel="noopener noreferrer"
                       data-testid="certificate-download"

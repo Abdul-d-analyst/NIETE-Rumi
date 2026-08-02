@@ -20,8 +20,15 @@ import userEvent from "@testing-library/user-event";
 vi.mock("../services/api", () => ({
   default: { get: vi.fn(), post: vi.fn() },
 }));
+vi.mock("@/lib/runtime", () => ({ getApiBaseUrl: vi.fn(() => "/api/portal") }));
 import api from "../services/api";
+import { getApiBaseUrl } from "@/lib/runtime";
 import CertificatesPanel from "./CertificatesPanel";
+
+/** Point the component at a given API base, as runtime.ts would at build time. */
+function mockApiBase(base: string) {
+  (getApiBaseUrl as any).mockReturnValue(base);
+}
 
 const URL = "/training/certificates";
 
@@ -142,5 +149,64 @@ describe("CertificatesPanel", () => {
 
     await waitFor(() => expect(screen.queryAllByTestId("certificate-row")).toHaveLength(0));
     expect(api.get).toHaveBeenCalledTimes(1);
+  });
+
+  // bd-2397: in the Android app the WebView serves the bundle from
+  // https://localhost, so a root-relative href resolves to an origin with no
+  // server. The download link went to https://localhost/api/portal/... , the
+  // SPA router caught the unknown path, and the teacher got the 404 page whose
+  // only action is "Go to portal login" — indistinguishable from being logged
+  // out, on a session that was perfectly valid.
+  //
+  // The server keeps sending a relative path (correct for web, same origin);
+  // the anchor is responsible for resolving it against the API base the axios
+  // client already uses.
+  describe("native builds resolve the download against the API origin (bd-2397)", () => {
+    it("makes the href absolute when running in the app", async () => {
+      mockApiBase("https://portal.example.com/api/portal");
+      mockList([RENDERED]);
+      render(<CertificatesPanel />);
+      await userEvent.click(screen.getByTestId("certificates-toggle"));
+
+      const link = await screen.findByTestId("certificate-download");
+      expect(link.getAttribute("href")).toBe(
+        "https://portal.example.com/api/portal/training/certificates/PFX-20260802-NEW111/download"
+      );
+    });
+
+    it("never points at the WebView origin", async () => {
+      mockApiBase("https://portal.example.com/api/portal");
+      mockList([RENDERED]);
+      render(<CertificatesPanel />);
+      await userEvent.click(screen.getByTestId("certificates-toggle"));
+
+      const href = (await screen.findByTestId("certificate-download")).getAttribute("href") ?? "";
+      expect(href.startsWith("/")).toBe(false);
+      expect(href).not.toMatch(/localhost/);
+    });
+
+    it("leaves the web build's relative path alone", async () => {
+      // On the web the portal and API share an origin: a relative path avoids
+      // CORS and third-party cookies, so it must not be rewritten.
+      mockApiBase("/api/portal");
+      mockList([RENDERED]);
+      render(<CertificatesPanel />);
+      await userEvent.click(screen.getByTestId("certificates-toggle"));
+
+      const link = await screen.findByTestId("certificate-download");
+      expect(link.getAttribute("href")).toBe(
+        "/api/portal/training/certificates/PFX-20260802-NEW111/download"
+      );
+    });
+
+    it("does not double up the base when the server ever returns an absolute url", async () => {
+      mockApiBase("https://portal.example.com/api/portal");
+      mockList([{ ...RENDERED, download_url: "https://cdn.example.com/cert.pdf" }]);
+      render(<CertificatesPanel />);
+      await userEvent.click(screen.getByTestId("certificates-toggle"));
+
+      const link = await screen.findByTestId("certificate-download");
+      expect(link.getAttribute("href")).toBe("https://cdn.example.com/cert.pdf");
+    });
   });
 });
