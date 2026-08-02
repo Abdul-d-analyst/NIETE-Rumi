@@ -70,4 +70,36 @@ describe('bd-2395 — Android release identity', () => {
     const name = source.match(/versionName\s+["']([^"']+)["']/)[1];
     expect(name).toBe(code);
   });
+
+  // bd-2396: Gradle's default output is `app-release.aab` for every build, so
+  // two AABs from different versions are indistinguishable once they leave the
+  // build directory — and the file that matters is the one being uploaded to
+  // Play. Naming the artifact after the versionCode makes it self-identifying.
+  describe('the release artifact is self-identifying (bd-2396)', () => {
+    it('names the archive niete-rumi-v<versionCode>', () => {
+      const gradle = stripComments(source);
+      expect(gradle).toMatch(/archivesName\s*=\s*["']niete-rumi-v\$\{[^}]*versionCode\}["']/);
+    });
+
+    it('copies the bundle to the exact niete-rumi-v<versionCode>.aab name', () => {
+      const gradle = stripComments(source);
+      expect(gradle).toMatch(/niete-rumi-v\$\{[^}]*versionCode\}\.aab/);
+    });
+
+    it('derives the name from versionCode rather than hardcoding a number', () => {
+      const gradle = stripComments(source);
+      for (const [, name] of gradle.matchAll(/["'](niete-rumi-v[^"']*)["']/g)) {
+        // A literal digit would go stale on the next bump; it must interpolate.
+        expect(name).not.toMatch(/v\d/);
+        expect(name).toContain('${');
+      }
+    });
+
+    // archivesBaseName is removed in Gradle 9 — the modern spelling is
+    // archivesName, and reintroducing the old one would reintroduce a
+    // deprecation warning on every build.
+    it('does not use the Gradle-9-removed archivesBaseName', () => {
+      expect(stripComments(source)).not.toMatch(/archivesBaseName/);
+    });
+  });
 });

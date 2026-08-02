@@ -73,6 +73,41 @@ android {
     }
 }
 
+// bd-2396: name the release artifact after the version.
+//
+// Gradle's default output is `app-release.aab` for every build, so two AABs
+// from different versions are indistinguishable the moment they leave the build
+// directory — and the file that matters is the one being uploaded to Play.
+//
+// The name is derived from versionCode, never hardcoded, so it cannot go stale
+// across a bump: versionCode 1203 produces `niete-rumi-v1203.aab`.
+//
+// `archivesName` (not the Gradle-9-removed `archivesBaseName`) sets the base;
+// the bundle task appends its build type, so the copy below lands the exact
+// name without a `-release` tail. The original app-release.aab is left in place
+// because tooling and CI conventionally look for it.
+base {
+    archivesName = "niete-rumi-v${android.defaultConfig.versionCode}"
+}
+
+tasks.whenTaskAdded { task ->
+    if (task.name == 'bundleRelease') {
+        task.doLast {
+            def outDir = file("${layout.buildDirectory.get()}/outputs/bundle/release")
+            def versioned = new File(outDir, "niete-rumi-v${android.defaultConfig.versionCode}.aab")
+            outDir.listFiles()?.findAll { it.name.endsWith('.aab') && it.name != versioned.name }?.each {
+                java.nio.file.Files.copy(
+                    it.toPath(), versioned.toPath(),
+                    java.nio.file.StandardCopyOption.REPLACE_EXISTING
+                )
+            }
+            if (versioned.exists()) {
+                logger.lifecycle("Release bundle: ${versioned}")
+            }
+        }
+    }
+}
+
 repositories {
     flatDir{
         dirs '../capacitor-cordova-android-plugins/src/main/libs', 'libs'
