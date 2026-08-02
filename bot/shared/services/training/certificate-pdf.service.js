@@ -286,17 +286,134 @@ async function generateAndStoreCertificatePdf(supabase, p = {}) {
  * Presigned URL for a stored certificate PDF.
  * @param {string} pdfR2Key
  * @param {number} [expiresIn=3600] seconds
+ * @param {object} [options] - forwarded to the presigner (e.g. attachment mode)
  * @returns {Promise<string|null>}
  */
-async function certificatePdfUrl(pdfR2Key, expiresIn = 3600) {
+async function certificatePdfUrl(pdfR2Key, expiresIn = 3600, options = undefined) {
   if (!pdfR2Key) return null;
   try {
     const { buildR2PublicUrl, getPresignedUrl } = require('../../storage/r2');
-    return await getPresignedUrl(buildR2PublicUrl(pdfR2Key), expiresIn);
+    return await getPresignedUrl(buildR2PublicUrl(pdfR2Key), expiresIn, options);
   } catch (err) {
     logToFile('❌ Certificate presign failed', { pdfR2Key, error: err.message });
     return null;
   }
+}
+
+/** An error carrying a machine-readable `code` the HTTP layer maps to a status. */
+function certError(code, message) {
+  return Object.assign(new Error(message), { code });
+}
+
+/**
+ * The teacher's certificates. A pure read: it never mints and never presigns.
+ *
+ * Listing is separated from minting on purpose. A teacher with 40 certificates
+ * would otherwise trigger 40 renders and 40 uploads to draw a list they may
+ * only glance at. `has_pdf` tells the caller which ones are already rendered;
+ * the file itself is fetched (and minted, if needed) one at a time, on an
+ * actual request.
+ *
+ * @param {object} supabase
+ * @param {string} userId
+ * @returns {Promise<Array<{certificate_code, level_name, teacher_name, issued_at, has_pdf}>>}
+ */
+async function listCertificates(supabase, userId) {
+  if (!userId) return [];
+  const { data, error } = await supabase
+    .from('training_certificates')
+    .select('id, certificate_code, teacher_name_snapshot, level_name_snapshot, issued_at, pdf_r2_key')
+    .eq('user_id', userId)
+    .order('issued_at', { ascending: false });
+  if (error) throw error;
+
+  return (data || []).map((c) => ({
+    id: c.id,
+    certificate_code: c.certificate_code,
+    level_name: c.level_name_snapshot,
+    teacher_name: c.teacher_name_snapshot,
+    issued_at: c.issued_at,
+    has_pdf: !!c.pdf_r2_key,
+  }));
+}
+
+/**
+ * FETCH-OR-MINT — the single definition of "give me this certificate's PDF".
+ *
+ * Both surfaces go through here: the portal (over the internal HTTP API) and
+ * WhatsApp (`/certificate <code>`). One implementation, so the two can never
+ * disagree about what a teacher is allowed to download or what the file
+ * contains.
+ *
+ * Why mint on demand rather than backfilling: every certificate in production
+ * predates PDF generation, and the vast majority will never be asked for.
+ * Rendering ~13k PDFs to serve a few dozen is waste. The key is deterministic
+ * (`certs/{user_id}/{cert_code}.pdf`), so a concurrent double-mint overwrites
+ * one object instead of orphaning one — there is no cleanup path to get wrong.
+ *
+ * OWNERSHIP IS ENFORCED HERE, not only at the edge. The lookup filters on
+ * user_id AND certificate_code. Callers have already established identity, but
+ * a lookup by bare code would make any leaked code a working download link.
+ *
+ * THROWS rather than returning null, with a `code` the caller maps:
+ *   bad_request | not_found | mint_failed
+ * A file request that cannot be satisfied is a failure, and the caller must be
+ * able to tell "you have no such certificate" from "we could not render it".
+ * Silent success is what hid a comparable bug for two days elsewhere in this
+ * codebase; degrading is the CALLER's decision, not this function's.
+ *
+ * @param {object} supabase
+ * @param {{userId: string, certificateCode: string, expiresIn?: number}} p
+ * @returns {Promise<{certificate_code, level_name, teacher_name, issued_at, pdf_r2_key, download_url, minted}>}
+ */
+async function fetchOrMintCertificatePdf(supabase, p = {}) {
+  const { userId, certificateCode, expiresIn = 3600 } = p;
+  if (!userId || !certificateCode) {
+    throw certError('bad_request', 'userId and certificateCode are required');
+  }
+
+  const { data: row, error } = await supabase
+    .from('training_certificates')
+    .select('id, user_id, level_id, certificate_code, teacher_name_snapshot, level_name_snapshot, issued_at, pdf_r2_key')
+    .eq('user_id', userId)
+    .eq('certificate_code', certificateCode)
+    .maybeSingle();
+  if (error) throw certError('lookup_failed', error.message);
+  if (!row) throw certError('not_found', 'No such certificate for this user');
+
+  let key = row.pdf_r2_key;
+  let minted = false;
+
+  if (!key) {
+    key = await generateAndStoreCertificatePdf(supabase, {
+      userId,
+      levelId: row.level_id,
+      certificateCode: row.certificate_code,
+      teacherName: row.teacher_name_snapshot,
+      levelName: row.level_name_snapshot,
+      issuedAt: row.issued_at,
+    });
+    if (!key) throw certError('mint_failed', 'Certificate PDF could not be generated');
+    minted = true;
+    logToFile('🏆 Certificate PDF minted on demand', { certificateCode, key });
+  }
+
+  // Attachment, not inline: a certificate is a file a teacher saves and prints.
+  const downloadUrl = await certificatePdfUrl(key, expiresIn, {
+    disposition: 'attachment',
+    filename: `${row.certificate_code}.pdf`,
+  });
+  if (!downloadUrl) throw certError('mint_failed', 'Certificate PDF could not be signed');
+
+  return {
+    certificate_code: row.certificate_code,
+    level_name: row.level_name_snapshot,
+    teacher_name: row.teacher_name_snapshot,
+    issued_at: row.issued_at,
+    pdf_r2_key: key,
+    download_url: downloadUrl,
+    minted,
+  };
 }
 
 /**
@@ -336,12 +453,84 @@ async function sendCertificateDocument(phoneNumber, cert, caption) {
   }
 }
 
+/**
+ * A certificate code: <PREFIX>-<YYYYMMDD>-<alnum>, optionally with the legacy
+ * import's extra `-L<n>` segment (`NIETE-L3-20260712-697CAA`).
+ */
+const CERT_CODE_RE = /^[A-Z0-9]{1,12}(?:-L\d+)?-\d{8}-[A-Z0-9]+$/;
+
+/**
+ * Parse the WhatsApp `/certificate[s]` command.
+ *
+ * Exported (and parsed here rather than inline in text-message.handler.js)
+ * because that handler pulls in ~40 services and cannot be booted in a test —
+ * anything hidden inside it is untestable by construction.
+ *
+ * @param {string} text - the trimmed inbound message
+ * @returns {{code: string|null}|null} null when this is not the command at all;
+ *   `{ code: null }` for a bare "show me my certificates";
+ *   `{ code }` when the teacher named one.
+ *
+ * A junk argument degrades to the LIST rather than to a "not found" — a
+ * teacher typing "/certificate please" wants their certificates, not an error.
+ */
+function parseCertificateCommand(text) {
+  const trimmed = String(text || '').trim();
+  const m = /^\/certificates?(?:\s+(.*))?$/i.exec(trimmed);
+  if (!m) return null;
+
+  const arg = (m[1] || '').trim().toUpperCase();
+  if (!arg) return { code: null };
+  return CERT_CODE_RE.test(arg) ? { code: arg } : { code: null };
+}
+
+/**
+ * Fetch-or-mint one certificate and hand it to the teacher on WhatsApp.
+ *
+ * Goes through the SAME fetchOrMintCertificatePdf the portal reaches over the
+ * internal API, so a certificate the teacher can download in the browser is
+ * exactly the certificate they get in chat — including the legacy rows, which
+ * mint on first request either way.
+ *
+ * Never throws. Returns a reason the caller turns into a message.
+ *
+ * @returns {Promise<{ok: boolean, reason?: 'not_found'|'mint_failed'|'send_failed'|'error', minted?: boolean}>}
+ */
+async function deliverCertificateByCode(supabase, { userId, phoneNumber, certificateCode }) {
+  try {
+    // Via module.exports so a test (and any future wrapper) can observe the
+    // one shared entry point rather than a private closure reference.
+    const cert = await module.exports.fetchOrMintCertificatePdf(supabase, { userId, certificateCode });
+
+    const ok = await sendCertificateDocument(phoneNumber, {
+      certificate_code: cert.certificate_code,
+      level_name: cert.level_name,
+      pdf_r2_key: cert.pdf_r2_key,
+    });
+    if (!ok) return { ok: false, reason: 'send_failed' };
+
+    logToFile('🏆 Certificate delivered on WhatsApp', { userId, certificateCode, minted: cert.minted });
+    return { ok: true, minted: cert.minted };
+  } catch (err) {
+    const reason = (err && (err.code === 'not_found' || err.code === 'mint_failed')) ? err.code : 'error';
+    logToFile('❌ Certificate chat delivery failed', { userId, certificateCode, reason, error: err && err.message });
+    return { ok: false, reason };
+  }
+}
+
 module.exports = {
   certificatePdfKey,
   renderCertificatePdf,
   generateAndStoreCertificatePdf,
   certificatePdfUrl,
   sendCertificateDocument,
+  // The shared fetch-or-mint surface — used by the internal HTTP API (which
+  // the portal calls) and by the WhatsApp /certificate command.
+  listCertificates,
+  fetchOrMintCertificatePdf,
+  // WhatsApp command surface, kept out of the un-bootable text handler.
+  parseCertificateCommand,
+  deliverCertificateByCode,
   // exported for tests + any future backfill script
   resolveVendorName,
   formatIssueDate,

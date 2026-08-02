@@ -1,12 +1,16 @@
 /**
  * The Certificates panel on the Training page.
  *
- * Rendered, not grepped — the behaviour that matters here is what a teacher
- * sees after a click, and the one rule that is easy to get wrong is the
- * PDF-less certificate. Every certificate issued before PDF generation existed
- * has `pdf_r2_key = null`, and generation stays best-effort, so a null download
- * is permanent and valid: the certificate must still appear, with the download
- * simply absent — never a broken link, never an error row, never hidden.
+ * Rendered, not grepped. The behaviour that changed with fetch-or-mint is the
+ * one worth pinning: EVERY certificate is now downloadable. Before, a
+ * certificate whose PDF had never been rendered showed "PDF not available" and
+ * was a dead end — and that was every certificate in production, because all
+ * 12,954 predate PDF generation. Now the download link points at the portal's
+ * own route, which mints on first request.
+ *
+ * `has_pdf: false` therefore means "not rendered YET", not "not available".
+ * The UI says so, so the teacher knows the first click may take a moment
+ * rather than thinking it hung.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -21,22 +25,24 @@ import CertificatesPanel from "./CertificatesPanel";
 
 const URL = "/training/certificates";
 
-const WITH_PDF = {
+const RENDERED = {
   id: "cert-new",
   certificate_code: "PFX-20260802-NEW111",
   level_name: "Aspiring Teacher",
   teacher_name: "Amina Khan",
   issued_at: "2026-08-02T10:00:00Z",
-  download_url: "https://r2.example.com/bucket/certs/u/PFX-20260802-NEW111.pdf?X-Amz-Signature=abc",
+  has_pdf: true,
+  download_url: "/api/portal/training/certificates/PFX-20260802-NEW111/download",
 };
 
-const WITHOUT_PDF = {
+const NOT_YET_RENDERED = {
   id: "cert-old",
   certificate_code: "PFX-L1-20260712-OLD222",
   level_name: "Teacher Leader",
   teacher_name: "Amina Khan",
   issued_at: "2026-07-12T09:00:00Z",
-  download_url: null,
+  has_pdf: false,
+  download_url: "/api/portal/training/certificates/PFX-L1-20260712-OLD222/download",
 };
 
 function mockList(certificates: unknown[]) {
@@ -59,7 +65,7 @@ describe("CertificatesPanel", () => {
   });
 
   it("lists the teacher's certificates on click", async () => {
-    mockList([WITH_PDF, WITHOUT_PDF]);
+    mockList([RENDERED, NOT_YET_RENDERED]);
     render(<CertificatesPanel />);
     await userEvent.click(screen.getByTestId("certificates-toggle"));
 
@@ -71,27 +77,44 @@ describe("CertificatesPanel", () => {
     expect(rows[1].textContent).toContain("PFX-L1-20260712-OLD222");
   });
 
-  it("renders a download link pointing at the presigned URL", async () => {
-    mockList([WITH_PDF]);
+  it("links the download at the portal route the API supplied", async () => {
+    mockList([RENDERED]);
     render(<CertificatesPanel />);
     await userEvent.click(screen.getByTestId("certificates-toggle"));
 
     const link = await screen.findByTestId("certificate-download");
-    expect(link).toHaveAttribute("href", WITH_PDF.download_url);
+    expect(link).toHaveAttribute("href", RENDERED.download_url);
   });
 
-  it("still lists a certificate with no PDF, with no link and no error", async () => {
-    mockList([WITHOUT_PDF]);
+  it("EVERY certificate is downloadable, including one never rendered", async () => {
+    // The regression this guards: an un-minted certificate used to render a
+    // dead "PDF not available" label, which was every certificate in prod.
+    mockList([NOT_YET_RENDERED]);
     render(<CertificatesPanel />);
     await userEvent.click(screen.getByTestId("certificates-toggle"));
 
-    const rows = await screen.findAllByTestId("certificate-row");
-    expect(rows).toHaveLength(1);
-    expect(rows[0].textContent).toContain("PFX-L1-20260712-OLD222");
-    expect(screen.queryByTestId("certificate-download")).toBeNull();
-    expect(screen.queryByTestId("certificates-error")).toBeNull();
-    // The absence is stated, not silent.
-    expect(rows[0].textContent).toMatch(/not available/i);
+    const links = await screen.findAllByTestId("certificate-download");
+    expect(links).toHaveLength(1);
+    expect(links[0]).toHaveAttribute("href", NOT_YET_RENDERED.download_url);
+    expect(screen.queryByText(/not available/i)).toBeNull();
+  });
+
+  it("warns that a first download has to be prepared", async () => {
+    mockList([NOT_YET_RENDERED]);
+    render(<CertificatesPanel />);
+    await userEvent.click(screen.getByTestId("certificates-toggle"));
+
+    const row = await screen.findByTestId("certificate-row");
+    expect(row.textContent).toMatch(/prepared on first download/i);
+  });
+
+  it("says nothing about preparing when the PDF already exists", async () => {
+    mockList([RENDERED]);
+    render(<CertificatesPanel />);
+    await userEvent.click(screen.getByTestId("certificates-toggle"));
+
+    const row = await screen.findByTestId("certificate-row");
+    expect(row.textContent).not.toMatch(/prepared on first download/i);
   });
 
   it("shows an empty state when the teacher has none", async () => {
@@ -109,7 +132,7 @@ describe("CertificatesPanel", () => {
   });
 
   it("collapses again on a second click without refetching", async () => {
-    mockList([WITH_PDF]);
+    mockList([RENDERED]);
     render(<CertificatesPanel />);
     const toggle = screen.getByTestId("certificates-toggle");
 

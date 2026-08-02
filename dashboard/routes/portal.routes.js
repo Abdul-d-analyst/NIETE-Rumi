@@ -1848,77 +1848,108 @@ router.get('/training/vendors', requirePortalAuth, async (req, res) => {
   }
 });
 
+/* ------------------------------------------------------------------------- *
+ * Certificates — identity here, everything else in the bot.
+ *
+ * These two routes used to read `training_certificates` and presign R2 keys in
+ * this process. Both moved to the bot, because the RENDER has to live there:
+ * `certificate-pdf.service.js` sits under bot/shared, so its
+ * `require('pdfkit')` resolves from bot/node_modules and then the repo root
+ * and never reaches dashboard/node_modules — Node resolves from the requiring
+ * FILE's directory upward, so the dashboard declaring pdfkit itself changes
+ * nothing. A portal-side mint therefore works in a dev tree where both
+ * installs exist and fails on the deployed service. Same trap as the LP
+ * enqueue, which degraded silently for two days.
+ *
+ * Once the mint is in the bot, keeping the read here would mean two places
+ * that know what a certificate is. So the portal keeps the one thing it
+ * genuinely owns — WHO IS ASKING — and asks the bot for the rest. Both routes
+ * take the userId from the SESSION and never from the path, query or body.
+ * ------------------------------------------------------------------------- */
+
 /**
  * GET /api/portal/training/certificates
  *
- * Every certificate the authenticated teacher has earned, newest first, with a
- * download link when a PDF exists.
+ * The teacher's certificates, newest first, straight from the bot.
  *
- * Three deliberate choices:
+ * This route NEVER mints. A teacher with 40 certificates must not trigger 40
+ * PDF renders just to see their names — rendering happens on the download
+ * route below, for the one certificate actually asked for. That split is also
+ * why a rendering problem can never take this list down.
  *
- *   - SCOPED IN THE QUERY. The filter is `user_id = req.session.portalUserId`
- *     and the request supplies no id at all, so there is no shape of request
- *     that reaches another teacher's certificate.
+ * `download_url` is the portal's own download route, present for EVERY
+ * certificate. Before fetch-or-mint, a null `pdf_r2_key` meant a permanently
+ * undownloadable certificate; now it just means "not rendered yet", so a
+ * null download link here would be a bug rather than an honest state.
+ * `has_pdf` still reports whether the file already exists, so the UI can warn
+ * that a first download may take a moment.
  *
- *   - A CERTIFICATE WITHOUT A PDF STILL LISTS, with `download_url: null`.
- *     `pdf_r2_key` is null on every certificate issued before PDF generation
- *     existed, and generation is best-effort by design — so null is permanent
- *     and valid, and the row must render as a certificate you simply cannot
- *     download yet, never as an error or a link that 404s.
- *
- *   - PRESIGNED AS AN ATTACHMENT with a filename built from the certificate
- *     code. A certificate is the one artefact a teacher wants as a file rather
- *     than a tab, and the HTML `download` attribute is ignored cross-origin —
- *     so the disposition has to be signed into the URL. Those overrides are
- *     part of the SigV4 signature: they go INTO generatePresignedUrl, never
- *     appended to a URL it already returned (that answers 403).
+ * A lookup failure is a 500, NOT an empty list: `[]` is a legitimate answer
+ * ("none yet"), so returning it on error would tell a teacher their
+ * certificates do not exist.
  */
 router.get('/training/certificates', requirePortalAuth, async (req, res) => {
   try {
     const userId = req.session.portalUserId;
+    const certificatesClient = require('../services/certificates.service');
 
-    const { data: rows, error } = await supabase
-      .from('training_certificates')
-      .select('id, certificate_code, level_name_snapshot, teacher_name_snapshot, issued_at, pdf_r2_key')
-      .eq('user_id', userId)
-      .order('issued_at', { ascending: false });
-    if (error) throw error;
+    const certificates = await certificatesClient.listCertificates(userId);
 
-    // pdf_r2_key stores a BARE object key; the presigner validates a full R2
-    // URL (same prepend the lesson-plan download does).
-    const endpoint = (process.env.R2_ENDPOINT || '').replace(/\/$/, '');
-    const bucket = process.env.R2_BUCKET_NAME;
-
-    const certificates = await Promise.all((rows || []).map(async (c) => {
-      let downloadUrl = null;
-      if (c.pdf_r2_key) {
-        // A presign failure degrades this one row to "no download" — it must
-        // not take the whole list down.
-        try {
-          downloadUrl = await generatePresignedUrl(
-            `${endpoint}/${bucket}/${c.pdf_r2_key}`,
-            3600,
-            { disposition: 'attachment', filename: `${c.certificate_code}.pdf` },
-          );
-        } catch (presignErr) {
-          console.error('training/certificates presign failed:', presignErr.message);
-          downloadUrl = null;
-        }
-      }
-      return {
-        id: c.id,
-        certificate_code: c.certificate_code,
-        level_name: c.level_name_snapshot,
-        teacher_name: c.teacher_name_snapshot,
-        issued_at: c.issued_at,
-        download_url: downloadUrl || null,
-      };
-    }));
-
-    res.json({ success: true, certificates });
+    res.json({
+      success: true,
+      certificates: (certificates || []).map((c) => ({
+        ...c,
+        download_url: `/api/portal/training/certificates/${encodeURIComponent(c.certificate_code)}/download`,
+      })),
+    });
   } catch (error) {
-    console.error('training/certificates error:', error);
+    console.error('training/certificates error:', error.message);
     res.status(500).json({ success: false, error: 'Failed to load certificates' });
+  }
+});
+
+/**
+ * GET /api/portal/training/certificates/:code/download
+ *
+ * Fetch-or-mint one certificate, then 302 to a short-lived signed R2 URL.
+ *
+ * Why a redirect rather than handing the signed URL out in the list: the URL
+ * is a bearer token for the file, and issuing one per rendered row would mint
+ * credentials for certificates nobody ever clicks. This way the session is
+ * re-checked at the moment of the download.
+ *
+ * The bot distinguishes "no such certificate for this user" (404) from "we
+ * could not produce the file" (502), and so does this route — collapsing both
+ * into one status would hide a rendering outage behind a not-found.
+ */
+router.get('/training/certificates/:code/download', requirePortalAuth, async (req, res) => {
+  const code = req.params && req.params.code;
+  if (!code) return res.status(400).json({ success: false, error: 'certificate code is required' });
+
+  try {
+    const userId = req.session.portalUserId;
+    const certificatesClient = require('../services/certificates.service');
+
+    const result = await certificatesClient.getCertificatePdf(userId, code);
+
+    if (result && result.notFound) {
+      return res.status(404).json({ success: false, error: 'Certificate not found' });
+    }
+    if (!result || !result.download_url) {
+      // The certificate exists; its PDF could not be produced. Say so — the
+      // list is unaffected and the teacher can retry.
+      return res.status(502).json({
+        success: false,
+        error: 'Your certificate PDF could not be prepared. Please try again in a moment.',
+      });
+    }
+    return res.redirect(302, result.download_url);
+  } catch (error) {
+    console.error('training/certificates download error:', error.message);
+    return res.status(502).json({
+      success: false,
+      error: 'Your certificate PDF could not be prepared. Please try again in a moment.',
+    });
   }
 });
 

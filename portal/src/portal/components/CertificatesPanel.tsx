@@ -7,17 +7,22 @@
  *
  * TWO THINGS THAT LOOK LIKE DETAILS AND ARE NOT:
  *
- *  1. A certificate WITHOUT a PDF still renders. `pdf_r2_key` is null on every
- *     certificate issued before PDF generation existed, and generation stays
- *     best-effort by design — so `download_url: null` is a permanent, valid
- *     state. The row shows the code and says the file isn't available, rather
- *     than disappearing or rendering a link that 404s.
+ *  1. EVERY certificate is downloadable. `download_url` is the portal's own
+ *     download route, which fetch-or-mints: it renders the PDF on the first
+ *     request and serves it from R2 afterwards. That matters because all
+ *     12,954 certificates in production predate PDF generation — under the
+ *     old "link only if already rendered" rule, every single one of them was
+ *     a dead end reading "PDF not available".
+ *
+ *     `has_pdf: false` therefore means "not rendered YET", and the row says so,
+ *     so a teacher knows the first click may take a second rather than
+ *     thinking it hung.
  *
  *  2. There is deliberately NO `download` attribute on the anchor. It is
- *     ignored cross-origin, and the presigned URL points at R2, not at us.
- *     The attachment disposition is SIGNED into the URL by the API instead.
- *     Adding `download` here would look like it does the work and would hide
- *     the day the signing regresses.
+ *     ignored cross-origin, and the route redirects to R2. The attachment
+ *     disposition is SIGNED into the presigned URL by the bot instead. Adding
+ *     `download` here would look like it does the work and would hide the day
+ *     the signing regresses.
  */
 
 import { useState, useCallback } from 'react';
@@ -30,6 +35,8 @@ export type PortalCertificate = {
   level_name: string | null;
   teacher_name: string | null;
   issued_at: string | null;
+  /** false = not rendered yet; the download route mints it on first request. */
+  has_pdf?: boolean;
   download_url: string | null;
 };
 
@@ -119,6 +126,11 @@ export default function CertificatesPanel() {
                         Issued {formatIssued(c.issued_at)}
                       </div>
                     )}
+                    {c.has_pdf === false && (
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        Your PDF will be prepared on first download.
+                      </div>
+                    )}
                   </div>
 
                   {c.download_url ? (
@@ -132,7 +144,9 @@ export default function CertificatesPanel() {
                       <Download className="w-4 h-4" /> Download PDF
                     </a>
                   ) : (
-                    <span className="text-xs text-muted-foreground">PDF not available</span>
+                    // Defensive only: the API gives every certificate a
+                    // download route, so this should never render.
+                    <span className="text-xs text-muted-foreground">Download unavailable</span>
                   )}
                 </li>
               ))}
