@@ -170,6 +170,12 @@ function seedThreeQuestionModule({ moduleId = 42, courseId = 7, levelId = 1, pro
 }
 
 beforeEach(() => {
+  // bd-2490 — the portal's assessment routes are gated to WhatsApp. This
+  // suite covers the grading logic behind them, which is RETAINED for when
+  // the surface comes back (bd-2488), so it opens the test seam. The
+  // production default stays blocked — see
+  // tests/portal/assessments-are-whatsapp-only.test.js.
+  process.env.PORTAL_ASSESSMENTS_TEST_ENABLE = '1';
   jest.resetModules();
   tableStates = {};
   inserts = [];
@@ -192,6 +198,7 @@ beforeEach(() => {
   jest.doMock('@aws-sdk/client-s3', () => ({ S3Client: jest.fn(), GetObjectCommand: jest.fn() }), { virtual: true });
 });
 
+afterEach(() => { delete process.env.PORTAL_ASSESSMENTS_TEST_ENABLE; });
 afterEach(() => jest.resetModules());
 
 describe('POST /api/portal/training/module/:id/quiz-attempts', () => {

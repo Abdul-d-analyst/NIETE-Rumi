@@ -2330,6 +2330,52 @@ router.get('/training/module/:id/attempts', requirePortalAuth, async (req, res) 
  *          `questions: []` when the module has no active questions — the
  *          frontend uses that to hide the "Take Quiz" button entirely.
  */
+/* ------------------------------------------------------------------------- *
+ * bd-2490 — assessments happen on WhatsApp, not here. INTERIM.
+ *
+ * The portal renders quiz answers as one radio per option. A capstone paper is
+ * free text and carries none, so a Beacon House teacher got eight questions,
+ * no inputs and a dead Submit button. Beyond that, every assessment rule this
+ * surface owned has drifted from the bot at some point and been fixed
+ * separately: the pass bar (bd-2483), the progress write (bd-2450), the
+ * eligibility proxy (bd-2447).
+ *
+ * So the portal stops assessing. It keeps content — videos, PDFs, progress,
+ * past results — and the bot keeps grading, cooldowns and certificates. One
+ * engine instead of two that must be kept in step.
+ *
+ * THE API IS THE GATE, NOT THE BUTTON. #77 shipped the mirror image of this: a
+ * "Locked" label with no server-side check, which started the exam anyway when
+ * tapped. A session cookie and curl must hit the same wall the UI does.
+ *
+ * Checked FIRST in each route, ahead of eligibility, so the answer never
+ * depends on lock state and no paper or progress detail leaks in the refusal.
+ *
+ * To undo for real: delete this block and its call sites, once the portal can
+ * genuinely run both quiz kinds (bd-2488). This is deliberately NOT an ops
+ * toggle — re-enabling needs UI work, and a runtime switch would imply the
+ * form is ready when it is not.
+ *
+ * PORTAL_ASSESSMENTS_TEST_ENABLE is a TEST SEAM, not a feature flag. The
+ * grading, cooldown and certificate logic behind these routes is retained
+ * because we intend to restore this surface, and deleting its suites would
+ * leave that code unexercised until then. The four portal quiz suites set it;
+ * nothing else may. Production must never set it, and a test below pins the
+ * default to blocked so an accidental removal of that default fails the build.
+ * ------------------------------------------------------------------------- */
+const ASSESSMENTS_ON_WHATSAPP_ONLY = process.env.PORTAL_ASSESSMENTS_TEST_ENABLE !== '1';
+
+function _whatsappOnly(res) {
+  if (!ASSESSMENTS_ON_WHATSAPP_ONLY) return false;
+  res.status(409).json({
+    success: false,
+    code: 'whatsapp_only',
+    error: 'Quizzes and exams are taken on WhatsApp. Open a chat with NIETE and send /training to pick up where you left off.',
+    whatsapp_command: '/training',
+  });
+  return true;
+}
+
 /**
  * bd-2138 — multi-answer ("msq") questions. A question is multi iff its
  * correct_option holds a comma-joined set ('1,3,5', restored from the legacy
@@ -2348,6 +2394,7 @@ function _normalizeAnswerSet(value) {
 }
 
 router.get('/training/module/:id/questions', requirePortalAuth, async (req, res) => {
+  if (_whatsappOnly(res)) return;
   try {
     const userId = req.session.portalUserId;
     const moduleId = parseInt(req.params.id, 10);
@@ -2453,6 +2500,7 @@ router.get('/training/module/:id/questions', requirePortalAuth, async (req, res)
  * switching" promise.
  */
 router.post('/training/module/:id/quiz-attempts', requirePortalAuth, async (req, res) => {
+  if (_whatsappOnly(res)) return;
   try {
     const userId = req.session.portalUserId;
     const moduleId = parseInt(req.params.id, 10);
@@ -2724,12 +2772,19 @@ async function _loadGrandQuizGate(userId, levelId) {
   // questionCount is data, not a decision: how many questions the paper has.
   // Resolved by LEVEL and by exam TYPE so a capstone counts too.
   let questionCount = 0;
+  let examKind = null;
   const quizId = level && level.grand_quiz_id ? level.grand_quiz_id : null;
   if (quizId) {
-    const { data: qs } = await supabase
-      .from('training_questions').select('id')
-      .eq('grand_quiz_id', quizId).eq('is_active', true);
+    const [{ data: qs }, { data: quizRow }] = await Promise.all([
+      supabase.from('training_questions').select('id')
+        .eq('grand_quiz_id', quizId).eq('is_active', true),
+      // bd-2490 — the exam's KIND, read from the exam row rather than inferred
+      // from the vendor. What the portal can render depends on whether the
+      // paper is multiple choice or free text, not on whose programme it is.
+      supabase.from('training_grand_quizzes').select('quiz_type').eq('id', quizId).maybeSingle(),
+    ]);
     questionCount = (qs || []).length;
+    examKind = (quizRow && quizRow.quiz_type) || null;
   }
 
   return {
@@ -2739,6 +2794,7 @@ async function _loadGrandQuizGate(userId, levelId) {
     message: gate.message || null,
     unavailable: gate.unavailable === true,
     passPct: typeof gate.pass_pct === 'number' ? gate.pass_pct : null,
+    examKind,
     quiz: quizId ? { id: quizId, level_id: levelId } : null,
     passed: gate.reason === 'already_passed',
     passedAttempt: level && level.passed_at ? { completed_at: level.passed_at } : null,
@@ -2773,6 +2829,12 @@ function _grandQuizState(gate) {
   // resolves the exam ROW; an active row with zero active questions is a
   // content fault, and 'no_quiz' is what the UI already renders for it.
   if (!gate.quiz || gate.questionCount === 0) return 'no_quiz';
+  // bd-2490 — INTERIM. Assessments are taken on WhatsApp, not here.
+  //
+  // Placed ABOVE the `ok` check on purpose: the state must never be 'ready',
+  // so the card never invites a start the API would refuse, and a client that
+  // ignores the banner still cannot open a paper it could not submit.
+  if (ASSESSMENTS_ON_WHATSAPP_ONLY) return 'whatsapp_only';
   if (gate.ok) return 'ready';
   // Could not reach the bot. Never render 'ready' off a failure — the caller
   // surfaces gate.message, and 'courses_incomplete' is the safe closed state
@@ -2839,6 +2901,7 @@ router.get('/training/level/:id/grand-quiz', requirePortalAuth, async (req, res)
       success: true,
       grand_quiz: {
         state,
+        exam_kind: gate.examKind,
         question_count: gate.questionCount,
         // bd-2393 — was hardcoded 100. The bar is the vendor's.
         pass_mark_pct: gate.passPct,
@@ -2868,6 +2931,7 @@ router.get('/training/level/:id/grand-quiz', requirePortalAuth, async (req, res)
  * it can't submit).
  */
 router.get('/training/level/:id/grand-quiz/questions', requirePortalAuth, async (req, res) => {
+  if (_whatsappOnly(res)) return;
   try {
     const userId = req.session.portalUserId;
     const levelId = parseInt(req.params.id, 10);
@@ -2953,6 +3017,7 @@ router.get('/training/level/:id/grand-quiz/questions', requirePortalAuth, async 
  *          cooldown_until, completed_at }, certificate: {...}|null }
  */
 router.post('/training/level/:id/grand-quiz/attempts', requirePortalAuth, async (req, res) => {
+  if (_whatsappOnly(res)) return;
   try {
     const userId = req.session.portalUserId;
     const levelId = parseInt(req.params.id, 10);

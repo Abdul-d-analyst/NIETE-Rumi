@@ -691,6 +691,7 @@ const PortalTraining = () => {
               key={moduleDetail.id}
               moduleId={moduleDetail.id}
               hasAttempts={(attemptsByModule[moduleDetail.id] ?? []).length > 0}
+              hasQuestions={moduleDetail.has_questions}
               onSubmitted={handleQuizSubmitted}
             />
 

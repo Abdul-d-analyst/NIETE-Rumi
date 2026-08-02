@@ -24,6 +24,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import api from '../services/api';
+import { WHATSAPP_TRAINING_URL } from '@/lib/assessments';
 
 type GrandQuizState = 'no_quiz' | 'passed' | 'cooldown' | 'courses_incomplete' | 'ready';
 
@@ -37,6 +38,9 @@ type Certificate = {
 type GrandQuizGate = {
   state: GrandQuizState;
   question_count: number;
+  /** bd-2490 — 'whatsapp_only' while the portal cannot run exams. */
+  state: string;
+  exam_kind: 'grand_quiz' | 'capstone' | null;
   pass_mark_pct: number;
   cooldown_hours: number;
   cooldown_until: string | null;
@@ -295,6 +299,36 @@ const LevelExamCard = ({
   }
 
   // ── Gate cards ───────────────────────────────────────────────────────────
+  // bd-2490 — INTERIM: exams are sat on WhatsApp.
+  //
+  // Ahead of every other state so the card never offers a start the API would
+  // refuse. 'passed' and 'cooldown' are deliberately BELOW this: a teacher who
+  // has already passed should see their certificate, not a redirect to an exam
+  // they do not need to sit.
+  if (gate.state === 'whatsapp_only') {
+    const isCapstone = gate.exam_kind === 'capstone';
+    return (
+      <div className="rounded-lg border border-primary/30 bg-primary/5 p-4 shadow-sm" data-testid="level-exam-whatsapp-only">
+        <div className="flex items-center gap-2 font-medium">
+          <ClipboardCheck className="w-5 h-5 text-primary" /> Level exam — on WhatsApp
+        </div>
+        <p className="text-sm text-muted-foreground mt-1">
+          {isCapstone
+            ? 'This level finishes with a written capstone, marked by NIETE on WhatsApp.'
+            : 'Level exams are taken with NIETE on WhatsApp.'}{' '}
+          Open the chat and send{' '}
+          <code className="px-1 py-0.5 rounded bg-muted font-mono text-xs">/training</code>{' '}
+          to start it. Everything you have completed here already counts.
+        </p>
+        <Button asChild className="mt-3" data-testid="exam-whatsapp-button">
+          <a href={WHATSAPP_TRAINING_URL} target="_blank" rel="noopener noreferrer">
+            Take the exam on WhatsApp
+          </a>
+        </Button>
+      </div>
+    );
+  }
+
   if (gate.state === 'passed') {
     return (
       <div className="rounded-lg border border-green-200 bg-green-50 p-4 shadow-sm" data-testid="level-exam-passed">
