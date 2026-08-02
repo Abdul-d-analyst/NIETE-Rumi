@@ -1910,6 +1910,13 @@ class WhatsAppService {
               {
                 title: 'My Features',
                 rows: [
+                  // bd-2504 — Training first: it is the thing NIETE teachers are
+                  // actually being asked to do, and it was missing entirely.
+                  {
+                    id: 'menu_training',
+                    title: 'Teacher Training',
+                    description: 'Continue your training modules and exams'
+                  },
                   {
                     id: 'menu_lesson_plan',
                     title: 'Lesson Plans',
@@ -1920,16 +1927,11 @@ class WhatsAppService {
                     title: 'Classroom Coaching',
                     description: 'Get teaching feedback from recordings'
                   },
-                  {
-                    id: 'menu_reading',
-                    title: 'Reading Assessment',
-                    description: 'Test student reading fluency'
-                  },
-                  {
-                    id: 'menu_video',
-                    title: 'AI Video Generation',
-                    description: 'Create educational videos'
-                  },
+                  // bd-2504 — Reading Assessment and AI Video Generation removed
+                  // from the menu by operator decision. Their /readingtest and
+                  // /video commands still work, and menu.service still handles
+                  // menu_reading / menu_video, because WhatsApp list rows live in
+                  // scrollback forever and an old tap must still land somewhere.
                   {
                     id: 'menu_other',
                     title: 'Ask Anything',

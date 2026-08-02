@@ -95,6 +95,14 @@ class MenuService {
 
       // Route to appropriate handler based on button ID
       switch (buttonId) {
+        // bd-2504 — the training menu entry. Delegates to the same Flow the
+        // /training command opens, so there is one entry point, not two.
+        case 'menu_training': {
+          const TrainingEntry = require('./training/training-entry.service');
+          await TrainingEntry.openTrainingFlow(user, from, language);
+          break;
+        }
+
         case 'menu_lesson_plan':
           await this._handleLessonPlanningChoice(user.id, state.sessionId, from, language);
           break;

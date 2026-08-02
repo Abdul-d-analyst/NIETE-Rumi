@@ -659,31 +659,12 @@ async function handleTextMessage(message, from, messageBody, user = null) {
       );
       return;
     }
-    const TEACHER_TRAINING_FLOW_ID = process.env.TEACHER_TRAINING_FLOW_ID || '';
-    if (TEACHER_TRAINING_FLOW_ID) {
-      typingController.stop();
-      const flowToken = `${user.id}:teacher-training:${Date.now()}`;
-      const responseLanguage = await getUserLanguage(from) || 'en';
-      await WhatsAppService.sendFlow(from, {
-        flowId: TEACHER_TRAINING_FLOW_ID,
-        header: '🎓 Teacher Training',
-        body: ({
-          ur: 'اپنی تربیت کی پیش رفت دیکھیں اور اگلا سبق شروع کریں۔',
-        })[responseLanguage] || 'View your training progress and start your next level.',
-        buttonText: ({
-          ur: 'کھولیں',
-        })[responseLanguage] || 'Open',
-        flowToken,
-      });
-      logToFile('🎓 Sent teacher-training flow (/training)', { userId: user.id });
-      return;
-    }
-    // Fallback when the Flow has not been published to Meta yet.
+    // bd-2504 — one entry point, shared with the menu's Training row. A second
+    // copy here is how the two would drift.
     typingController.stop();
-    await WhatsAppService.sendMessage(
-      from,
-      "Teacher Training is being prepared for you. We'll notify you when it's live.\n\nاستاد کی تربیت آپ کے لیے تیار کی جا رہی ہے۔"
-    );
+    const trainingLanguage = await getUserLanguage(from) || 'en';
+    const TrainingEntry = require('../services/training/training-entry.service');
+    await TrainingEntry.openTrainingFlow(user, from, trainingLanguage);
     return;
   }
 
