@@ -1979,10 +1979,19 @@ router.get('/training/level/:id/capstone', requirePortalAuth, async (req, res) =
  *     the bug this helper fixes (non-R2 video/audio silently rendered nothing).
  *
  * Returns null for empty/non-http values (e.g. a local path row).
+ *
+ * bd-2492: `options` is forwarded to the presigner, which defaults to
+ * `inline` + a Content-Type inferred from the key so migrated videos/PDFs
+ * render in the browser instead of downloading. Pass
+ * `{ disposition: 'attachment', filename }` to presign the SAME object as an
+ * explicit download. The overrides are signed — they cannot be bolted onto a
+ * URL this function already returned (403 SignatureDoesNotMatch).
+ * Externally-hosted public URLs are passed through as-is, so a download
+ * control over one of those must fall back to the browser's own behaviour.
  */
-async function _resolveMediaUrl(url, expiresIn = 3600) {
+async function _resolveMediaUrl(url, expiresIn = 3600, options) {
   if (!url) return null;
-  if (isValidR2Url(url)) return generatePresignedUrl(url, expiresIn);
+  if (isValidR2Url(url)) return generatePresignedUrl(url, expiresIn, options);
   if (/^https?:\/\//i.test(url)) return url;
   return null;
 }
@@ -4742,5 +4751,11 @@ router.get('/assessment/status/:jobId', requirePortalAuth, async (req, res) => {
 router.post('/assessment/callback', (req, res) => {
   return res.status(200).json({ received: true });
 });
+
+// Exported for tests only (an express Router is a function; attaching a
+// property to it does not affect mounting). Keeps the media-URL contract —
+// presign-vs-passthrough and the signed disposition options — testable
+// without standing up the whole endpoint.
+router._resolveMediaUrl = _resolveMediaUrl;
 
 module.exports = router;
