@@ -103,3 +103,4 @@ portal/.env.app
 portal/.android-env.sh
 *.jks
 *.keystore
+.staging-bootstrap/
