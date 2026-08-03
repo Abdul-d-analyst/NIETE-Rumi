@@ -23,6 +23,10 @@ const VideoOrchestrator = require('../services/video/video-orchestrator.service'
 const AttendanceDetectorService = require('../services/attendance-detector.service');
 const AttendanceConversationService = require('../services/attendance-conversation.service');
 const AttendanceDeliveryService = require('../services/attendance-delivery.service');
+// principal teacher-attendance channel (role-routed off the same keyword)
+const AttendanceRouterService = require('../services/attendance-router.service');
+const TeacherAttendanceConversationService = require('../services/teacher-attendance-conversation.service');
+const { getAttendanceRepository } = require('../../../dashboard/services/attendance-repository.service');
 const { logToFile } = require('../utils/logger');
 const { TEMP_DIR, LOADING_STICKER_PATH, LOADING_STICKER_MEDIA_ID, OPENAI_API_KEY, ATTENDANCE_SETUP_FLOW_ID, ATTENDANCE_MARKING_FLOW_ID } = require('../utils/constants');
 const { getClient } = require('../services/llm-client');
@@ -1781,6 +1785,78 @@ async function handleTextMessage(message, from, messageBody, user = null) {
   }
 
   // ============================================================
+  // PENDING ACTOR CHOICE (principal who also runs a class picked
+  // teachers vs students). Intercepted before either session router.
+  // ============================================================
+  if (user?.id) {
+    try {
+      const pendingChoice = await redisService.get(`attendance:actor-choice:${user.id}`);
+      if (pendingChoice) {
+        typingController.stop();
+        const choice = String(messageBody || '').trim().toLowerCase();
+        const wantsTeachers = choice === '1' || choice.includes('teacher') || choice.includes('اساتذہ') || choice.includes('استاد');
+        const wantsStudents = choice === '2' || choice.includes('student') || choice.includes('طالب') || choice.includes('بچ');
+        if (wantsTeachers) {
+          await redisService.delete(`attendance:actor-choice:${user.id}`);
+          const repo = getAttendanceRepository(supabase);
+          const result = await TeacherAttendanceConversationService.startSession(user.id, { user, repository: repo });
+          await WhatsAppService.sendMessage(from, result.message);
+          return;
+        }
+        if (wantsStudents) {
+          await redisService.delete(`attendance:actor-choice:${user.id}`);
+          const result = await AttendanceConversationService.startAttendanceSession(user.id);
+          if (result.action === 'SEND_SETUP_FLOW' && ATTENDANCE_SETUP_FLOW_ID) {
+            await WhatsAppService.sendFlow(from, { flowId: ATTENDANCE_SETUP_FLOW_ID, header: '📋 Class Setup', body: result.message, buttonText: 'Set Up Class', screen: 'CLASS_INFO', flowToken: user.id });
+          } else {
+            await WhatsAppService.sendMessage(from, result.message);
+          }
+          return;
+        }
+        // Unrecognised — re-ask, keep the pending flag alive.
+        await WhatsAppService.sendMessage(from, 'Please reply 1 for Teachers or 2 for Students.');
+        return;
+      }
+    } catch (error) {
+      logToFile('Error handling attendance actor choice', { error: error.message, userId: user?.id });
+    }
+  }
+
+  // ============================================================
+  // PRINCIPAL TEACHER-ATTENDANCE SESSION (takes precedence)
+  // A principal marking their own school's teachers. Uses a separate Redis
+  // namespace from the student flow, so the two can never collide.
+  // ============================================================
+  if (user?.id) {
+    try {
+      if (await TeacherAttendanceConversationService.isInSession(user.id)) {
+        typingController.stop();
+        const repo = getAttendanceRepository(supabase);
+        const teacherSession = await TeacherAttendanceConversationService.getSessionState(user.id);
+        let result;
+        switch (teacherSession?.state) {
+          case TeacherAttendanceConversationService.STATES.AWAITING_MARKING:
+            result = await TeacherAttendanceConversationService.handleMarkingInput(user.id, messageBody, { repository: repo });
+            break;
+          case TeacherAttendanceConversationService.STATES.AWAITING_LEAVE_TYPE:
+            result = await TeacherAttendanceConversationService.handleLeaveTypeInput(user.id, messageBody);
+            break;
+          case TeacherAttendanceConversationService.STATES.AWAITING_VERIFICATION:
+            result = await TeacherAttendanceConversationService.handleVerification(user.id, messageBody, { repository: repo });
+            break;
+          default:
+            await TeacherAttendanceConversationService.clearSessionState(user.id);
+            result = { message: 'Say "attendance" to start again.' };
+        }
+        if (result?.message) await WhatsAppService.sendMessage(from, result.message);
+        return;
+      }
+    } catch (error) {
+      logToFile('Error routing teacher-attendance session', { error: error.message, userId: user?.id });
+    }
+  }
+
+  // ============================================================
   // ATTENDANCE SYSTEM INTEGRATION
   // ============================================================
   // Check if user is in an active attendance session
@@ -2014,6 +2090,39 @@ async function handleTextMessage(message, from, messageBody, user = null) {
   if (user?.id && attendanceDetection.detected) {
     logToFile('📋 Attendance keyword detected, starting session', { userId: user.id, message: messageBody, confidence: attendanceDetection.confidence });
     typingController.stop();
+
+    // role-route the keyword. Principal → mark TEACHERS; teacher → mark
+    // STUDENTS; a principal who ALSO runs a class is asked which they mean. A
+    // principal is NEVER silently routed into the student flow.
+    if (AttendanceRouterService.isPrincipal(user)) {
+      let hasStudentClasses = false;
+      try {
+        const StudentListService = require('../services/student-list.service');
+        const { data: classList } = await StudentListService.getStudentListsByUser(user.id);
+        hasStudentClasses = Array.isArray(classList) && classList.length > 0;
+      } catch (e) {
+        hasStudentClasses = false;
+      }
+      const decision = AttendanceRouterService.resolveAttendanceActor(user, { hasStudentClasses });
+
+      if (decision.actor === AttendanceRouterService.ACTOR.ASK) {
+        await redisService.set(`attendance:actor-choice:${user.id}`, { pending: true }, 300);
+        await WhatsAppService.sendMessage(from,
+          'Are you marking *teachers* or *students*?\n\n1. Teachers (your school\'s staff)\n2. Students (your class)\n\nReply 1 or 2.');
+        return;
+      }
+
+      // PRINCIPAL_MARKS_TEACHERS
+      try {
+        const repo = getAttendanceRepository(supabase);
+        const result = await TeacherAttendanceConversationService.startSession(user.id, { user, repository: repo });
+        await WhatsAppService.sendMessage(from, result.message);
+      } catch (error) {
+        logToFile('Error starting teacher-attendance session', { error: error.message, userId: user.id });
+        await WhatsAppService.sendMessage(from, 'Sorry, something went wrong. Please try again.');
+      }
+      return;
+    }
 
     try {
       const result = await AttendanceConversationService.startAttendanceSession(user.id);

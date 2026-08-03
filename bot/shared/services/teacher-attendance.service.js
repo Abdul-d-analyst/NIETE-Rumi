@@ -1,9 +1,9 @@
 /**
- * Teacher Attendance Service (bd-2481, Phase 1)
+ * Teacher Attendance Service
  *
  * The WhatsApp principal channel's write path. A principal marks their school's
  * teachers (present / absent / leave + leave_type) and this service persists the
- * result through the SAME TASK-133 backend the web build uses — the injected
+ * result through the SAME backend the web build uses — the injected
  * attendance repository (getTeachersBySchool / saveAttendance / getPresence).
  *
  * There is exactly ONE write path: saveAttendance() upserts on

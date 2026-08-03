@@ -1,12 +1,12 @@
 /**
  * Attendance Router Service
  *
- * Role-routing fork for the "attendance"/"حاضری" keyword (bd-2481, Phase 1).
+ * Role-routing fork for the "attendance"/"حاضری" keyword.
  *
  * The SAME keyword means different things depending on who sends it:
  *   - a teacher marks their STUDENTS  (the existing student-attendance flow)
  *   - a principal marks their school's TEACHERS  (the new channel, wired to the
- *     TASK-133 teacher_attendance_records backend via saveAttendance())
+ *     shared teacher_attendance_records backend via saveAttendance())
  *
  * This module owns ONLY the decision of which flow to enter. It is a pure
  * function so the highest-risk behaviour in the feature can be unit-tested
