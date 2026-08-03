@@ -3641,10 +3641,21 @@ app.get('/health', (req, res) => {
 // marketing landing at "/" (Rumi's own splash). NIETE customers reach us via
 // the portal invite link, not a top-level URL. Anything hitting the marketing
 // paths should land on NIETE's own site instead of a confusing Rumi splash.
+// bd-2467: ON THE PORTAL HOSTNAME "/" BELONGS TO THE PORTAL. Once
+// portal.niete.edu.pk went live this redirect fired there too, so a teacher
+// opening the portal domain bounced straight back to the marketing site. The
+// SPA already handles that host — App.tsx routes "/" to PortalRoot, which is
+// session-aware (login form, or straight through to the dashboard / My Patch).
+// So on a `portal.` host we fall through to the static bundle; every other host
+// (the bare Railway URL) keeps the redirect, because there "/" would render the
+// upstream Rumi marketing splash this override exists to avoid.
 const NIETE_MARKETING_REDIRECT = 'https://niete.edu.pk/';
-for (const p of ['/', '/how-it-works']) {
-  app.get(p, (req, res) => res.redirect(302, NIETE_MARKETING_REDIRECT));
-}
+const { isPortalHost } = require('./lib/portal-host');
+app.get('/', (req, res, next) => {
+  if (isPortalHost(req)) return next();
+  res.redirect(302, NIETE_MARKETING_REDIRECT);
+});
+app.get('/how-it-works', (req, res) => res.redirect(302, NIETE_MARKETING_REDIRECT));
 
 // Serve static frontend files from /portal-frontend/dist folder
 // This includes all compiled React/Vite assets (JS, CSS, images)
