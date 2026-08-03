@@ -15,7 +15,7 @@ const NotFound = () => {
         <img src={nieteLogo} alt="NIETE" className="mx-auto mb-6 h-16 w-16 rounded" />
         <h1 className="mb-2 text-5xl font-semibold text-primary-foreground">404</h1>
         <p className="mb-6 text-lg text-primary-foreground/80">
-          We couldn't find that page in the NIETE Teacher Portal.
+          We couldn't find that page in the NIETE Portal.
         </p>
         <a
           href="/portal/login"

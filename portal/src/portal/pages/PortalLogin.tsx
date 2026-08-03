@@ -48,9 +48,9 @@ const PortalLogin = () => {
         <div className="text-center mb-8">
           <div className="flex items-center justify-center gap-3 mb-4">
             <img src={nieteLogo} alt="NIETE logo" className="w-10 h-10 object-contain" />
-            <h1 className="text-3xl sm:text-4xl font-light text-primary-foreground">NIETE Teacher Portal</h1>
+            <h1 className="text-3xl sm:text-4xl font-light text-primary-foreground">NIETE Portal</h1>
           </div>
-          <p className="text-primary-foreground/80">Sign in to access your teaching resources</p>
+          <p className="text-primary-foreground/80">For teachers and coaches — sign in to continue</p>
         </div>
 
         <form onSubmit={handleSubmit} className="bg-white rounded-lg p-8 shadow-[var(--shadow-medium)]">
