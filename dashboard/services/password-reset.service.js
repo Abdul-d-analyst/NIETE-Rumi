@@ -32,10 +32,11 @@ class PasswordResetService {
    * Generates 6-digit code, stores in database, calls Main Bot API to send WhatsApp message
    *
    * @param {string} phoneNumber - User's phone number (format: 923001234567)
-   * @param {string} language - User's preferred language ('en', 'ur', 'ar', 'es')
+   * @param {string} [language] - optional override; normally left unset so the
+   *   user's own `preferred_language` decides (bd-2469)
    * @returns {Promise<{success: boolean, error?: string}>}
    */
-  static async sendResetCode(phoneNumber, language = 'en') {
+  static async sendResetCode(phoneNumber, language = null) {
     try {
       console.log('🔐 Sending password reset code', { phoneNumber, language });
 
@@ -49,7 +50,7 @@ class PasswordResetService {
       // Check if user exists and has activated portal
       const { data: users, error: userError } = await supabase
         .from('users')
-        .select('id, first_name, portal_activated')
+        .select('id, first_name, portal_activated, preferred_language')
         .eq('phone_number', phoneNumber);
 
       // Extract first user from array (or null if empty)
@@ -93,8 +94,14 @@ class PasswordResetService {
         throw updateError;
       }
 
-      // Use provided language (default to English if not specified)
-      const userLanguage = language || 'en';
+      // bd-2469: the OTP goes out in the USER'S language. Read
+      // `preferred_language` (never `user.language` — dead column), and clamp to
+      // the variants this WABA actually has approved: asking Meta for a
+      // template variant that doesn't exist fails the send outright. An explicit
+      // argument still wins so a caller can force a language.
+      const SUPPORTED_TEMPLATE_LANGS = ['en', 'ur'];
+      const requested = language || user.preferred_language;
+      const userLanguage = SUPPORTED_TEMPLATE_LANGS.includes(requested) ? requested : 'en';
 
       console.log('📞 Calling Main Bot internal API to send WhatsApp message', {
         mainBotUrl: MAIN_BOT_URL,

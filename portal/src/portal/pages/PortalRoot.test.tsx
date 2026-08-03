@@ -56,14 +56,14 @@ describe("PortalRoot — '/' honours an existing session (bd-2394)", () => {
   it("shows the login form when there is no session", () => {
     renderWith({ user: null, loading: false });
     expect(navigateSpy).not.toHaveBeenCalled();
-    expect(screen.getByText("Sign in to access your teaching resources")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /log in/i })).toBeInTheDocument();
   });
 
   it("does not flash the login form while the session check is still in flight", () => {
     renderWith({ user: null, loading: true });
     expect(navigateSpy).not.toHaveBeenCalled();
     expect(
-      screen.queryByText("Sign in to access your teaching resources")
+      screen.queryByRole("button", { name: /log in/i })
     ).not.toBeInTheDocument();
   });
 });
