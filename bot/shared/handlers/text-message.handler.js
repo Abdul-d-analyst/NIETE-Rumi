@@ -922,8 +922,15 @@ async function handleTextMessage(message, from, messageBody, user = null) {
 
   // ============================================================
   // VIDEO GENERATION COMMAND: Check for /video command
+  // bd-2482 (NIETE-only): a bare "video" (no slash) also opens the library —
+  // teachers type the plain word more often than the slash form. Exact-match
+  // only (not startsWith/substring) so a real sentence like "make me a video
+  // on photosynthesis" still falls through to AI video generation below.
   // ============================================================
-  if (trimmedMessage === '/video' || trimmedMessage.startsWith('/video ')) {
+  if (
+    trimmedMessage === '/video' || trimmedMessage.startsWith('/video ') ||
+    trimmedMessage.toLowerCase() === 'video'
+  ) {
     logToFile('🎬 /video command detected', { userId: user?.id, phoneNumber: from });
 
     if (!user) {
