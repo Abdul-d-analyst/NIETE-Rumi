@@ -28,11 +28,12 @@ function assets() {
     _assets = {
       lexend: readBase64('fonts/Lexend-Regular.ttf'),
       lexendBold: readBase64('fonts/Lexend-Bold.ttf'),
-      // bd-2477 #2: the SAME white-on-transparent mark already proven on the
-      // Railway Linux render path via hero-report.template.js. Never
-      // AI-generate or redraw the brand mark (short-video skill rule 9b —
-      // Omni fuses the two dots into a face every time).
-      rumiMark: readBase64('assets/rumi-mark-white.png'),
+      // NIETE branding (2026-08-04): the white-on-transparent N/ن monogram
+      // from the niete-brand skill, replacing the Rumi mark for this fork.
+      // Never AI-generate or redraw the brand mark (short-video skill rule
+      // 9b — Omni fuses the two dots into a face every time; same risk
+      // applies to redrawing the NIETE monogram).
+      nieteMark: readBase64('assets/niete-mark-white-transparent.png'),
     };
   }
   return _assets;
@@ -125,8 +126,8 @@ function renderScorecardHtml(d) {
   const palette = tierPalette(pct);
   const footLabel = [grade, subject].filter(Boolean).join(' ') || 'Taleemabad';
 
-  const logoImg = a.rumiMark
-    ? `<img class='logo' src='data:image/png;base64,${a.rumiMark}' alt='Rumi'>` : '';
+  const logoImg = a.nieteMark
+    ? `<img class='logo' src='data:image/png;base64,${a.nieteMark}' alt='NIETE'>` : '';
   const nameHtml = takerName ? `<div class='name'>${esc(takerName)}</div>` : '';
 
   return `<!DOCTYPE html><html><head><meta charset='utf-8'><style>

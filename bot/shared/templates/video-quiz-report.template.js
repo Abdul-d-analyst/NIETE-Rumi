@@ -40,6 +40,9 @@ function assets() {
       lexendBold: readBase64('fonts/Lexend-Bold.ttf'),
       fraunces: readBase64('fonts/Fraunces-Regular.ttf'),
       frauncesSemi: readBase64('fonts/Fraunces-SemiBold.ttf'),
+      // NIETE branding (2026-08-04): black-on-transparent N/ن monogram from
+      // the niete-brand skill, for the light-background footer lockup.
+      nieteMark: readBase64('assets/niete-mark-black-transparent.png'),
     };
   }
   return _assets;
@@ -94,6 +97,9 @@ function renderVideoQuizReportHtml(d) {
         <div class="r-score">${s.correct_answers || 0}/${s.total_questions_answered || 0} &middot; ${pct}%</div>
       </div>`;
   }).join('');
+
+  const brandMarkImg = a.nieteMark
+    ? `<img class="mark" src="data:image/png;base64,${a.nieteMark}" alt="NIETE">` : '';
 
   const notFinished = unfinished.length ? `
     <div class="unfin"><b>Not finished yet:</b> ${esc(unfinished.join(', '))}</div>` : '';
@@ -164,9 +170,7 @@ body{background:#eef1f7;font-family:'Lexend',sans-serif}
 
 .foot{display:flex;align-items:center;justify-content:space-between;padding:20px 42px 28px;margin-top:20px;border-top:1px solid #eef0f6;color:#8a93ad;font-size:12px}
 .brand{display:flex;align-items:center;gap:8px;font-weight:700;color:#0c1a4e;font-size:14px;font-family:'Lexend'}
-.dot{width:22px;height:22px;border-radius:50%;background:#0c1a4e;position:relative}
-.dot::before,.dot::after{content:'';position:absolute;width:3.5px;height:3.5px;border-radius:50%;background:#fff;top:8px}
-.dot::before{left:6px}.dot::after{right:6px}
+.brand .mark{width:20px;height:20px;object-fit:contain;display:block}
 </style></head><body>
 <div class="report">
 
@@ -198,7 +202,7 @@ body{background:#eef1f7;font-family:'Lexend',sans-serif}
   ${guidanceBlock}
 
   <div class="foot">
-    <div class="brand"><div class="dot"></div>Rumi</div>
+    <div class="brand">${brandMarkImg}NIETE</div>
     <div>${esc(generatedAt)}</div>
   </div>
 
