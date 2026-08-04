@@ -80,19 +80,52 @@ function nameAnswer(label) {
 }
 
 /**
+ * bd-2486 — option_feedback text is authored at content-generation time
+ * against STORED option order (A=option_a, B=option_b, ...). The render-time
+ * shuffle (bd-2359, above) repositions options for DISPLAY without touching
+ * this pre-baked prose, so a letter reference inside it ("the correct answer
+ * is B)") can name a different option than the one shown at that letter.
+ * Confirmed against a real bug report: shuffle put the stored-correct option
+ * at a different displayed letter than the feedback text named.
+ *
+ * Fixed by REMAPPING every letter token found, not stripping it — the
+ * feedback stays just as specific, it just names the letter the child
+ * actually saw. `order[shownPos] = storedIdx`, so inverting it gives, for
+ * every stored letter, the shown letter to substitute.
+ */
+function storedToShownLetterMap(order) {
+  const map = {};
+  order.forEach((storedIdx, shownPos) => {
+    const storedLetter = 'ABCD'[storedIdx];
+    if (storedLetter) map[storedLetter] = optionLetter(shownPos);
+  });
+  return map;
+}
+
+/** Two shapes the corpus uses: "A) text..." and "...answer is B." (no paren). */
+function remapLetters(text, letterMap) {
+  if (!text) return text;
+  let out = text.replace(/\b([A-D])\)/g, (m, letter) => `${letterMap[letter] || letter})`);
+  out = out.replace(/\b(answer\s+is\s+)([A-D])\b(?!\))/gi,
+    (m, prefix, letter) => `${prefix}${letterMap[letter] || letter}`);
+  return out;
+}
+
+/**
  * Per-option feedback where the source has it.
  *
  * The generated half of the bank carries distractor-specific copy that names
  * the misconception ("you picked see, which is an action word"). The legacy
  * half has only a shared explanation and falls back to the generic branch.
  */
-function feedbackFor(q, labels) {
+function feedbackFor(q, labels, order) {
   const fb = q.option_feedback || {};
+  const letterMap = storedToShownLetterMap(order || labels.map((_, i) => i));
   const wrong = {};
   Object.entries(fb.wrong || {}).forEach(([k, v]) => {
-    if (v && String(v).trim()) wrong[Number(k)] = String(v).trim();
+    if (v && String(v).trim()) wrong[Number(k)] = remapLetters(String(v).trim(), letterMap);
   });
-  return { correct: (fb.correct || '').trim(), wrong };
+  return { correct: remapLetters((fb.correct || '').trim(), letterMap), wrong };
 }
 
 /** Buttons only when every title fits; otherwise the list, which is wider. */
@@ -399,7 +432,7 @@ function build(q, opts = {}) {
   const rightLabels = idx.map((i) => labels[i]).filter(Boolean);
   const rightText = rightLabels.map(nameAnswer).join(' and ');
   const expl = (q.explanation || '').trim();
-  const fb = feedbackFor(q, labels);
+  const fb = feedbackFor(q, labels, order);
 
   add('answer', 'text', {
     body: fb.correct || `✅ Correct! The answer is ${rightText}.${expl ? `\n\n${expl}` : ''}`,

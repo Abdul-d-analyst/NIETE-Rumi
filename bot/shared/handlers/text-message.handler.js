@@ -20,6 +20,11 @@ const handleCurriculumLessonPlan = require('./lesson-plan-v2.handler');
 const RegionFeaturesService = require('../services/region-features.service');
 const { getUserRegion } = require('../utils/region');
 const VideoOrchestrator = require('../services/video/video-orchestrator.service');
+const ChildFlowToken = require('../services/quiz/child-flow-token'); // bd-2475 (ported from PK)
+// bd-2475 — tryChildVideoMenu reads the module-level constant (matches PK's
+// pattern); the existing /video block below still keeps its own local
+// process.env read (pre-existing NIETE code, untouched by this port).
+const { STUDENT_VIDEOS_FLOW_ID } = require('../utils/constants');
 const AttendanceDetectorService = require('../services/attendance-detector.service');
 const AttendanceConversationService = require('../services/attendance-conversation.service');
 const AttendanceDeliveryService = require('../services/attendance-delivery.service');
@@ -158,6 +163,63 @@ function isSelectVideoButton({ buttonId, buttonPayload, buttonText } = {}) {
   return [buttonId, buttonPayload, buttonText].some(
     (v) => v && SELECT_VIDEO_BUTTON_RX.test(String(v).trim())
   );
+}
+
+// bd-2486 (ported from PK) — the /video command, extended to match a bare
+// "video" (no slash). A trimmed message equal to just "video" used to fall
+// all the way through to intent detection, which routes intent.type===
+// 'video' to the legacy AI VideoOrchestrator with the literal word "Video"
+// as a nonsense topic — confirmed via a real Axiom trace (2026-08-04, PK).
+// Exact-match only (never startsWith/contains), so "make me a video on
+// photosynthesis" still falls through to AI video generation as intended.
+// Pure / side-effect-free so it is unit-testable.
+function isVideoCommand(trimmedMessage) {
+  const t = String(trimmedMessage || '').trim();
+  return t === '/video' || t.startsWith('/video ') || t.toLowerCase() === 'video';
+}
+
+/**
+ * bd-2475 (ported from PK) — /video's promise to a binge-declining child
+ * ("send /video anytime") only holds if it actually works with no `users`
+ * row. Named by a SINGLE match on the phone (StudentIdentity.findByPhone —
+ * siblings on one handset are ambiguous, so they fall through unchanged)
+ * with at least one prior share_link quiz session (so we have a
+ * shareCodeId to attribute the next round to). Returns false — never
+ * throws — on any miss, so the caller can fall straight into the existing
+ * noAccount message.
+ */
+async function tryChildVideoMenu(from, language) {
+  try {
+    const StudentIdentity = require('../services/quiz/student-identity.service');
+    const known = await StudentIdentity.findByPhone(from);
+    if (known.length !== 1) return false;
+
+    const { data: lastSession } = await supabase
+      .from('quiz_sessions')
+      .select('share_code_id')
+      .eq('student_id', known[0].id)
+      .not('share_code_id', 'is', null)
+      .order('completed_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (!lastSession?.share_code_id || !STUDENT_VIDEOS_FLOW_ID) return false;
+
+    const flowToken = ChildFlowToken.build({
+      phone: from, shareCodeId: lastSession.share_code_id,
+      studentId: known[0].id, language: language || 'en',
+    });
+    await WhatsAppService.sendFlow(from, {
+      flowId: STUDENT_VIDEOS_FLOW_ID,
+      header: '🎬 More Videos',
+      body: 'Pick a class, subject and topic — I will send the video to your chat.',
+      buttonText: 'Browse',
+      flowToken,
+    });
+    return true;
+  } catch (err) {
+    logToFile('⚠️ /video: child fallback failed', { error: err.message });
+    return false;
+  }
 }
 
 async function handleTextMessage(message, from, messageBody, user = null) {
@@ -922,18 +984,21 @@ async function handleTextMessage(message, from, messageBody, user = null) {
 
   // ============================================================
   // VIDEO GENERATION COMMAND: Check for /video command
-  // bd-2482 (NIETE-only): a bare "video" (no slash) also opens the library —
-  // teachers type the plain word more often than the slash form. Exact-match
-  // only (not startsWith/substring) so a real sentence like "make me a video
-  // on photosynthesis" still falls through to AI video generation below.
+  // bd-2482/bd-2486 (ported from PK): a bare "video" (no slash) also opens
+  // the library — teachers type the plain word more often than the slash
+  // form. Exact-match only (not startsWith/substring) so a real sentence
+  // like "make me a video on photosynthesis" still falls through to AI
+  // video generation below. isVideoCommand() is shared with PK's identical
+  // fix, extracted into a named/testable matcher (mirrors isSelectVideoButton).
   // ============================================================
-  if (
-    trimmedMessage === '/video' || trimmedMessage.startsWith('/video ') ||
-    trimmedMessage.toLowerCase() === 'video'
-  ) {
+  if (isVideoCommand(trimmedMessage)) {
     logToFile('🎬 /video command detected', { userId: user?.id, phoneNumber: from });
 
     if (!user) {
+      // bd-2475 (ported from PK) — a binge-declining child was told
+      // "/video always works". Honour that before falling to the
+      // teacher-only noAccount message.
+      if (await tryChildVideoMenu(from, user?.preferred_language)) return;
       await WhatsAppService.sendMessage(
         from,
         'Sorry, I could not find your account. Please send me a message first to register.\n\nمعذرت، میں آپ کا اکاؤنٹ نہیں مل سکا۔'
@@ -2966,4 +3031,6 @@ module.exports = {
   tryCurriculumLessonPlanServe, // exported for intercept unit tests
   handleLessonPlanRequest, // exported for the Oxbridge-picker "Generate NIETE LP" tap
   isSelectVideoButton, // bd-2482 — video-library broadcast "Select Video" button
+  isVideoCommand, // bd-2486 — exported for unit tests
+  tryChildVideoMenu, // bd-2475 — exported for unit tests
 };

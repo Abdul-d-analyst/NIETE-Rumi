@@ -1050,9 +1050,14 @@ app.post('/webhook', async (req, res) => {
         const VideoQuizService = require('./shared/services/quiz/video-quiz.service');
         const VideoQuizShare = require('./shared/services/quiz/video-quiz-share.service');
         const VideoQuizInvite = require('./shared/services/quiz/video-quiz-invite.service');
+        // bd-2475 (ported from PK) — the watch-more/binge offer, chained
+        // after a declined invite. Same LAST-before-handleAnswer placement,
+        // same reason.
+        const VideoQuizBinge = require('./shared/services/quiz/video-quiz-binge.service');
         const handled = await VideoQuizService.handleOfferButton(buttonId, from)
           || await VideoQuizShare.handleShareButton(buttonId, from)
           || await VideoQuizInvite.handleInviteButton(buttonId, from)
+          || await VideoQuizBinge.handleMoreButton(buttonId, from)
           || await VideoQuizService.handleAnswer(from, buttonId);
         if (!handled) {
           logToFile('⚠️ unrouted vq_ button', { buttonId, from });

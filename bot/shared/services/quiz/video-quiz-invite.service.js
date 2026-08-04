@@ -61,7 +61,20 @@ async function handleInviteButton(buttonId, phone) {
   if (buttonId !== INVITE_YES && buttonId !== INVITE_NO) return false;
   const ctx = await redisService.get(INVITE_KEY(phone));
   await redisService.delete(INVITE_KEY(phone));
-  if (buttonId === INVITE_NO || !ctx) return true;
+  if (!ctx) return true;
+
+  if (buttonId === INVITE_NO) {
+    // bd-2475 — a decline chains into "want to watch more?" rather than
+    // dead-ending the conversation. Same student/share-code so the next
+    // round still attributes to this teacher's report.
+    const Binge = require('./video-quiz-binge.service');
+    await Binge.offerMore({
+      phone, studentId: ctx.studentId, shareCodeId: ctx.shareCodeId, language: ctx.language,
+    }).catch((err) => {
+      logToFile('⚠️ video-quiz-invite: offerMore threw', { error: err.message });
+    });
+    return true;
+  }
 
   const share = require('./video-quiz-share.service');
   const { data: parent } = await supabase

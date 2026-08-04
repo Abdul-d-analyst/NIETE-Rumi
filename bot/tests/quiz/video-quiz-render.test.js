@@ -325,6 +325,39 @@ describe('feedback (§4b invariant)', () => {
       .toBe('You picked see, an action word.');
   });
 
+  // bd-2486 — option_feedback is authored at content-generation time against
+  // STORED option order (A=option_a, B=option_b, C=option_c). The render-time
+  // shuffle (bd-2359) repositions options for DISPLAY without touching this
+  // pre-baked text, so a letter reference inside it can name a different
+  // option than the one the child actually saw at that letter. Confirmed
+  // against a real operator bug report (Sabeena, 2026-08-04): shuffle put the
+  // stored-correct option at a different displayed letter than the feedback
+  // text named.
+  test('letter references in feedback are remapped to the DISPLAYED letter, not the stored one', () => {
+    // external_id 'test-id-0' is a fixed point: for a 3-option question it
+    // shuffles stored [A,B,C]=[Alpha,Beta,Gamma] to shown [Gamma,Alpha,Beta] —
+    // i.e. stored A is displayed at position 1 (shown letter B), stored B at
+    // position 2 (shown letter C), stored C at position 0 (shown letter A).
+    const msgs = render.build(row({
+      external_id: 'test-id-0',
+      option_a: 'Alpha', option_b: 'Beta', option_c: 'Gamma', option_d: null,
+      correct_option: 'A',
+      option_feedback: {
+        correct: 'Yes! A) Alpha is right.',
+        wrong: { 1: 'B) Good try! The correct answer is A) Alpha, because reasons.' },
+      },
+    }));
+    const correctMsg = msgs.find((m) => m.role === 'feedback_correct');
+    // Stored A is SHOWN as B — the text must say B), never the stale A).
+    expect(correctMsg.body).toContain('B) Alpha is right.');
+    expect(correctMsg.body).not.toContain('A) Alpha is right.');
+
+    const wrongMsg = msgs.find((m) => m.role === 'feedback_incorrect' && m.optionIndex === 1);
+    // Stored B (the wrong option authored here) is SHOWN as C; stored A
+    // (named as "the correct answer") is SHOWN as B.
+    expect(wrongMsg.body).toBe('C) Good try! The correct answer is B) Alpha, because reasons.');
+  });
+
   test('legacy questions fall back to one generic incorrect branch', () => {
     const msgs = render.build(row());
     const wrong = msgs.filter((m) => m.role === 'feedback_incorrect');

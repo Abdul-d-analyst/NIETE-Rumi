@@ -22,6 +22,7 @@ const { logToFile } = require('../utils/logger');
 const { logEvent } = require('../utils/structured-logger');
 const WhatsAppService = require('../services/whatsapp.service');
 const StudentVideoFeedbackService = require('../services/student-video-feedback.service');
+const ChildFlowToken = require('../services/quiz/child-flow-token');
 
 const GRADE_ORDER = ['NURSERY', 'KG', '1', '2', '3', '4', '5', '6'];
 const gradeRank = (g) => {
@@ -66,6 +67,24 @@ async function getPhoneForUser(userId) {
     .eq('id', userId)
     .single();
   return data?.phone_number || null;
+}
+
+/**
+ * bd-2475 — the Flow now serves two kinds of caller behind one flow_token:
+ * a registered teacher (`<userId>:student-videos:<ts>`, resolved via the
+ * `users` table like always) and an anonymous quiz-taking child
+ * (`childpick:<phone>:<shareCodeId>:<studentId>:<language>:<ts>`, resolved
+ * with zero queries — the phone travels IN the token because there is no
+ * `users` row to look it up from). Everything upstream of delivery (grade/
+ * subject/topic browsing) is identical for both; only who gets addressed,
+ * and what happens after the video lands, differs — see deliverVideoAsync.
+ */
+async function resolveDelivery(flowToken) {
+  const child = ChildFlowToken.parse(flowToken);
+  if (child) return { kind: 'child', ...child };
+  const userId = (flowToken || '').split(':')[0];
+  const phone = await getPhoneForUser(userId);
+  return { kind: 'teacher', userId, phone };
 }
 
 // ---------- INIT ----------
@@ -191,9 +210,8 @@ async function selectTopic(flowToken, screenData) {
 // Awaited (not fire-and-forget) so it lands BEFORE the SUCCESS screen renders;
 // tiny sendMessage call, well under Meta's 10s data_exchange budget.
 async function sendPreDeliveryAck(flowToken, row) {
-  const userId = (flowToken || '').split(':')[0];
   try {
-    const phone = await getPhoneForUser(userId);
+    const { phone } = await resolveDelivery(flowToken);
     if (!phone) return;
     await WhatsAppService.sendMessage(
       phone,
@@ -209,11 +227,47 @@ async function sendPreDeliveryAck(flowToken, row) {
 // upload succeeds — a failed upload should not produce a feedback prompt
 // asking the teacher to rate a video they never received.
 function deliverVideoAsync(flowToken, row) {
-  const userId = (flowToken || '').split(':')[0];
   (async () => {
-    let phone;
+    const resolved = await resolveDelivery(flowToken);
+
+    // bd-2475 — a binge-round child gets exactly what every other share_link
+    // child gets: the video sent and the quiz started immediately by
+    // startSession (source: 'share_link'), no opt-in offer, no delivery
+    // tracking row. Reusing offerAfterVideo here would hardcode
+    // source:'video_solo' on accept (see handleOfferButton) and reopen the
+    // exact report-attribution leak bd-2472 closed.
+    if (resolved.kind === 'child') {
+      const { phone, shareCodeId, studentId, language } = resolved;
+      try {
+        const VideoQuizService = require('../services/quiz/video-quiz.service');
+        const quiz = await VideoQuizService.quizForVideo(row.id);
+        if (!quiz) {
+          const caption = `📚 ${gradeTitle(row.grade)} · ${row.subject}\n${row.clean_title}`;
+          await WhatsAppService.sendVideoFromUrl(phone, row.r2_url, caption);
+          logEvent('student_videos.delivered', {
+            studentId, videoId: row.id, grade: row.grade, subject: row.subject,
+            chapter: row.clean_chapter, title: row.clean_title, quizAvailable: false,
+          });
+          return;
+        }
+        const { data: student } = await supabase
+          .from('students').select('student_name, self_reported_class')
+          .eq('id', studentId).maybeSingle();
+        await VideoQuizService.startSession({
+          phone, userId: null, quizId: quiz.id, videoId: row.id, language,
+          source: 'share_link',
+          studentName: student?.student_name || null,
+          studentClass: student?.self_reported_class || null,
+          studentId, shareCodeId, invitedByStudentId: null,
+        });
+      } catch (err) {
+        logToFile('Student Videos: child delivery failed', { studentId, videoId: row.id, error: err.message });
+      }
+      return;
+    }
+
+    const { userId, phone } = resolved;
     try {
-      phone = await getPhoneForUser(userId);
       if (!phone) {
         logToFile('Student Videos: no phone for user', { userId });
         return;
