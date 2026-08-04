@@ -22,8 +22,13 @@ jest.mock('../../shared/services/whatsapp.service', () => ({
 }));
 jest.mock('../../shared/utils/logger', () => ({ logToFile: jest.fn() }));
 jest.mock('../../shared/utils/structured-logger', () => ({ logEvent: jest.fn() }));
+jest.mock('../../shared/services/quiz/video-quiz-binge.service', () => ({
+  offerMore: jest.fn().mockResolvedValue(true),
+}));
 
 const WhatsAppService = require('../../shared/services/whatsapp.service');
+const supabase = require('../../shared/config/supabase');
+const Binge = require('../../shared/services/quiz/video-quiz-binge.service');
 const invite = require('../../shared/services/quiz/video-quiz-invite.service');
 
 beforeEach(() => jest.clearAllMocks());
@@ -131,5 +136,45 @@ describe('bd-2339 — the offer', () => {
     // the offer would be a promise we cannot keep.
     await invite.offerInvite({ phone: '923001234567', studentId: null, shareCodeId: 'sc-1' });
     expect(WhatsAppService.sendInteractiveButtons).not.toHaveBeenCalled();
+  });
+});
+
+// bd-2475 — declining the friend-invite chains into the watch-more offer.
+describe('handleInviteButton', () => {
+  const redisService = require('../../shared/services/cache/railway-redis.service');
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    redisService.get.mockResolvedValue({ studentId: 'stu-1', shareCodeId: 'sc-1', language: 'en' });
+  });
+
+  test('returns false for a button id it does not own', async () => {
+    expect(await invite.handleInviteButton('vq_more_yes', '923001234567')).toBe(false);
+    expect(Binge.offerMore).not.toHaveBeenCalled();
+  });
+
+  test('an expired offer is a no-op — no binge offer either, nothing to attribute it to', async () => {
+    redisService.get.mockResolvedValue(null);
+    expect(await invite.handleInviteButton(invite.INVITE_NO, '923001234567')).toBe(true);
+    expect(Binge.offerMore).not.toHaveBeenCalled();
+  });
+
+  test('on decline: chains into the watch-more offer with the SAME student/share-code/language', async () => {
+    expect(await invite.handleInviteButton(invite.INVITE_NO, '923001234567')).toBe(true);
+    expect(Binge.offerMore).toHaveBeenCalledWith({
+      phone: '923001234567', studentId: 'stu-1', shareCodeId: 'sc-1', language: 'en',
+    });
+  });
+
+  test('on accept: does NOT trigger the watch-more offer (a friend invite is being sent, not declined)', async () => {
+    supabase.from.mockImplementation((table) => {
+      const chain = {
+        select: () => chain, eq: () => chain,
+        maybeSingle: async () => ({ data: null }), // no parent share code found -> early return
+      };
+      return chain;
+    });
+    expect(await invite.handleInviteButton(invite.INVITE_YES, '923001234567')).toBe(true);
+    expect(Binge.offerMore).not.toHaveBeenCalled();
   });
 });
