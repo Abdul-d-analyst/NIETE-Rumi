@@ -160,6 +160,19 @@ function isSelectVideoButton({ buttonId, buttonPayload, buttonText } = {}) {
   );
 }
 
+// bd-2486 (ported from PK) — the /video command, extended to match a bare
+// "video" (no slash). A trimmed message equal to just "video" used to fall
+// all the way through to intent detection, which routes intent.type===
+// 'video' to the legacy AI VideoOrchestrator with the literal word "Video"
+// as a nonsense topic — confirmed via a real Axiom trace (2026-08-04, PK).
+// Exact-match only (never startsWith/contains), so "make me a video on
+// photosynthesis" still falls through to AI video generation as intended.
+// Pure / side-effect-free so it is unit-testable.
+function isVideoCommand(trimmedMessage) {
+  const t = String(trimmedMessage || '').trim();
+  return t === '/video' || t.startsWith('/video ') || t.toLowerCase() === 'video';
+}
+
 async function handleTextMessage(message, from, messageBody, user = null) {
   logToFile(`Processing TEXT message: ${messageBody}`);
 
@@ -922,15 +935,14 @@ async function handleTextMessage(message, from, messageBody, user = null) {
 
   // ============================================================
   // VIDEO GENERATION COMMAND: Check for /video command
-  // bd-2482 (NIETE-only): a bare "video" (no slash) also opens the library —
-  // teachers type the plain word more often than the slash form. Exact-match
-  // only (not startsWith/substring) so a real sentence like "make me a video
-  // on photosynthesis" still falls through to AI video generation below.
+  // bd-2482/bd-2486 (ported from PK): a bare "video" (no slash) also opens
+  // the library — teachers type the plain word more often than the slash
+  // form. Exact-match only (not startsWith/substring) so a real sentence
+  // like "make me a video on photosynthesis" still falls through to AI
+  // video generation below. isVideoCommand() is shared with PK's identical
+  // fix, extracted into a named/testable matcher (mirrors isSelectVideoButton).
   // ============================================================
-  if (
-    trimmedMessage === '/video' || trimmedMessage.startsWith('/video ') ||
-    trimmedMessage.toLowerCase() === 'video'
-  ) {
+  if (isVideoCommand(trimmedMessage)) {
     logToFile('🎬 /video command detected', { userId: user?.id, phoneNumber: from });
 
     if (!user) {
@@ -2966,4 +2978,5 @@ module.exports = {
   tryCurriculumLessonPlanServe, // exported for intercept unit tests
   handleLessonPlanRequest, // exported for the Oxbridge-picker "Generate NIETE LP" tap
   isSelectVideoButton, // bd-2482 — video-library broadcast "Select Video" button
+  isVideoCommand, // bd-2486 — exported for unit tests
 };
