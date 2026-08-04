@@ -149,6 +149,17 @@ const {
   deliverCertificateByCode,
 } = require('../services/training/certificate-pdf.service');
 
+// bd-2482 (NIETE port of PK bd-1598): the "Select Video" QUICK_REPLY tap on
+// the video-library broadcast template. Matches the template button title,
+// an explicit `select_video` payload, or the Urdu equivalent — pure /
+// side-effect-free so it's unit-testable.
+const SELECT_VIDEO_BUTTON_RX = /^(select[_\s]?video|ویڈیو\s*منتخب\s*کریں)$/i;
+function isSelectVideoButton({ buttonId, buttonPayload, buttonText } = {}) {
+  return [buttonId, buttonPayload, buttonText].some(
+    (v) => v && SELECT_VIDEO_BUTTON_RX.test(String(v).trim())
+  );
+}
+
 async function handleTextMessage(message, from, messageBody, user = null) {
   logToFile(`Processing TEXT message: ${messageBody}`);
 
@@ -2947,4 +2958,5 @@ module.exports = {
   evaluateHomeworkTrigger, // exported for trigger unit tests
   tryCurriculumLessonPlanServe, // exported for intercept unit tests
   handleLessonPlanRequest, // exported for the Oxbridge-picker "Generate NIETE LP" tap
+  isSelectVideoButton, // bd-2482 — video-library broadcast "Select Video" button
 };

@@ -14,7 +14,7 @@ const PortalInviteService = require('./shared/services/portal-invite.service');
 const ReadingAssessmentService = require('./shared/services/reading-assessment.service');
 
 // Import Handlers
-const { handleTextMessage } = require('./shared/handlers/text-message.handler');
+const { handleTextMessage, isSelectVideoButton } = require('./shared/handlers/text-message.handler');
 const { handleVoiceMessage } = require('./shared/handlers/voice-message.handler');
 const { handleImageMessage } = require('./shared/handlers/image-message.handler');
 const ExamCheckerHandler = require('./shared/handlers/exam-checker.handler');
@@ -160,6 +160,32 @@ async function handleBroadcastStatusWebhook(statuses) {
       });
     }
   }
+}
+
+/**
+ * bd-2482 (NIETE port of PK bd-1598): video-library broadcast "Select Video"
+ * CTA tap. Opens the Student Videos Flow directly, bypassing any per-user
+ * gate in text-message.handler.js. On any sendFlow error, falls back to the
+ * keyword path (handleTextMessage 'video') so the tap never dead-ends.
+ */
+async function openStudentVideosFlowFromCta(message, from, user) {
+  const { STUDENT_VIDEOS_FLOW_ID } = require('./shared/utils/constants');
+  logToFile('🎬 Student Videos: Select Video CTA tapped', { from, userId: user?.id });
+  if (STUDENT_VIDEOS_FLOW_ID) {
+    try {
+      await WhatsAppService.sendFlow(from, {
+        flowId: STUDENT_VIDEOS_FLOW_ID,
+        header: '🎬 Student Videos',
+        body: 'Choose your class, subject and topic — I will send the video to your chat.',
+        buttonText: 'Browse',
+        flowToken: `${user?.id || from}:student-videos:${Date.now()}`,
+      });
+      return;
+    } catch (flowErr) {
+      logToFile('Student Videos CTA: sendFlow failed, falling back to keyword path', { error: flowErr.message });
+    }
+  }
+  await handleTextMessage(message, from, 'video', user);
 }
 
 /**
@@ -1061,7 +1087,13 @@ app.post('/webhook', async (req, res) => {
             });
           }
         }
-      } else {
+      }
+      // bd-2482 (NIETE port of PK bd-1598): video-library broadcast
+      // "Select Video" CTA arriving as an interactive button_reply.
+      else if (buttonId === 'select_video' || isSelectVideoButton({ buttonId })) {
+        await openStudentVideosFlowFromCta(message, from, user);
+      }
+      else {
         logToFile('⚠️ Unknown button ID', { buttonId });
       }
     } else if (messageType === 'button' && message.button) {
@@ -1137,7 +1169,15 @@ app.post('/webhook', async (req, res) => {
         } else {
           logToFile('⚠️ No user found for menu button', { buttonPayload, from });
         }
-      } else {
+      }
+      // bd-2482 (NIETE port of PK bd-1598): video-library broadcast
+      // "Select Video" QUICK_REPLY. Templates deliver QUICK_REPLY as
+      // messageType:'button'; match payload OR button text (EN/UR) since
+      // Meta strips the payload on some registrations.
+      else if (isSelectVideoButton({ buttonPayload, buttonText })) {
+        await openStudentVideosFlowFromCta(message, from, user);
+      }
+      else {
         logToFile('⚠️ Unknown carousel button payload', { buttonPayload, buttonText });
       }
     } else if (messageType === 'interactive' && message.interactive?.type === 'nfm_reply') {
