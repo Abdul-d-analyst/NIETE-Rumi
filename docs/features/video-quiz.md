@@ -48,6 +48,24 @@ WABA as part of this port — `STUDENT_VIDEOS_FLOW_ID` had never been set before
 unreachable dead code prior to 2026-08-04), `WHATSAPP_BOT_NUMBER` (so forwarded wa.me links open NIETE's own
 number, not another deployment's).
 
+## Post-port fixes (2026-08-04, same day — operator phone-testing)
+
+Operator tested the ported feature live (Sabeena's share_link session) and found 3 real issues, all
+root-caused against live production data before writing fix code, and all ported from PK's own same-day
+fixes for feature parity:
+
+1. **Watch-more-videos offer never appeared** — root cause was NOT a code bug: PK's own binge-loop feature
+   (bd-2475, "after a declined friend-invite, offer another round") had been sitting on PK's staging for
+   weeks, never promoted to PK's main, so NIETE's port (sourced from PK main) simply never had it. Ported
+   here once PK shipped it to its own prod. New: `child-flow-token.js`, `video-quiz-binge.service.js`.
+2. **`option_feedback` named the wrong letter after a shuffle** — the render-time shuffle repositions
+   options for display without touching the pre-authored `option_feedback` text, which references letters
+   in STORED order. Fixed by remapping (not stripping) every letter token to the shown letter in
+   `feedbackFor()` (`video-quiz-render.service.js`).
+3. **Bare "video" (no slash) opened the wrong feature** — fell through to intent detection and the legacy AI
+   video generator instead of the library. Fixed same-day, twice: once NIETE-only inline, then refactored to
+   match PK's cleaner extracted `isVideoCommand()` for consistency between the two codebases.
+
 ## Related
 
 - [Quiz](quiz.md) — the sibling LLM-generated class-quiz feature; shares the underlying `quizzes` tables but
