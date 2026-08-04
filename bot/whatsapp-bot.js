@@ -14,7 +14,7 @@ const PortalInviteService = require('./shared/services/portal-invite.service');
 const ReadingAssessmentService = require('./shared/services/reading-assessment.service');
 
 // Import Handlers
-const { handleTextMessage } = require('./shared/handlers/text-message.handler');
+const { handleTextMessage, isSelectVideoButton } = require('./shared/handlers/text-message.handler');
 const { handleVoiceMessage } = require('./shared/handlers/voice-message.handler');
 const { handleImageMessage } = require('./shared/handlers/image-message.handler');
 const ExamCheckerHandler = require('./shared/handlers/exam-checker.handler');
@@ -160,6 +160,32 @@ async function handleBroadcastStatusWebhook(statuses) {
       });
     }
   }
+}
+
+/**
+ * bd-2482 (NIETE port of PK bd-1598): video-library broadcast "Select Video"
+ * CTA tap. Opens the Student Videos Flow directly, bypassing any per-user
+ * gate in text-message.handler.js. On any sendFlow error, falls back to the
+ * keyword path (handleTextMessage 'video') so the tap never dead-ends.
+ */
+async function openStudentVideosFlowFromCta(message, from, user) {
+  const { STUDENT_VIDEOS_FLOW_ID } = require('./shared/utils/constants');
+  logToFile('🎬 Student Videos: Select Video CTA tapped', { from, userId: user?.id });
+  if (STUDENT_VIDEOS_FLOW_ID) {
+    try {
+      await WhatsAppService.sendFlow(from, {
+        flowId: STUDENT_VIDEOS_FLOW_ID,
+        header: '🎬 Student Videos',
+        body: 'Choose your class, subject and topic — I will send the video to your chat.',
+        buttonText: 'Browse',
+        flowToken: `${user?.id || from}:student-videos:${Date.now()}`,
+      });
+      return;
+    } catch (flowErr) {
+      logToFile('Student Videos CTA: sendFlow failed, falling back to keyword path', { error: flowErr.message });
+    }
+  }
+  await handleTextMessage(message, from, 'video', user);
 }
 
 /**
@@ -1014,6 +1040,24 @@ app.post('/webhook', async (req, res) => {
         const StudentVideoFeedbackService = require('./shared/services/student-video-feedback.service');
         await StudentVideoFeedbackService.handleFeedbackButton(buttonId, from);
       }
+      // bd-2482 (NIETE port of PK bd-2308/2313): Video quizzes — the offer
+      // after a video, an answer tap, the share-with-class offer, the
+      // invite-a-friend offer. All use the `vq_` prefix so they can never
+      // collide with the parent-quiz `quiz_` ids handled elsewhere.
+      // handleAnswer stays LAST: it treats anything left as an answer id, so
+      // a new offer button placed after it would be swallowed as a wrong answer.
+      else if (buttonId.startsWith('vq_')) {
+        const VideoQuizService = require('./shared/services/quiz/video-quiz.service');
+        const VideoQuizShare = require('./shared/services/quiz/video-quiz-share.service');
+        const VideoQuizInvite = require('./shared/services/quiz/video-quiz-invite.service');
+        const handled = await VideoQuizService.handleOfferButton(buttonId, from)
+          || await VideoQuizShare.handleShareButton(buttonId, from)
+          || await VideoQuizInvite.handleInviteButton(buttonId, from)
+          || await VideoQuizService.handleAnswer(from, buttonId);
+        if (!handled) {
+          logToFile('⚠️ unrouted vq_ button', { buttonId, from });
+        }
+      }
       // Edit-class multi-class picker: open the edit-class flow for the chosen class.
       else if (buttonId.startsWith('edit_class_')) {
         const listId = buttonId.replace('edit_class_', '');
@@ -1043,7 +1087,13 @@ app.post('/webhook', async (req, res) => {
             });
           }
         }
-      } else {
+      }
+      // bd-2482 (NIETE port of PK bd-1598): video-library broadcast
+      // "Select Video" CTA arriving as an interactive button_reply.
+      else if (buttonId === 'select_video' || isSelectVideoButton({ buttonId })) {
+        await openStudentVideosFlowFromCta(message, from, user);
+      }
+      else {
         logToFile('⚠️ Unknown button ID', { buttonId });
       }
     } else if (messageType === 'button' && message.button) {
@@ -1119,7 +1169,15 @@ app.post('/webhook', async (req, res) => {
         } else {
           logToFile('⚠️ No user found for menu button', { buttonPayload, from });
         }
-      } else {
+      }
+      // bd-2482 (NIETE port of PK bd-1598): video-library broadcast
+      // "Select Video" QUICK_REPLY. Templates deliver QUICK_REPLY as
+      // messageType:'button'; match payload OR button text (EN/UR) since
+      // Meta strips the payload on some registrations.
+      else if (isSelectVideoButton({ buttonPayload, buttonText })) {
+        await openStudentVideosFlowFromCta(message, from, user);
+      }
+      else {
         logToFile('⚠️ Unknown carousel button payload', { buttonPayload, buttonText });
       }
     } else if (messageType === 'interactive' && message.interactive?.type === 'nfm_reply') {
@@ -1132,6 +1190,41 @@ app.post('/webhook', async (req, res) => {
         responseJson = JSON.parse(message.interactive?.nfm_reply?.response_json || '{}');
       } catch (error) {
         logToFile('❌ Failed to parse flow response_json', { from, error: error.message });
+      }
+
+      // bd-2482 (NIETE port of PK bd-2309/2338): video-quiz Flow submissions
+      // are routed on the FLOW TOKEN (`vq:<sessionId>:<questionId>` for a
+      // picture-answer, `vqjoin:...` for a new student's name+class) — not on
+      // response shape, since a generic {screen_0_..: "2"} payload would have
+      // to be guessed at. The token is ours by construction.
+      const vqToken = responseJson.flow_token || message.interactive?.nfm_reply?.flow_token || '';
+
+      if (typeof vqToken === 'string' && vqToken.startsWith('vqjoin:')) {
+        try {
+          const VideoQuizShare = require('./shared/services/quiz/video-quiz-share.service');
+          const handled = await VideoQuizShare.handleJoinFlowReply(from, vqToken, responseJson);
+          if (handled) return;
+        } catch (joinErr) {
+          logToFile('❌ student join Flow reply routing failed', { error: joinErr.message });
+        }
+      }
+
+      if (typeof vqToken === 'string' && vqToken.startsWith('vq:')) {
+        try {
+          const [, , questionId] = vqToken.split(':');
+          const picked = Object.entries(responseJson)
+            .filter(([k]) => k !== 'flow_token')
+            .map(([, v]) => v)
+            .find((v) => /^\d+$/.test(String(v)));
+          if (questionId && picked !== undefined) {
+            const VideoQuizService = require('./shared/services/quiz/video-quiz.service');
+            await VideoQuizService.handleAnswer(from, `vq_${questionId}_${picked}`);
+            return;
+          }
+          logToFile('⚠️ video-quiz Flow reply had no option index', { vqToken, responseJson });
+        } catch (vqFlowErr) {
+          logToFile('❌ video-quiz Flow reply routing failed', { error: vqFlowErr.message });
+        }
       }
 
       // Use centralized flow type detection (fixes registration→attendance misrouting)
@@ -1353,6 +1446,15 @@ app.post('/webhook', async (req, res) => {
       const listReply = message.interactive.list_reply;
       const listId = listReply.id;
       logToFile('📋 Interactive list item selected', { listId, from });
+
+      // bd-2482 (NIETE port of PK bd-2309): video-quiz answers arrive as
+      // list_reply whenever the question has 4 options or a title too long
+      // for a 20-char button. Same `vq_` ids as the button path — routed
+      // here too, or a four-option question would accept no answer at all.
+      if (listId.startsWith('vq_')) {
+        const VideoQuizService = require('./shared/services/quiz/video-quiz.service');
+        if (await VideoQuizService.handleAnswer(from, listId)) return;
+      }
 
       // Teacher-training grand quiz answers — handle before Reading Assessment routing.
       if (listId && listId.startsWith('training_quiz_')) {

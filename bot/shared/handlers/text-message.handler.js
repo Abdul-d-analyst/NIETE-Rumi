@@ -149,6 +149,17 @@ const {
   deliverCertificateByCode,
 } = require('../services/training/certificate-pdf.service');
 
+// bd-2482 (NIETE port of PK bd-1598): the "Select Video" QUICK_REPLY tap on
+// the video-library broadcast template. Matches the template button title,
+// an explicit `select_video` payload, or the Urdu equivalent — pure /
+// side-effect-free so it's unit-testable.
+const SELECT_VIDEO_BUTTON_RX = /^(select[_\s]?video|ویڈیو\s*منتخب\s*کریں)$/i;
+function isSelectVideoButton({ buttonId, buttonPayload, buttonText } = {}) {
+  return [buttonId, buttonPayload, buttonText].some(
+    (v) => v && SELECT_VIDEO_BUTTON_RX.test(String(v).trim())
+  );
+}
+
 async function handleTextMessage(message, from, messageBody, user = null) {
   logToFile(`Processing TEXT message: ${messageBody}`);
 
@@ -208,6 +219,37 @@ async function handleTextMessage(message, from, messageBody, user = null) {
         }
       } catch (qErr) {
         logToFile('⚠️ Quiz state intercept error (non-fatal)', { error: qErr.message });
+      }
+    }
+
+    // ============================================================
+    // bd-2482 (NIETE port of PK bd-2314/2315): Video-quiz share links.
+    //
+    // Deliberately BEFORE user lookup: a child arriving from a forwarded
+    // wa.me link may have no users row at all, and their first message is
+    // the auto-filled "QUIZ-ABC123". Routing that through normal onboarding
+    // would answer a code with a menu.
+    //
+    // Two steps, both short-circuiting:
+    //   1. the code itself -> greet, naming the teacher and the topic
+    //   2. the next two texts -> their name, then their class
+    // ============================================================
+    if (messageBody) {
+      try {
+        const VideoQuizShare = require('../services/quiz/video-quiz-share.service');
+        const code = VideoQuizShare.parseShareCode(messageBody);
+        if (code) {
+          await VideoQuizShare.beginFromCode(from, code);
+          typingController.stop();
+          return;
+        }
+        if (await VideoQuizShare.consumeJoinReply(from, messageBody)) {
+          logToFile('Text consumed as video-quiz join detail — short-circuit', { from });
+          typingController.stop();
+          return;
+        }
+      } catch (vqErr) {
+        logToFile('Video Quiz share: routing error', { error: vqErr.message });
       }
     }
 
@@ -2916,4 +2958,5 @@ module.exports = {
   evaluateHomeworkTrigger, // exported for trigger unit tests
   tryCurriculumLessonPlanServe, // exported for intercept unit tests
   handleLessonPlanRequest, // exported for the Oxbridge-picker "Generate NIETE LP" tap
+  isSelectVideoButton, // bd-2482 — video-library broadcast "Select Video" button
 };
