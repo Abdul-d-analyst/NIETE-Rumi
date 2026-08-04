@@ -212,6 +212,37 @@ async function handleTextMessage(message, from, messageBody, user = null) {
     }
 
     // ============================================================
+    // bd-2482 (NIETE port of PK bd-2314/2315): Video-quiz share links.
+    //
+    // Deliberately BEFORE user lookup: a child arriving from a forwarded
+    // wa.me link may have no users row at all, and their first message is
+    // the auto-filled "QUIZ-ABC123". Routing that through normal onboarding
+    // would answer a code with a menu.
+    //
+    // Two steps, both short-circuiting:
+    //   1. the code itself -> greet, naming the teacher and the topic
+    //   2. the next two texts -> their name, then their class
+    // ============================================================
+    if (messageBody) {
+      try {
+        const VideoQuizShare = require('../services/quiz/video-quiz-share.service');
+        const code = VideoQuizShare.parseShareCode(messageBody);
+        if (code) {
+          await VideoQuizShare.beginFromCode(from, code);
+          typingController.stop();
+          return;
+        }
+        if (await VideoQuizShare.consumeJoinReply(from, messageBody)) {
+          logToFile('Text consumed as video-quiz join detail — short-circuit', { from });
+          typingController.stop();
+          return;
+        }
+      } catch (vqErr) {
+        logToFile('Video Quiz share: routing error', { error: vqErr.message });
+      }
+    }
+
+    // ============================================================
     // DATABASE INTEGRATION: Use provided user or get/create
     // ============================================================
   if (!user) {

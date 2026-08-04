@@ -1014,6 +1014,24 @@ app.post('/webhook', async (req, res) => {
         const StudentVideoFeedbackService = require('./shared/services/student-video-feedback.service');
         await StudentVideoFeedbackService.handleFeedbackButton(buttonId, from);
       }
+      // bd-2482 (NIETE port of PK bd-2308/2313): Video quizzes — the offer
+      // after a video, an answer tap, the share-with-class offer, the
+      // invite-a-friend offer. All use the `vq_` prefix so they can never
+      // collide with the parent-quiz `quiz_` ids handled elsewhere.
+      // handleAnswer stays LAST: it treats anything left as an answer id, so
+      // a new offer button placed after it would be swallowed as a wrong answer.
+      else if (buttonId.startsWith('vq_')) {
+        const VideoQuizService = require('./shared/services/quiz/video-quiz.service');
+        const VideoQuizShare = require('./shared/services/quiz/video-quiz-share.service');
+        const VideoQuizInvite = require('./shared/services/quiz/video-quiz-invite.service');
+        const handled = await VideoQuizService.handleOfferButton(buttonId, from)
+          || await VideoQuizShare.handleShareButton(buttonId, from)
+          || await VideoQuizInvite.handleInviteButton(buttonId, from)
+          || await VideoQuizService.handleAnswer(from, buttonId);
+        if (!handled) {
+          logToFile('⚠️ unrouted vq_ button', { buttonId, from });
+        }
+      }
       // Edit-class multi-class picker: open the edit-class flow for the chosen class.
       else if (buttonId.startsWith('edit_class_')) {
         const listId = buttonId.replace('edit_class_', '');
@@ -1132,6 +1150,41 @@ app.post('/webhook', async (req, res) => {
         responseJson = JSON.parse(message.interactive?.nfm_reply?.response_json || '{}');
       } catch (error) {
         logToFile('❌ Failed to parse flow response_json', { from, error: error.message });
+      }
+
+      // bd-2482 (NIETE port of PK bd-2309/2338): video-quiz Flow submissions
+      // are routed on the FLOW TOKEN (`vq:<sessionId>:<questionId>` for a
+      // picture-answer, `vqjoin:...` for a new student's name+class) — not on
+      // response shape, since a generic {screen_0_..: "2"} payload would have
+      // to be guessed at. The token is ours by construction.
+      const vqToken = responseJson.flow_token || message.interactive?.nfm_reply?.flow_token || '';
+
+      if (typeof vqToken === 'string' && vqToken.startsWith('vqjoin:')) {
+        try {
+          const VideoQuizShare = require('./shared/services/quiz/video-quiz-share.service');
+          const handled = await VideoQuizShare.handleJoinFlowReply(from, vqToken, responseJson);
+          if (handled) return;
+        } catch (joinErr) {
+          logToFile('❌ student join Flow reply routing failed', { error: joinErr.message });
+        }
+      }
+
+      if (typeof vqToken === 'string' && vqToken.startsWith('vq:')) {
+        try {
+          const [, , questionId] = vqToken.split(':');
+          const picked = Object.entries(responseJson)
+            .filter(([k]) => k !== 'flow_token')
+            .map(([, v]) => v)
+            .find((v) => /^\d+$/.test(String(v)));
+          if (questionId && picked !== undefined) {
+            const VideoQuizService = require('./shared/services/quiz/video-quiz.service');
+            await VideoQuizService.handleAnswer(from, `vq_${questionId}_${picked}`);
+            return;
+          }
+          logToFile('⚠️ video-quiz Flow reply had no option index', { vqToken, responseJson });
+        } catch (vqFlowErr) {
+          logToFile('❌ video-quiz Flow reply routing failed', { error: vqFlowErr.message });
+        }
       }
 
       // Use centralized flow type detection (fixes registration→attendance misrouting)
@@ -1353,6 +1406,15 @@ app.post('/webhook', async (req, res) => {
       const listReply = message.interactive.list_reply;
       const listId = listReply.id;
       logToFile('📋 Interactive list item selected', { listId, from });
+
+      // bd-2482 (NIETE port of PK bd-2309): video-quiz answers arrive as
+      // list_reply whenever the question has 4 options or a title too long
+      // for a 20-char button. Same `vq_` ids as the button path — routed
+      // here too, or a four-option question would accept no answer at all.
+      if (listId.startsWith('vq_')) {
+        const VideoQuizService = require('./shared/services/quiz/video-quiz.service');
+        if (await VideoQuizService.handleAnswer(from, listId)) return;
+      }
 
       // Teacher-training grand quiz answers — handle before Reading Assessment routing.
       if (listId && listId.startsWith('training_quiz_')) {
