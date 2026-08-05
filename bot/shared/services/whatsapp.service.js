@@ -1833,56 +1833,38 @@ class WhatsAppService {
    * @param {string} to - Recipient phone number
    * @returns {Promise<boolean>}
    */
+  /**
+   * Send the feature menu.
+   *
+   * bd-2507 — this used to POST the Meta template `feature_menu_carousel_v3`
+   * and only fall back to the interactive list when that failed. The template
+   * is APPROVED, so the template WAS the menu, and the list was effectively
+   * dead code. That made bd-2504 — Training first, Reading Assessment and AI
+   * Video Generation removed — invisible: it edited the fallback while every
+   * teacher kept seeing the old four cards.
+   *
+   * Now it goes straight to the list. Three reasons, in order of weight:
+   *
+   *   1. The list is defined in code, so the menu can be changed in a PR. The
+   *      template needs a Meta review round-trip, which is the wrong cost for
+   *      the surface that changes most often.
+   *   2. The template is categorised MARKETING — subject to delivery limits and
+   *      suppressed outright for teachers who opted out of marketing. An
+   *      interactive list is not.
+   *   3. One surface instead of two that silently disagree.
+   *
+   * The template is left registered and untouched. An unused approved template
+   * costs nothing, and deleting it is a separate decision.
+   *
+   * Note this only covers IN-SESSION sends. A menu pushed outside the 24-hour
+   * window still requires a template — that path is bd-2506 and is unchanged.
+   *
+   * @returns {Promise<boolean>} true if the menu was delivered
+   */
   static async sendFeatureMenuCarousel(to) {
-    try {
-      logToFile('Sending feature menu carousel', { to });
-
-      const payload = this.buildFeatureMenuCarouselPayload(to);
-
-      const response = await fetch(
-        `${GRAPH_API_BASE}/${PHONE_NUMBER_ID}/messages`,
-        {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${WHATSAPP_TOKEN}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(payload)
-        }
-      );
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        logToFile('❌ Feature menu carousel failed, using fallback', {
-          to,
-          error: data.error?.message || 'Unknown error',
-          errorCode: data.error?.code,
-          errorDetails: JSON.stringify(data.error)
-        });
-        return await this.sendFeatureMenuListFallback(to);
-      }
-
-      logToFile('✅ Feature menu carousel sent successfully', {
-        to,
-        messageId: data.messages?.[0]?.id
-      });
-      return true;
-    } catch (error) {
-      logToFile('❌ Feature menu carousel exception', {
-        to,
-        error: error.message
-      });
-      return await this.sendFeatureMenuListFallback(to);
-    }
+    return await this.sendFeatureMenuListFallback(to);
   }
 
-  /**
-   * Fallback: Send feature menu as interactive list (no videos)
-   * Used when carousel template is not approved or fails
-   * @param {string} to - Recipient phone number
-   * @returns {Promise<boolean>}
-   */
   static async sendFeatureMenuListFallback(to) {
     try {
       logToFile('Sending feature menu list fallback', { to });
@@ -1910,6 +1892,13 @@ class WhatsAppService {
               {
                 title: 'My Features',
                 rows: [
+                  // bd-2504 — Training first: it is the thing NIETE teachers are
+                  // actually being asked to do, and it was missing entirely.
+                  {
+                    id: 'menu_training',
+                    title: 'Teacher Training',
+                    description: 'Continue your training modules and exams'
+                  },
                   {
                     id: 'menu_lesson_plan',
                     title: 'Lesson Plans',
@@ -1920,16 +1909,11 @@ class WhatsAppService {
                     title: 'Classroom Coaching',
                     description: 'Get teaching feedback from recordings'
                   },
-                  {
-                    id: 'menu_reading',
-                    title: 'Reading Assessment',
-                    description: 'Test student reading fluency'
-                  },
-                  {
-                    id: 'menu_video',
-                    title: 'AI Video Generation',
-                    description: 'Create educational videos'
-                  },
+                  // bd-2504 — Reading Assessment and AI Video Generation removed
+                  // from the menu by operator decision. Their /readingtest and
+                  // /video commands still work, and menu.service still handles
+                  // menu_reading / menu_video, because WhatsApp list rows live in
+                  // scrollback forever and an old tap must still land somewhere.
                   {
                     id: 'menu_other',
                     title: 'Ask Anything',

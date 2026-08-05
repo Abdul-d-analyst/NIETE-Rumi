@@ -32,18 +32,24 @@ type CapstoneAttempt = {
 const CapstoneResultCard = ({ levelId, levelName }: { levelId: number; levelName: string }) => {
   const [attempt, setAttempt] = useState<CapstoneAttempt | null>(null);
   const [answers, setAnswers] = useState<CapstoneAnswer[]>([]);
+  // bd-2489 — the bar comes from the endpoint (the bot's capstone PASS_PCT).
+  // This used to be the literal 70 in the copy below: the right number by
+  // coincidence, owned somewhere else, and silent when it went stale.
+  const [passMarkPct, setPassMarkPct] = useState<number | null>(null);
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     setAttempt(null);
     setAnswers([]);
+    setPassMarkPct(null);
     (async () => {
       try {
         const { data } = await api.get(`/training/level/${levelId}/capstone`);
         if (!cancelled && data.attempt) {
           setAttempt(data.attempt);
           setAnswers(data.answers || []);
+          setPassMarkPct(typeof data.pass_mark_pct === 'number' ? data.pass_mark_pct : null);
         }
       } catch {
         /* no capstone record — panel stays hidden */
@@ -75,7 +81,9 @@ const CapstoneResultCard = ({ levelId, levelName }: { levelId: number; levelName
           ? 'Passed — this quiz counts toward your certificate.'
           : attempt.status === 'in_progress'
             ? 'In progress on WhatsApp — finish it there to be scored.'
-            : 'Below the 70% pass mark — review the feedback below and retake it on WhatsApp.'}
+            : passMarkPct != null
+              ? `Below the ${passMarkPct}% pass mark — review the feedback below and retake it on WhatsApp.`
+              : 'Review the feedback below and retake it on WhatsApp.'}
       </p>
 
       {answers.length > 0 && (

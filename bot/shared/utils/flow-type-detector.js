@@ -5,6 +5,7 @@
  * Used by whatsapp-bot.js to route nfm_reply messages to the correct handler.
  *
  * Flow types:
+ * - training_msq: Training multi-answer question (training_msq_action)
  * - reading_assessment: Reading assessment flow (Student_Full_Name, Assessment_Mode)
  * - exam_generator: Exam generator flow (`:exam-generator:` in flow_token)
  * - attendance_setup: Class setup flow (class_name + student_list/students_text)
@@ -40,6 +41,17 @@ function detectFlowType(responseJson) {
   //    extension_message_response.params on Flow close.
   if (responseJson.training_action !== undefined) {
     return 'teacher_training';
+  }
+
+  // 0.05 Training multi-answer question — the select-all-that-apply
+  //      CheckboxGroup Flow. The screen echoes training_msq_action in its
+  //      completion payload; the field is unique to this flow, so the rule
+  //      cannot false-positive. MUST sit above the loose attendance_marking
+  //      fallback: the token `<userId>:training-msq:<attemptId>:<index>` is
+  //      full of colons and would otherwise be misrouted to attendance —
+  //      the same class of bug that hit the exam-generator and observe flows.
+  if (responseJson.training_msq_action !== undefined) {
+    return 'training_msq';
   }
 
   // 0.1 Observe (FEAT-102) — the editable FICO observation form submission.

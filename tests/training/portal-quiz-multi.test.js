@@ -150,9 +150,16 @@ function seed() {
   tableStates.training_assessment_answers = { rows: [] };
   tableStates.training_grand_quizzes = { rows: [] };
   tableStates.teacher_training_assignments = { rows: [{ program_id: 'prog-1' }] };
+  require('../fixtures/delegate-training-to-bot').seedProgramScope(tableStates);
 }
 
 beforeEach(() => {
+  // bd-2490 — the portal's assessment routes are gated to WhatsApp. This
+  // suite covers the grading logic behind them, which is RETAINED for when
+  // the surface comes back (bd-2488), so it opens the test seam. The
+  // production default stays blocked — see
+  // tests/portal/assessments-are-whatsapp-only.test.js.
+  process.env.PORTAL_ASSESSMENTS_TEST_ENABLE = '1';
   jest.resetModules();
   tableStates = {};
 
@@ -161,6 +168,8 @@ beforeEach(() => {
     from: supabaseFrom,
     rpc: jest.fn().mockResolvedValue({ error: null }),
   }));
+  const { installTrainingDelegation } = require('../fixtures/delegate-training-to-bot');
+  installTrainingDelegation(() => supabaseFrom);
   jest.doMock('../../dashboard/services/r2.service', () => ({
     generatePresignedUrl: jest.fn().mockResolvedValue(null),
     generatePresignedUrls: jest.fn().mockResolvedValue([]),
@@ -171,6 +180,7 @@ beforeEach(() => {
   jest.doMock('@aws-sdk/client-s3', () => ({ S3Client: jest.fn(), GetObjectCommand: jest.fn() }), { virtual: true });
 });
 
+afterEach(() => { delete process.env.PORTAL_ASSESSMENTS_TEST_ENABLE; });
 afterEach(() => jest.resetModules());
 
 describe('bd-2138 — GET questions exposes multi flag, never the key', () => {
