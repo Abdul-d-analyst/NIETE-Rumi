@@ -14,15 +14,9 @@ one, delete the line and say so in the PR.
 ## How to reproduce
 
 ```bash
-npm ci                 # root only — bot/ deps are NOT required
-npm run test:safe      # never bare `npm test` — see below
+npm ci      # root only — bot/ deps are NOT required
+npm test
 ```
-
-`test:safe` blanks `SQS_QUEUE_URL` and `SQS_DLQ_URL` for the run. Those two
-variables point at the **production** coaching queue in the current staging env,
-and the suite boots real worker entry points, so a bare run could attach a
-worker to production's queue. Blanking them makes the queue service disable
-itself instead.
 
 No out-of-band installs are needed. `dotenv` (bot-only) and `pg` (dashboard-only)
 are mapped to stubs in `tests/jest.config.js`, the same pattern already used for
@@ -107,6 +101,13 @@ escalates to `SIGKILL` and waits for the process to actually die, with a guard
 test asserting no child survives. This only ever reproduced locally: CI runs the
 root suite *before* `cd bot && npm ci`, and the whole file skips when
 `bot/node_modules` is absent.
+
+That audit also blanks the queue variables in the env it hands each child, so a
+booted worker cannot reach a real queue no matter what the developer's `.env`
+says. The check only asks whether the require chain loads; it has no business
+claiming jobs. The guard lives in the test rather than in an npm script so it
+travels with the code that needs it and cannot be bypassed by invoking Jest
+directly.
 
 **Known-failing is not the same as acceptable.** Two of the stable failures are
 worth reading before touching their area — `unresolved-requires` is flagging a

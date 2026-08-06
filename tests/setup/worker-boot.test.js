@@ -40,6 +40,14 @@ const MINIMUM_ENV = {
   PHONE_NUMBER_ID: '0000000000',
   WABA_ID: '1111111111',
   WEBHOOK_VERIFY_TOKEN: 'test-verify-token',
+  // This audit only asks "does the require chain load?" — it has no business
+  // touching a real queue. Blanked here rather than in an npm script so the
+  // guard travels with the only test that boots workers and cannot be bypassed
+  // by running jest directly. The queue service disables itself when unset.
+  SQS_QUEUE_URL: '',
+  SQS_DLQ_URL: '',
+  SQS_VIDEO_QUEUE_URL: '',
+  SQS_QUIZ_QUEUE_URL: '',
 };
 
 // Only TRUE load-time failures count — patterns Node prints at column 0 when
