@@ -1459,7 +1459,11 @@ class WhatsAppService {
 
       const data = await response.json();
       if (!response.ok) {
-        logToFile('❌ Error sending language selection list', { error: data });
+        // level: 'error', not the default info. A rejected send means the teacher
+        // received NOTHING — she typed /language and the bot went silent — and at
+        // info level that never reaches error monitoring. This exact failure ran
+        // seven times on staging before a human noticed by testing by hand.
+        logToFile('❌ Error sending language selection list', { error: data, level: 'error' });
         return false;
       }
 
@@ -1467,7 +1471,8 @@ class WhatsAppService {
       return true;
     } catch (error) {
       logToFile('❌ Error sending language selection list', {
-        error: error.message
+        error: error.message,
+        level: 'error'
       });
       return false;
     }
