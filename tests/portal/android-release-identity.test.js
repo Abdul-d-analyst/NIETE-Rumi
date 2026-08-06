@@ -59,10 +59,15 @@ describe('bd-2395 — Android release identity', () => {
     expect(debug).toMatch(/applicationIdSuffix\s+["']\.debug["']/);
   });
 
-  it('versionCode is at least 1203 (1202 shipped; Play needs a higher code)', () => {
+  // Floor moves with every upload: Play rejects a bundle whose versionCode is
+  // not strictly higher than the live release, so this asserts against the
+  // highest code that has LEFT this machine, not the highest ever built.
+  // 1202 shipped, then 1203 was uploaded (operator, 2026-08-06) — so the AAB
+  // carrying the auth-flow fixes has to be 1204.
+  it('versionCode is at least 1204 (1203 uploaded; Play needs a higher code)', () => {
     const m = source.match(/versionCode\s+(\d+)/);
     expect(m).not.toBeNull();
-    expect(Number(m[1])).toBeGreaterThanOrEqual(1203);
+    expect(Number(m[1])).toBeGreaterThanOrEqual(1204);
   });
 
   it('versionName tracks versionCode', () => {
