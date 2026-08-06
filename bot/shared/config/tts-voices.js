@@ -6,7 +6,7 @@
  * authoritative table.
  *
  * It used to carry a `provider` field too, and that field went stale: it still said
- * Urdu was Uplift long after VOICE_MODELS moved Urdu to ElevenLabs (bd-2375). The
+ * Urdu was Uplift long after VOICE_MODELS moved Urdu to ElevenLabs. The
  * prompt builder was inferring emotion-tag support from it, so two registries
  * disagreed about the same language. The field is gone; what remains is the part
  * that has no second home — hard-won pronunciation knowledge (retroflex ݔ, Sindhi
