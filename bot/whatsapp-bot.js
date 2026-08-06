@@ -482,7 +482,9 @@ app.post('/webhook', async (req, res) => {
       }
       if (buttonId.startsWith('training_quiz_')) {
         const QuizDelivery = require('./shared/services/training/quiz-delivery.service');
-        await QuizDelivery.handleQuizButton(user.id, buttonId, from);
+        // bd-2525: pass the inbound wamid so the answer tap itself gets the
+        // ✅/❌ reaction.
+        await QuizDelivery.handleQuizButton(user.id, buttonId, from, message.id);
         return;
       }
       // BH open-ended capstone start (bd-2233)
@@ -1464,7 +1466,10 @@ app.post('/webhook', async (req, res) => {
       // Teacher-training grand quiz answers — handle before Reading Assessment routing.
       if (listId && listId.startsWith('training_quiz_')) {
         const QuizDelivery = require('./shared/services/training/quiz-delivery.service');
-        await QuizDelivery.handleQuizButton(user.id, listId, from);
+        // bd-2525: the LIST path is the one teachers actually take — quiz
+        // options are delivered as an interactive list — so the wamid matters
+        // most here. Same reaction as the button path above.
+        await QuizDelivery.handleQuizButton(user.id, listId, from, message.id);
         return;
       }
 
