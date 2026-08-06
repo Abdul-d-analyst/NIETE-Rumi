@@ -5,6 +5,7 @@
   "private": true,
   "scripts": {
     "test": "node tests/run.js",
+    "test:safe": "SQS_QUEUE_URL= SQS_DLQ_URL= node tests/run.js",
     "test:security": "node tests/run.js --testPathPattern=sprint-0",
     "test:sprint1": "node tests/run.js --testPathPattern=sprint-1",
     "test:schema": "node tests/run.js --testPathPattern=sprint-2",
