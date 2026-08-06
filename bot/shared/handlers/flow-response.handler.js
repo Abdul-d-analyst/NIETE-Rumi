@@ -53,6 +53,9 @@ const WhatsAppService = require('../services/whatsapp.service');
 const AttendanceFlowHandler = require('./attendance-flow.handler');
 const AttendanceDeliveryService = require('../services/attendance-delivery.service');
 const { logToFile } = require('../utils/logger');
+const { setUserLanguage } = require('../utils/language-cache');
+const { offerDefaultLanguage } = require('../config/languages');
+const { clampLanguage } = require('../config/ux-strings');
 
 // Flow IDs - configure via environment variables. Canonical list lives in
 // `bot/scripts/setup/flow-configs.js`; this file only reads the IDs that
@@ -816,7 +819,30 @@ async function handleRegistrationFlow(message, phoneNumber, userId) {
     // a broken placeholder. See bot/shared/config/branding.js.
     const portalBase = require('../config/branding').portalUrl();
     const portalUrl = portalBase ? `${portalBase}/portal/setup/${portalToken}` : null;
-    const userLang = country === 'PK' ? 'ur' : 'en';
+
+    // Greet her in the language SHE chose on the first screen.
+    //
+    // This used to read `country === 'PK' ? 'ur' : 'en'`. The country dropdown
+    // supplies ISO codes and every ICT teacher picks PK, so the greeting was
+    // always Urdu — while registration never wrote preferred_language, leaving
+    // her on the schema default of English. She was greeted in Urdu and then
+    // silently answered in English forever. The main bot logged the same pattern
+    // as BUG-071; the fix here is to stop inferring from country at all.
+    const registrationLanguage = clampLanguage(
+      responseJson.language || offerDefaultLanguage()
+    );
+    const userLang = registrationLanguage;
+
+    // Persist it through the ONE writer, LOCKED — she chose this explicitly, and
+    // the lock is what stops a later classroom recording overwriting it. This is
+    // the step that grows the genuinely-chosen population beyond today's 38.
+    const languageStored = await setUserLanguage(userId, registrationLanguage, true);
+    logToFile(
+      languageStored
+        ? '✅ registration: language chosen and locked'
+        : '⚠️ registration: language write rejected — greeting still uses the choice',
+      { userId, language: registrationLanguage, rule: 'registration-asked' }
+    );
 
     const confirmMessagesWithPortal = {
       en: `Thank you for registering, ${firstName}! You're all set to use NIETE.\n\n🔗 *Set up your NIETE Portal:*\n${portalUrl}\n\nThis link expires in 7 days. What would you like to work on?`,
