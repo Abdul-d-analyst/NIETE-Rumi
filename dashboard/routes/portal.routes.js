@@ -706,25 +706,68 @@ router.post('/reset-password', async (req, res) => {
     const passwordHash = await bcrypt.hash(password, 10);
 
     // Update password and clear reset code
-    const { error } = await supabase
+    const { data: user, error } = await supabase
       .from('users')
       .update({
         portal_password_hash: passwordHash,
         password_reset_code: null,
-        password_reset_expires_at: null
+        password_reset_expires_at: null,
+        portal_last_login: new Date().toISOString()
       })
-      .eq('id', userId);
+      .eq('id', userId)
+      .select('id, first_name, country, role')
+      .maybeSingle();
 
     if (error) {
       throw error;
     }
 
-    // Clear reset session
+    // Clear the one-shot reset grant BEFORE opening a real session, so the
+    // code can never be replayed even if session setup fails below.
     delete req.session.resetUserId;
 
-    res.json({
-      success: true,
-      message: 'Password reset successful. Please log in with your new password.'
+    // The password has now changed. Everything from here is a convenience —
+    // if the row didn't come back we still must not fail the request, or the
+    // teacher is told the reset failed when it actually succeeded.
+    if (!user) {
+      console.error('Reset succeeded but user row not returned:', userId);
+      return res.json({
+        success: true,
+        message: 'Password reset successful. Please sign in with your new password.'
+      });
+    }
+
+    // bd-2513: log the teacher straight in rather than bouncing them to an
+    // empty login form to retype the number and the password they just chose.
+    //
+    // This is not trusting the client: `userId` came from
+    // `req.session.resetUserId`, which /verify-reset-code wrote server-side
+    // after checking the WhatsApp code. We already proved who this is — the
+    // old behaviour just threw that proof away.
+    //
+    // SECURITY: Regenerate session ID (prevent session fixation) — same
+    // pattern as the /login handler above.
+    req.session.regenerate((regenErr) => {
+      if (regenErr) {
+        // The password DID change. Don't fail the request — fall back to the
+        // old behaviour and let them log in manually.
+        console.error('Session regeneration error after reset:', regenErr);
+        return res.json({
+          success: true,
+          message: 'Password reset successful. Please sign in with your new password.'
+        });
+      }
+
+      req.session.portalUserId = user.id;
+      req.session.isPortalAuth = true;
+      req.session.portalUserName = user.first_name;
+
+      res.json({
+        success: true,
+        message: 'Password reset successful.',
+        // bd-2434: carries `role` so the client can route a leader to My Patch.
+        user: publicUserPayload(user)
+      });
     });
   } catch (error) {
     console.error('Reset password error:', error);
