@@ -82,6 +82,73 @@ describe('bd-2523 — the teacher is told, per question, if the answer was right
     expect(tail).toMatch(/❌|✗/);
   });
 
+  // bd-2525 — copy review. "❌ Not quite" was doing two contradictory things:
+  // ❌ is the loudest mark in the set (reads as failure) while "not quite"
+  // hedges (implies a near miss, which is often untrue). A teacher needs to
+  // know plainly that the answer was wrong. The thin ✗ says so without the
+  // red-block shout, and matches the ✓ family typographically.
+  it('the wrong-answer copy is plain, not a hedge', () => {
+    const tail = singleAnswerTail();
+    expect(tail).toMatch(/Not correct/);
+    expect(tail).not.toMatch(/Not quite/);
+  });
+
+  it('the heavy ❌ stays out of the prose', () => {
+    const tail = singleAnswerTail();
+    // ❌ still fires as the REACTION (a single glyph on the teacher's own
+    // bubble, where an unambiguous mark is exactly right) — just not in the
+    // sentence, four times a quiz. So scope this to the sendMessage argument
+    // specifically; the sendReaction ternary above it SHOULD contain ❌.
+    const sent = tail.match(/sendMessage\(\s*[\s\S]*?\)/);
+    expect(sent).not.toBeNull();
+    expect(sent[0]).toMatch(/Not correct/);
+    expect(sent[0]).not.toMatch(/❌/);
+  });
+});
+
+describe('bd-2525 — the answer tap itself is marked ✅/❌', () => {
+  it('a reaction is sent from the single-answer path', () => {
+    const tail = singleAnswerTail();
+    expect(tail).toMatch(/sendReaction\(/);
+  });
+
+  it('it reacts to the teacher\'s own message, not to ours', () => {
+    // The inbound wamid is the only id we hold: sendInteractiveMessage
+    // returns a bare boolean, so the question we sent has no id to react to.
+    // Reacting to their tap is also better placed — it lands at the bottom of
+    // the thread where their eye already is.
+    expect(code).toMatch(/handleQuizButton\(userId,\s*replyId,\s*phoneNumber,\s*messageId/);
+    const tail = singleAnswerTail();
+    expect(tail).toMatch(/sendReaction\(\s*phoneNumber,\s*messageId/);
+  });
+
+  it('the reaction is optional — no messageId, no crash', () => {
+    const tail = singleAnswerTail();
+    expect(tail).toMatch(/if\s*\(\s*messageId\s*\)/);
+  });
+
+  it('a failed reaction cannot strand the quiz', () => {
+    const tail = singleAnswerTail();
+    const reactAt = tail.indexOf('sendReaction(');
+    const tryAt = tail.lastIndexOf('try {', reactAt);
+    expect(tryAt).toBeGreaterThan(-1);
+    expect(tryAt).toBeLessThan(reactAt);
+  });
+
+  it('BOTH bot call sites pass the inbound message id through', () => {
+    const bot = fs.readFileSync(path.join(ROOT, 'bot/whatsapp-bot.js'), 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/^\s*\/\/.*$/gm, '');
+    const calls = bot.match(/handleQuizButton\([^)]*\)/g) || [];
+    // Quiz options ship as an interactive LIST, so the list path is the one
+    // teachers actually take — wiring only the button path would have left
+    // the reaction dead in practice while looking done in review.
+    expect(calls.length).toBeGreaterThanOrEqual(2);
+    for (const call of calls) {
+      expect(call).toMatch(/message\.id/);
+    }
+  });
+
   it('the answer is still recorded before anything is sent', () => {
     const tail = singleAnswerTail();
     const recordAt = tail.indexOf('recordAnswer(');
