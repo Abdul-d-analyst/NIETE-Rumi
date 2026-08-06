@@ -26,6 +26,8 @@
 const { logToFile } = require('../utils/logger');
 const { LANGUAGES_DROPDOWN, FRAMEWORKS_DROPDOWN } = require('../config/settings-config');
 const { FRAMEWORK_LABELS, defaultFrameworkForRegion } = require('../config/region-config');
+const { setUserLanguage } = require('../utils/language-cache');
+const { offerDefaultLanguage } = require('../config/languages');
 const supabase = require('../config/supabase');
 
 // Look up a language's display label from the configured dropdown.
@@ -51,7 +53,12 @@ async function handleSettingsInit(userId) {
   const region = (user?.region || '').toLowerCase();
   const regionDefault = defaultFrameworkForRegion(region);
 
-  const currentLang = prefs.language || user?.preferred_language || 'en';
+  // Read the column, and only the column. This used to prefer the JSONB blob,
+  // which is the other half of the dual-store bug: the screen would show
+  // whatever the blob said while every reply used the column. Falling back to
+  // the blob for one release would just keep the divergence alive, and no rows
+  // have it set today — so the column is simply the answer.
+  const currentLang = user?.preferred_language || offerDefaultLanguage();
   const currentFramework = prefs.observation_framework || regionDefault;
 
   const regionLabel = region ? region.charAt(0).toUpperCase() + region.slice(1) : 'your region';
@@ -95,7 +102,6 @@ async function handleSettingsDataExchange(userId, screen, screenData, flowToken)
  * Handle SETTINGS_MAIN submission — validate and save preferences to DB
  */
 async function handleSettingsMainSubmit(userId, screenData, flowToken) {
-  const language = screenData.language || 'en';
   const framework = screenData.observation_framework || 'oecd';
 
   // Validate framework is one we support
@@ -104,28 +110,68 @@ async function handleSettingsMainSubmit(userId, screenData, flowToken) {
     return { data: { error: { message: 'Invalid observation framework' } } };
   }
 
-  // Fetch existing preferences to merge (preserve lesson_plan_source, curriculum, etc.)
+  // Fetch existing state. preferred_language is read so we can tell an actual
+  // change from a no-op — the lock must only be set when she really chose.
   const { data: user } = await supabase
     .from('users')
-    .select('preferences')
+    .select('preferences, preferred_language')
     .eq('id', userId)
     .single();
 
   const existingPrefs = user?.preferences || {};
+  const currentLanguage = user?.preferred_language || null;
+
+  // A submission that never touched the language dropdown must not touch her
+  // language. This previously read `screenData.language || 'en'`, so a
+  // framework-only save silently rewrote an Urdu teacher to English.
+  const languageSubmitted = Object.prototype.hasOwnProperty.call(screenData, 'language')
+    && screenData.language !== null
+    && screenData.language !== '';
+  const language = languageSubmitted ? screenData.language : currentLanguage;
+  const languageChanged = languageSubmitted && screenData.language !== currentLanguage;
+
+  // Framework still lives in the preferences JSONB. Language deliberately does
+  // NOT: it used to be written to both the blob and the column, with Settings
+  // reading the blob first and the rest of the bot reading the column, so the
+  // two could disagree permanently and the screen could show one language while
+  // the bot spoke another. The column is now the single home.
   const updatedPrefs = {
     ...existingPrefs,
-    language,
     observation_framework: framework,
   };
+  delete updatedPrefs.language;
 
-  // Update preferences JSONB + preferred_language column (legacy compat)
   await supabase
     .from('users')
-    .update({
-      preferences: updatedPrefs,
-      preferred_language: language,
-    })
+    .update({ preferences: updatedPrefs })
     .eq('id', userId);
+
+  // Language goes through the ONE writer, which validates against the offer,
+  // sets the lock and invalidates both Redis keys. Writing the column directly
+  // from here is what left the 24-hour cache serving the old language and left
+  // the choice unlocked, so a coaching recording could overwrite it.
+  if (languageChanged) {
+    const ok = await setUserLanguage(userId, screenData.language, true);
+    if (!ok) {
+      logToFile('⚠️ Settings language write rejected by the writer', {
+        userId,
+        requested: screenData.language,
+      });
+      return { data: { error: { message: 'That language is not available.' } } };
+    }
+    logToFile('✅ Settings language updated via writer', {
+      userId,
+      from: currentLanguage,
+      to: screenData.language,
+      locked: true,
+    });
+  } else {
+    logToFile('ℹ️ Settings saved without a language change', {
+      userId,
+      language: language || '(unset)',
+      languageSubmitted,
+    });
+  }
 
   const langLabel = languageLabel(language);
   const frameworkLabel = FRAMEWORK_LABELS[framework] || framework;

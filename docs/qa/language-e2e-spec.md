@@ -1,6 +1,6 @@
 # Language E2E — assertion spec (NIETE ICT)
 
-**For:** QA, who own end-to-end testing for the language-unification work (OPS-117).
+**For:** QA, who own end-to-end testing for the language-unification work.
 **From:** the audit of every language decision in the codebase.
 **Status:** spec only. No harness is prescribed — the assertions are the deliverable.
 
