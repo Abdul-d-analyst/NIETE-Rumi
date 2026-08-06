@@ -1,4 +1,5 @@
 const WhatsAppService = require('../services/whatsapp.service');
+const { verifyOutputLanguage } = require('../utils/output-language-check');
 const OpenAIService = require('../services/openai.service');
 const ContentService = require('../services/content.service');
 const LanguageDetectorService = require('../services/language-detector.service');
@@ -2900,6 +2901,22 @@ async function handleGeneralConversation(from, messageBody, user, sessionId, res
     featureContext // Phase 2: Feature context for past work references
   );
   logToFile('AI response generated (format-aware)', { response: aiResponse, language: responseLanguage, firstName });
+
+  // Did the model answer in the language we asked for? Checked BEFORE the send, so
+  // drift is a counted event rather than a teacher's screenshot. Advisory only —
+  // we still deliver, because a checker that suppresses a reply is worse than the
+  // drift it was added to catch.
+  const langCheck = verifyOutputLanguage(aiResponse, responseLanguage);
+  if (!langCheck.ok) {
+    logToFile('🈯 language_drift: chat reply', {
+      surface: 'chat_text',
+      expected: langCheck.expected,
+      detected: langCheck.detected,
+      reason: langCheck.reason,
+      userId: user?.id,
+      level: 'error'
+    });
+  }
 
   // Stop typing indicator before sending reply
   typingController.stop();

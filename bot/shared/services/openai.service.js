@@ -1,7 +1,6 @@
 const { CONVERSATION_HISTORY_LIMIT } = require('../utils/constants');
 const { logToFile } = require('../utils/logger');
 const { buildLanguagePrompt, hasEnhancedPrompt } = require('../config/language-prompts');
-const { getTtsProvider } = require('../config/tts-voices');
 const { getConversationHistory: getDbConversationHistory } = require('../database/bot-helpers');
 const { getClient } = require('./llm-client');
 
@@ -191,10 +190,23 @@ ANTI-FALSE-PROMISE RULE (CRITICAL - applies to ALL languages):
     if (hasEnhancedPrompt(language)) {
       const basePrompt = buildLanguagePrompt(language, firstName || 'Teacher');
 
-      // Determine if emotion tags should be used based on TTS provider
-      // ElevenLabs and Google support emotion tags, Uplift does not
-      const provider = getTtsProvider(language);
-      const useEmotionTags = format === 'voice' && provider !== 'uplift';
+      // Whether emotion tags are usable is read from VOICE_MODELS — the SAME table
+      // that actually routes the audio in audio.service.js — rather than inferred
+      // from a provider name in a second registry.
+      //
+      // It used to read getTtsProvider() from config/tts-voices.js and infer
+      // "provider !== 'uplift' means tags are supported". Those two registries
+      // DISAGREE: tts-voices still says Urdu is Uplift, while VOICE_MODELS moved
+      // Urdu to ElevenLabs (bd-2375). The outcome happened to match — both paths
+      // ended up omitting tags for Urdu, for different reasons — so nothing broke,
+      // but the next person to enable tags for Urdu on the audio side would find
+      // the prompt still stripping them, with no error anywhere to explain it.
+      //
+      // tts-voices.js keeps its real job: script guidance and pronunciation notes,
+      // which is why it needs no English entry — English needs no Nastaliq advice.
+      const { VOICE_MODELS } = require('../utils/constants');
+      const voiceModel = VOICE_MODELS[language];
+      const useEmotionTags = format === 'voice' && voiceModel?.supportsEmotionTags === true;
 
       const capabilities = this._getCapabilitiesSection(language, useEmotionTags);
 
@@ -202,7 +214,7 @@ ANTI-FALSE-PROMISE RULE (CRITICAL - applies to ALL languages):
         ? '\n\nVOICE FORMAT: Keep responses SHORT (max 60 seconds). Complete thoughts, never end mid-sentence.'
         : '\n\nTEXT FORMAT: Keep responses concise for WhatsApp. Be warm and supportive.';
 
-      logToFile('Using enhanced language prompt', { language, format, provider, useEmotionTags });
+      logToFile('Using enhanced language prompt', { language, format, ttsProvider: voiceModel?.provider ?? null, useEmotionTags });
 
       return basePrompt + capabilities + formatNote;
     }

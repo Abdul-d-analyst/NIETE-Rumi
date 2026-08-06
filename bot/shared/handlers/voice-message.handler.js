@@ -3,6 +3,7 @@ const fs = require('fs');
 const WhatsAppService = require('../services/whatsapp.service');
 const OpenAIService = require('../services/openai.service');
 const { clampLanguage } = require('../config/ux-strings');
+const { verifyOutputLanguage } = require('../utils/output-language-check');
 const AudioService = require('../services/audio.service');
 const ContentService = require('../services/content.service');
 const FeatureRegistrationService = require('../services/feature-registration.service');
@@ -1157,6 +1158,20 @@ async function handleVoiceMessage(message, from, user = null) {
       firstName,
       hasEmotionTags: /\[[\w]+\]/.test(aiResponse)
     });
+
+    // Same check as the text path, before the reply is spoken. A wrong-language
+    // voice note is worse than a wrong-language text — it cannot be skimmed.
+    const voiceLangCheck = verifyOutputLanguage(aiResponse, detectedLanguage);
+    if (!voiceLangCheck.ok) {
+      logToFile('🈯 language_drift: voice reply', {
+        surface: 'chat_voice',
+        expected: voiceLangCheck.expected,
+        detected: voiceLangCheck.detected,
+        reason: voiceLangCheck.reason,
+        userId: user?.id,
+        level: 'error'
+      });
+    }
 
     // Step 7: Generate speech using appropriate TTS service based on language
     logToFile('Step 7: Generating speech for language:', { language: detectedLanguage });
