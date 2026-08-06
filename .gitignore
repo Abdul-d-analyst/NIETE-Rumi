@@ -116,3 +116,8 @@ portal/.android-env.sh
 # Python build artifacts (the repo has a few scripts/ helpers)
 __pycache__/
 *.pyc
+
+# Flow asset backups written by bot/scripts/setup/republish-flow.js. These are
+# point-in-time dumps of what Meta was serving, kept locally as a rollback
+# artifact — not source, and per-environment, so they must not be committed.
+bot/scripts/setup/assets/backups/

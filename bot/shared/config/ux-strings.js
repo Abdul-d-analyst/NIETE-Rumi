@@ -74,11 +74,21 @@ const UX_STRINGS = {
     ur: 'زبان: {language} | مشاہدہ: {framework}',
   },
 
-  // The language picker's footer. Deliberately bilingual — see the note on
-  // languagePickerHeader below.
+  /**
+   * The language picker's footer. Bilingual — see languagePickerHeader below —
+   * but on a HARD 60-CHARACTER BUDGET, which is why it is terse to the point of
+   * being telegraphic rather than a full sentence in each language.
+   *
+   * The first bilingual version of this was 87 characters and Meta rejected the
+   * whole message (#131009, "Footer text length invalid. Min length: 0, Max
+   * length: 60"), so /language sent nothing at all. The command name appears once
+   * instead of twice, and each language gets a phrase rather than a sentence.
+   * tests/config/ux-strings-whatsapp-limits.test.js enforces the budget with
+   * headroom, so the next edit here cannot repeat it.
+   */
   languagePickerFooter: {
-    en: 'You can change this anytime by typing /language\nکسی بھی وقت /language لکھ کر تبدیل کریں',
-    ur: 'کسی بھی وقت /language لکھ کر تبدیل کریں\nYou can change this anytime by typing /language',
+    en: '/language — change anytime · کسی بھی وقت تبدیل کریں',
+    ur: '/language — کسی بھی وقت تبدیل کریں · change anytime',
   },
 
   /**
