@@ -1,5 +1,6 @@
 const { logToFile } = require('../utils/logger');
 const { getClient } = require('./llm-client');
+const { offerDefaultLanguage } = require('../config/languages');
 
 // Initialize OpenAI client
 const openai = getClient();
@@ -168,12 +169,18 @@ class LanguageDetectorService {
         });
         return gptLanguage;
       } catch (error) {
+        // We know nothing: Soniox returned no language AND the GPT confirmation
+        // threw. Fall back to the deployment's default rather than a hardcoded
+        // code, so this cannot silently disagree with the registry if the offer
+        // ever changes. (The comment here used to claim "'ur' for Arabic script",
+        // but no script check runs on this path — it was a blind default.)
+        const fallbackLanguage = normalizedSoniox || offerDefaultLanguage();
         logToFile('GPT language detection failed, using fallback', {
           error: error.message,
-          fallback: normalizedSoniox || 'ur'
+          fallback: fallbackLanguage,
+          rule: normalizedSoniox ? 'soniox-result' : 'offer-default'
         });
-        // Fallback to Soniox result or 'ur' for Arabic script
-        return normalizedSoniox || 'ur';
+        return fallbackLanguage;
       }
     }
 

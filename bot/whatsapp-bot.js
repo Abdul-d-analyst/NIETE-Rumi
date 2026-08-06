@@ -23,7 +23,7 @@ const ExamCheckerHandler = require('./shared/handlers/exam-checker.handler');
 const { logToFile, LOGS_DIR } = require('./shared/utils/logger');
 const validators = require('./shared/utils/validators');
 const constants = require('./shared/utils/constants');
-const { setUserLanguage, setLanguageLock } = require('./shared/utils/language-cache');
+const { setUserLanguage } = require('./shared/utils/language-cache');
 
 // Import Database helpers
 const { getOrCreateUser, trackChatStart } = require('./shared/database/bot-helpers');
@@ -1574,56 +1574,39 @@ app.post('/webhook', async (req, res) => {
       }
       // Language preference selection (from /language command)
       else if (listId.startsWith('lang_')) {
-        const languageCode = listId.replace('lang_', ''); // 'auto', 'en', 'ur', 'pa-PK', etc.
+        const languageCode = listId.replace('lang_', ''); // 'ur' or 'en'
 
         logToFile('🌐 Language preference selection', { listId, languageCode, userId: user?.id });
 
         try {
-          if (languageCode === 'auto') {
-            // Auto-detect mode: unlock language (uses consolidated language-cache function)
-            const success = await setLanguageLock(user.id, false);
+          // There is deliberately no 'auto' branch any more. "Auto-detect" was a
+          // user-facing switch that UNLOCKED the preference, which is the one
+          // thing protecting a teacher's choice from being overwritten by the
+          // language of a classroom recording. In a two-language market with a
+          // working picker its upside was saving a tap; its downside was the
+          // wrong-language class this workstream exists to remove.
+          //
+          // An unknown code cannot reach here from our own list, but a stale
+          // client could replay an old row id — so the writer validates against
+          // the offer and returns false rather than storing it.
+          const success = await setUserLanguage(user.id, languageCode, true);
 
-            if (!success) {
-              logToFile('❌ Failed to update language preference', { userId: user.id });
-              await WhatsAppService.sendMessage(from, 'Sorry, there was an error updating your language preference. Please try again.');
-              return;
-            }
-
-            // Send confirmation in user's current language
-            const confirmMessage = user.preferred_language === 'ur'
-              ? '✅ آٹو ڈیٹیکٹ فعال ہو گیا۔ اب میں خودکار طور پر آپ کی زبان پہچانوں گا۔'
-              : '✅ Auto-detect enabled. I will now automatically detect your language.';
-
-            await WhatsAppService.sendMessage(from, confirmMessage);
-            logToFile('✅ Language set to auto-detect', { userId: user.id });
-          } else {
-            // Specific language selected: set language and lock it (uses consolidated language-cache function)
-            const success = await setUserLanguage(user.id, languageCode, true);
-
-            if (!success) {
-              logToFile('❌ Failed to update language preference', { userId: user.id, languageCode });
-              await WhatsAppService.sendMessage(from, 'Sorry, there was an error updating your language preference. Please try again.');
-              return;
-            }
-
-            // Send confirmation in the newly selected language
-            // IMPORTANT: Pakistani languages use Perso-Arabic/Shahmukhi scripts, NOT Gurmukhi/Devanagari
-            const confirmMessages = {
-              'en': '✅ Language set to English. I will now respond in English.',
-              'ur': '✅ زبان اردو میں تبدیل ہو گئی۔ اب میں اردو میں جواب دوں گا۔',
-              'ar': '✅ تم تغيير اللغة إلى العربية. سأرد الآن بالعربية.',
-              'es': '✅ Idioma cambiado a español. Ahora responderé en español.',
-              'pa-PK': '✅ زبان پنجابی تے سیٹ ہو گئی۔ ہن میں پنجابی وچ جواب دیاں گا۔',  // Shahmukhi script
-              'sd-PK': '✅ ٻولي سنڌي تي سيٽ ٿي وئي۔ هاڻي مان سنڌي ۾ جواب ڏيندس۔',  // Arabic-Sindhi script
-              'ps-PK': '✅ ژبه پښتو ته ټاکل شوه۔ اوس به زه په پښتو ځواب ورکوم۔',  // Pashto script
-              'bal-PK': '✅ زبان بلوچی ءَ سیٹ بوت۔ انچو من بلوچی ءَ جواب دیان۔',  // Balochi script
-              'ta-LK': '✅ மொழி தமிழ் என்று அமைக்கப்பட்டது. இனி நான் தமிழில் பதிலளிப்பேன்.'  // Tamil script
-            };
-
-            const confirmMessage = confirmMessages[languageCode] || `✅ Language set to ${languageCode}.`;
-            await WhatsAppService.sendMessage(from, confirmMessage);
-            logToFile('✅ Language preference updated', { userId: user.id, languageCode, locked: true });
+          if (!success) {
+            logToFile('❌ Failed to update language preference', { userId: user.id, languageCode });
+            await WhatsAppService.sendMessage(from, 'Sorry, there was an error updating your language preference. Please try again.');
+            return;
           }
+
+          // Confirm in the language she just chose — the first message after a
+          // switch contradicting the switch is its own bug.
+          const confirmMessages = {
+            'ur': '✅ زبان اردو میں تبدیل ہو گئی۔ اب میں اردو میں جواب دوں گی۔',
+            'en': '✅ Language set to English. I will now respond in English.',
+          };
+
+          const confirmMessage = confirmMessages[languageCode] || confirmMessages.en;
+          await WhatsAppService.sendMessage(from, confirmMessage);
+          logToFile('✅ Language preference updated', { userId: user.id, languageCode, locked: true });
         } catch (error) {
           logToFile('❌ Error processing language selection', {
             userId: user?.id,
