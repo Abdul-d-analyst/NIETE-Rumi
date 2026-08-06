@@ -47,6 +47,7 @@ app.use('/webhooks', assessmentGenCallbackRoutes);
 // inside the router. Mounted before the inline /api/internal/send-password-reset
 // route below; Express falls through when no route in the router matches.
 const internalApiRoutes = require('./shared/routes/internal-api.routes');
+const { clampLanguage } = require('./shared/config/ux-strings');
 app.use('/api/internal', internalApiRoutes);
 
 // Create temp directory if it doesn't exist
@@ -1412,7 +1413,7 @@ app.post('/webhook', async (req, res) => {
           const observeSessionId = tokenParts[1];
           const { data: obsRow } = await supabase
             .from('users').select('preferred_language').eq('id', observerId).maybeSingle();
-          const obsLang = obsRow?.preferred_language === 'ur' ? 'ur' : 'en';
+          const obsLang = clampLanguage(obsRow?.preferred_language);
           const S = observeStrings(obsLang);
           await WhatsAppService.sendMessage(from, S.submitted_ack);
           if (observerId) await ObserveDebrief.clearStateAfterSubmit(observerId, observeSessionId);
@@ -2098,7 +2099,7 @@ app.post('/api/internal/send-password-reset', async (req, res) => {
     // expires in 10 minutes."); we only supply the code, twice (once as
     // the BODY variable, once as the OTP button payload so the tap-to-copy
     // button copies the same value).
-    const templateLang = language === 'ur' ? 'ur' : 'en';
+    const templateLang = clampLanguage(language);
     const sent = await WhatsAppService.sendTemplate(
       phoneNumber,
       'portal_password_reset_niete',

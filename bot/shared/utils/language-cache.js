@@ -196,54 +196,25 @@ async function setUserLanguage(userId, languageCode, lockLanguage = true) {
   }
 }
 
-/**
- * Set language lock status only (without changing preferred_language)
- * Used when user selects "Auto-detect" option
+/*
+ * setLanguageLock() was here, and is deliberately gone.
  *
- * @param {string} userId - User ID from users table
- * @param {boolean} locked - Whether language is locked
- * @returns {Promise<boolean>} Success status
+ * Its only purpose was to set language_locked WITHOUT changing the language —
+ * and its only caller was the "Auto-detect" picker row, whose effect was to
+ * UNLOCK a teacher's preference. Unlocking is the precise mechanism that let a
+ * classroom recording overwrite a choice she had made, which is the defect this
+ * workstream exists to remove. Auto-detect was deleted in Phase 1; this left a
+ * function whose entire job is to re-open that door, exported and callable.
+ *
+ * A deletion rather than a deprecation comment, because "don't call this" is not
+ * enforcement — the audit is full of clamps that were correct at every site and
+ * still drifted. Locking now happens only as part of setUserLanguage(), where it
+ * is set as a consequence of an actual, explicit choice.
+ *
+ * If a future feature genuinely needs to unlock (e.g. an explicit "let Rumi
+ * decide" setting), it should be reintroduced with a caller, a test, and a
+ * decision recorded — not resurrected from a dead export.
  */
-async function setLanguageLock(userId, locked) {
-  if (!userId) {
-    logToFile('⚠️  setLanguageLock: No userId provided', { level: 'warn' });
-    return false;
-  }
-
-  try {
-    const { error } = await supabase
-      .from('users')
-      .update({
-        language_locked: locked,
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', userId);
-
-    if (error) {
-      logToFile('❌ Failed to update language lock in DB', {
-        userId,
-        locked,
-        error: error.message
-      });
-      return false;
-    }
-
-    // Update Redis cache
-    const lockCacheKey = `user:language_locked:${userId}`;
-    await redisService.set(lockCacheKey, locked.toString(), CACHE_TTL);
-
-    logToFile('✅ Language lock updated', { userId, locked });
-    return true;
-
-  } catch (error) {
-    logToFile('❌ Error in setLanguageLock', {
-      userId,
-      locked,
-      error: error.message
-    });
-    return false;
-  }
-}
 
 /**
  * Has this teacher explicitly chosen her language?
@@ -434,7 +405,6 @@ async function getLanguageStats() {
 module.exports = {
   getUserLanguage,
   setUserLanguage,
-  setLanguageLock,
   isUserLanguageLocked,
   clearUserLanguageCache,
   prefetchLanguages,
