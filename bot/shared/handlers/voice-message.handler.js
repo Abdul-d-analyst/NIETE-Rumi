@@ -2,6 +2,7 @@ const path = require('path');
 const fs = require('fs');
 const WhatsAppService = require('../services/whatsapp.service');
 const OpenAIService = require('../services/openai.service');
+const { clampLanguage } = require('../config/ux-strings');
 const AudioService = require('../services/audio.service');
 const ContentService = require('../services/content.service');
 const FeatureRegistrationService = require('../services/feature-registration.service');
@@ -930,6 +931,36 @@ async function handleVoiceMessage(message, from, user = null) {
         gptDetected: detectedLanguage,
         userPreference: user?.preferred_language,
         using: detectedLanguage
+      });
+    }
+
+    // Clamp ONCE, here, after both branches.
+    //
+    // getConfirmedLanguage is a RECOGNITION function and deliberately broader than
+    // what this deployment serves — Soniox writes Sindhi, Balochi and Pashto in
+    // Urdu script, so the detector must be able to name them to tell them apart.
+    // The locked branch above replaces its answer with her stored preference, but
+    // 99.6% of teachers are UNLOCKED, so for almost everyone the raw detection
+    // flowed onward untouched: into the AI system prompt, so Rumi answered in
+    // Balochi, and into the TTS router, so the voice followed. That is the
+    // mechanism behind the 19 Punjabi and 2 Arabic output_language rows the audit
+    // measured and could not explain.
+    //
+    // It has to happen HERE rather than inside the AI service because this one
+    // value feeds the prompt, the speech synthesis and the logs. Clamping one
+    // consumer and not the other would mean Urdu text read aloud in a Punjabi
+    // voice — worse than either alone.
+    const heardLanguage = detectedLanguage;
+    detectedLanguage = clampLanguage(detectedLanguage);
+    if (heardLanguage !== detectedLanguage) {
+      // Still recorded: what she actually spoke is real information about her,
+      // even though we cannot answer in it. This is the signal that would justify
+      // adding a language to the offer one day.
+      logToFile('🈳 Reply language clamped to the offer', {
+        heard: heardLanguage,
+        replyingIn: detectedLanguage,
+        userId: user?.id,
+        rule: 'reply-language-clamped'
       });
     }
 
