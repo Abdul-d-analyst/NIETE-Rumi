@@ -9,6 +9,6 @@
   },
   {
     "file": "bot/shared/config/tts-voices.js",
-    "reason": "Pronunciation and script GUIDANCE, not routing — provider/voice routing is VOICE_MODELS in utils/constants.js, read by audio.service.js. Became unreferenced when the prompt builder stopped inferring emotion-tag support from its (stale) provider field; the two registries had disagreed about Urdu since bd-2375. Kept because the pronunciation knowledge it holds — retroflex, implosives, Punjabi tone, Nastaliq script rules — has no other home, and is worth preserving even for languages this deployment does not serve."
+    "reason": "Pronunciation and script GUIDANCE, not routing — provider/voice routing is VOICE_MODELS in utils/constants.js, read by audio.service.js. Became unreferenced when the prompt builder stopped inferring emotion-tag support from its (stale) provider field; the two registries had disagreed about Urdu. Kept because the pronunciation knowledge it holds — retroflex, implosives, Punjabi tone, Nastaliq script rules — has no other home, and is worth preserving even for languages this deployment does not serve."
   }
 ]

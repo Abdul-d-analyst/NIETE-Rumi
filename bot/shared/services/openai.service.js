@@ -197,7 +197,7 @@ ANTI-FALSE-PROMISE RULE (CRITICAL - applies to ALL languages):
       // It used to read getTtsProvider() from config/tts-voices.js and infer
       // "provider !== 'uplift' means tags are supported". Those two registries
       // DISAGREE: tts-voices still says Urdu is Uplift, while VOICE_MODELS moved
-      // Urdu to ElevenLabs (bd-2375). The outcome happened to match — both paths
+      // Urdu to ElevenLabs. The outcome happened to match — both paths
       // ended up omitting tags for Urdu, for different reasons — so nothing broke,
       // but the next person to enable tags for Urdu on the audio side would find
       // the prompt still stripping them, with no error anywhere to explain it.
