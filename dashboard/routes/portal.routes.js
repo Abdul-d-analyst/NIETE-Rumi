@@ -4775,6 +4775,86 @@ function _assessmentCallbackUrl(req) {
  * row, so the portal and WhatsApp can never disagree about whether a feature is
  * live. The message ships with the flag so both surfaces read identically.
  */
+/**
+ * GET /me/language — what did she actually choose?
+ *
+ * The portal's i18n detection order was ['localStorage','navigator','htmlTag']: it
+ * guessed from the BROWSER and never asked. So an Urdu-preferring teacher on an
+ * English-locale phone got an English portal, permanently, while every WhatsApp
+ * message arrived in Urdu.
+ *
+ * Clamped on the way out: a row written before the writer was hardened could still
+ * hold an off-market code, and the portal has no bundle for one — it would fall
+ * back to English silently rather than telling anyone.
+ */
+router.get('/me/language', requirePortalAuth, async (req, res) => {
+  try {
+    const { clampLanguage } = require('../../bot/shared/config/ux-strings');
+    const { data, error } = await supabase
+      .from('users')
+      .select('preferred_language, language_locked')
+      .eq('id', req.session.portalUserId)
+      .single();
+
+    if (error) throw error;
+
+    return res.json({
+      success: true,
+      language: clampLanguage(data?.preferred_language),
+      locked: data?.language_locked === true,
+    });
+  } catch (error) {
+    console.error('portal/me/language read error:', error.message);
+    // Fail to the floor rather than 500 — the portal must still render.
+    return res.json({ success: true, language: 'en', locked: false });
+  }
+});
+
+/**
+ * PUT /me/language — the switcher becomes a real mutator.
+ *
+ * It used to call i18n.changeLanguage() and nothing else: a device-local cosmetic,
+ * so switching here never reached the bot and her next WhatsApp reply came back in
+ * the old language.
+ *
+ * WRITTEN THROUGH THE ONE WRITER, deliberately. The tempting shortcut in this file
+ * is a direct users.update({ preferred_language }) — this service already has a
+ * supabase client. That would be a SECOND writer, which is precisely the defect
+ * Phase 1 existed to remove: a direct column write sets no lock and invalidates
+ * neither Redis key, so the 24-hour cache keeps serving the old language and a
+ * later classroom recording can overwrite her choice.
+ *
+ * Locked, because choosing in the portal is as explicit as choosing in Settings.
+ */
+router.put('/me/language', requirePortalAuth, async (req, res) => {
+  try {
+    const { setUserLanguage } = require('../../bot/shared/utils/language-cache');
+    const { isOffered, LANGUAGE_OFFER } = require('../../bot/shared/config/languages');
+
+    const requested = (req.body && req.body.language) || '';
+
+    // Rejected, not clamped. A clamp would silently store English when she asked
+    // for something else; on an explicit choice she deserves to be told.
+    if (!isOffered(requested)) {
+      return res.status(400).json({
+        success: false,
+        error: 'That language is not available.',
+        offered: LANGUAGE_OFFER,
+      });
+    }
+
+    const ok = await setUserLanguage(req.session.portalUserId, requested, true);
+    if (!ok) {
+      return res.status(500).json({ success: false, error: 'Could not save your language.' });
+    }
+
+    return res.json({ success: true, language: requested, locked: true });
+  } catch (error) {
+    console.error('portal/me/language write error:', error.message);
+    return res.status(500).json({ success: false, error: 'Could not save your language.' });
+  }
+});
+
 router.get('/config', async (req, res) => {
   try {
     const assessmentGenerator = await isAssessmentGeneratorEnabled(supabase);
