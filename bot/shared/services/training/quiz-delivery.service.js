@@ -880,6 +880,35 @@ async function handleQuizButton(userId, replyId, phoneNumber) {
   const isCorrect = String(q.correct_option).trim() === String(chosen).trim();
   await recordAnswer(attempt.id, attempt.current_question_index, q.id, chosen, isCorrect);
 
+  // bd-2523 — say so, immediately. The grade above was already computed and
+  // stored, then discarded: the teacher answered four questions and only found
+  // out at the end that two were wrong, with no way to tell which. A NIETE
+  // reviewer flagged it as P1 ("difficult to track progress").
+  //
+  // Sent BEFORE the next question so it reads as a verdict on the one just
+  // answered, and wrapped because it is a courtesy — if this single message
+  // fails to deliver, the quiz must still advance rather than strand the
+  // attempt mid-flight.
+  //
+  // Deliberately does NOT reveal the correct option. Module quizzes have no
+  // cooldown and NIETE's bar is 100%, so a teacher retries immediately;
+  // showing the answer would train recall of the letter rather than the idea.
+  // bd-2524 will add the WHY here — the source question bank has per-option
+  // explanations for ~43% of questions that were never migrated — which
+  // extends this message rather than replacing it.
+  try {
+    await WhatsAppService.sendMessage(
+      phoneNumber,
+      isCorrect ? '✅ Correct' : '❌ Not quite'
+    );
+  } catch (error) {
+    logToFile('⚠️ Could not send per-question feedback', {
+      attemptId: attempt.id,
+      index: attempt.current_question_index,
+      error: error.message,
+    });
+  }
+
   const nextIdx = attempt.current_question_index + 1;
   await supabase.from('training_assessment_attempts').update({
     current_question_index: nextIdx,
