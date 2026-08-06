@@ -127,6 +127,55 @@ describe('settings — a save that does not touch language must not touch langua
   });
 });
 
+describe('settings — the confirmation speaks the language she just chose', () => {
+  const { UX_STRINGS } = require('../../bot/shared/config/ux-strings');
+
+  it('confirms in Urdu when she switches to Urdu', async () => {
+    // The most common Urdu journey: open /settings, switch to Urdu, save. The
+    // success screen was hardcoded English, so it told her in English that Rumi
+    // would now speak Urdu.
+    const S = load({ row: { preferences: {}, preferred_language: 'en' } });
+    const res = await S.handleSettingsDataExchange('u1', 'SETTINGS_MAIN', {
+      language: 'ur',
+      observation_framework: FRAMEWORK,
+    }, 'tok');
+
+    expect(res.data.confirmation_message).toBe(UX_STRINGS.settingsSaved.ur);
+    expect(res.data.details_message).toContain('زبان');
+  });
+
+  it('confirms in English when she switches to English', async () => {
+    const S = load({ row: { preferences: {}, preferred_language: 'ur' } });
+    const res = await S.handleSettingsDataExchange('u1', 'SETTINGS_MAIN', {
+      language: 'en',
+      observation_framework: FRAMEWORK,
+    }, 'tok');
+
+    expect(res.data.confirmation_message).toBe(UX_STRINGS.settingsSaved.en);
+  });
+
+  it('uses her existing language on a framework-only save', async () => {
+    // No language submitted: the confirmation must still be in HER language,
+    // not the floor.
+    const S = load({ row: { preferences: {}, preferred_language: 'ur' } });
+    const res = await S.handleSettingsDataExchange('u1', 'SETTINGS_MAIN', {
+      observation_framework: FRAMEWORK,
+    }, 'tok');
+
+    expect(res.data.confirmation_message).toBe(UX_STRINGS.settingsSaved.ur);
+  });
+
+  it('renders no unreplaced placeholder', async () => {
+    const S = load({ row: { preferences: {}, preferred_language: 'ur' } });
+    const res = await S.handleSettingsDataExchange('u1', 'SETTINGS_MAIN', {
+      language: 'ur',
+      observation_framework: FRAMEWORK,
+    }, 'tok');
+
+    expect(res.data.details_message).not.toMatch(/\{|\}/);
+  });
+});
+
 describe('settings — one home for the language, not two', () => {
   it('does not write language into the preferences blob', async () => {
     const S = load({ row: { preferences: {}, preferred_language: 'ur' } });

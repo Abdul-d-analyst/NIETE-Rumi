@@ -5,6 +5,7 @@ const { WHATSAPP_TOKEN, PHONE_NUMBER_ID } = require('../utils/constants');
 const { logToFile } = require('../utils/logger');
 const { downloadFromR2, extractKeyFromUrl } = require('../storage/r2');
 const { getOfferedLanguages } = require('../config/languages');
+const { resolveUx } = require('../config/ux-strings');
 
 // Prefer ASSET_BASE_URL; fall back to legacy ASSETS_BASE_URL. Empty when
 // neither is set — the carousel template builder below guards against that.
@@ -1417,15 +1418,20 @@ class WhatsAppService {
             type: 'interactive',
             interactive: {
               type: 'list',
+              // Chrome comes from the catalog, and stays deliberately BILINGUAL:
+              // this is the screen a teacher reaches when the current language is
+              // the wrong one, so rendering it only in the language she is trying
+              // to leave is how a picker becomes unusable. The footer was
+              // English-only, which is the part that was simply a bug.
               header: {
                 type: 'text',
-                text: 'Select Language / زبان منتخب کریں'
+                text: resolveUx('languagePickerHeader', { language: currentLanguage })
               },
               body: {
-                text: 'Choose your preferred language. I will respond in this language for all conversations.\n\nاپنی پسندیدہ زبان منتخب کریں۔'
+                text: resolveUx('languagePickerBody', { language: currentLanguage })
               },
               footer: {
-                text: 'You can change this anytime by typing /language'
+                text: resolveUx('languagePickerFooter', { language: currentLanguage })
               },
               action: {
                 button: 'Languages',

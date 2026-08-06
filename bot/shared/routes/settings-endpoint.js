@@ -28,6 +28,7 @@ const { LANGUAGES_DROPDOWN, FRAMEWORKS_DROPDOWN } = require('../config/settings-
 const { FRAMEWORK_LABELS, defaultFrameworkForRegion } = require('../config/region-config');
 const { setUserLanguage } = require('../utils/language-cache');
 const { offerDefaultLanguage } = require('../config/languages');
+const { resolveUx } = require('../config/ux-strings');
 const supabase = require('../config/supabase');
 
 // Look up a language's display label from the configured dropdown.
@@ -157,7 +158,13 @@ async function handleSettingsMainSubmit(userId, screenData, flowToken) {
         userId,
         requested: screenData.language,
       });
-      return { data: { error: { message: 'That language is not available.' } } };
+      return {
+        data: {
+          error: {
+            message: resolveUx('languageNotAvailable', { language: currentLanguage }),
+          },
+        },
+      };
     }
     logToFile('✅ Settings language updated via writer', {
       userId,
@@ -176,6 +183,13 @@ async function handleSettingsMainSubmit(userId, screenData, flowToken) {
   const langLabel = languageLabel(language);
   const frameworkLabel = FRAMEWORK_LABELS[framework] || framework;
 
+  // Confirm in the language she just chose, not the one she is leaving. The
+  // success screen was hardcoded English, so the single most common Urdu journey
+  // — open /settings, switch to Urdu, save — ended by telling her in English
+  // that Rumi would now speak Urdu. The first message after a switch
+  // contradicting the switch is its own bug, and the most visible one left.
+  const replyLanguage = language;
+
   const response = {
     screen: 'SUCCESS',
     data: {
@@ -186,8 +200,11 @@ async function handleSettingsMainSubmit(userId, screenData, flowToken) {
           observation_framework: framework,
         }
       },
-      confirmation_message: 'Your settings have been saved successfully.',
-      details_message: `Language: ${langLabel} | Observation: ${frameworkLabel}`
+      confirmation_message: resolveUx('settingsSaved', { language: replyLanguage }),
+      details_message: resolveUx('settingsDetails', {
+        language: replyLanguage,
+        params: { language: langLabel, framework: frameworkLabel },
+      }),
     }
   };
 
