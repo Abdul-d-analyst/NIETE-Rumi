@@ -3901,6 +3901,43 @@ ALTER TABLE dashboard_users ADD COLUMN IF NOT EXISTS phone_number VARCHAR(20);
 -- column. Populated on every inbound by bot-helpers.getOrCreateUser.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS last_message_at TIMESTAMPTZ;
 
+-- training_vendors: per-vendor QUIZ SERVING policy. How many questions an
+-- attempt is asked, and in what option order, is a property of the content
+-- authority — imported banks differ wildly in size and tagging — so it is
+-- configuration, not code. Defaults reproduce the original behaviour exactly
+-- (serve every question, in order_index order, options unshuffled), which is
+-- also the fail-open fallback when the vendor row cannot be resolved.
+--   * module_quiz_strategy — 'all' | 'one_per_bloom'. one_per_bloom serves one
+--                            question per distinct training_questions.bloom_level
+--                            on the module (floor of 2), turning a 9-question
+--                            median check into a 3-question one.
+--   * exam_question_cap    — max questions in a level exam, chosen at random per
+--                            attempt. NULL = no cap. Imported exams run to 72.
+--   * shuffle_options      — permute MCQ option order per (attempt, question),
+--                            so a re-sit does not present identical lettering.
+--                            Display only: chosen_option stays canonical.
+ALTER TABLE training_vendors ADD COLUMN IF NOT EXISTS module_quiz_strategy VARCHAR(32) NOT NULL DEFAULT 'all';
+ALTER TABLE training_vendors ADD COLUMN IF NOT EXISTS exam_question_cap INTEGER;
+ALTER TABLE training_vendors ADD COLUMN IF NOT EXISTS shuffle_options BOOLEAN NOT NULL DEFAULT FALSE;
+DO $$ BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.table_constraints
+        WHERE constraint_name = 'training_vendors_module_quiz_strategy_ck'
+    ) THEN
+        ALTER TABLE training_vendors
+            ADD CONSTRAINT training_vendors_module_quiz_strategy_ck
+            CHECK (module_quiz_strategy IN ('all', 'one_per_bloom'));
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.table_constraints
+        WHERE constraint_name = 'training_vendors_exam_question_cap_ck'
+    ) THEN
+        ALTER TABLE training_vendors
+            ADD CONSTRAINT training_vendors_exam_question_cap_ck
+            CHECK (exam_question_cap IS NULL OR exam_question_cap > 0);
+    END IF;
+END $$;
+
 -- training_assessment_attempts: extend to support per-module (training) quizzes
 -- in addition to per-level grand quizzes. Grand quizzes are blocking + 100%
 -- pass + 24h cooldown; training-module quizzes are non-blocking, feedback-only,

@@ -108,6 +108,19 @@ const FLOW_CONFIGS = [
     categories: ['OTHER'],
   },
   {
+    // Multi-answer ("select all that apply") training quiz questions. ONE Flow
+    // serves every such question — the text, the options and the already-checked
+    // set come from the endpoint's INIT, keyed on the attempt in the flow token.
+    // Leaving TRAINING_MSQ_FLOW_ID unset falls those questions back to the
+    // interactive-list + Done delivery, which is the rollback lever.
+    name: 'Training Multi-Answer Question',
+    jsonPath: path.join(FLOWS_DIR, 'training-msq-flow.json'),
+    type: 'endpoint',
+    endpointPath: '/api/flows/training-msq',
+    envVar: 'TRAINING_MSQ_FLOW_ID',
+    categories: ['OTHER'],
+  },
+  {
     // Optional polished registration form. OSS registration also works
     // conversationally (name capture); this Flow is sent instead only when
     // REGISTRATION_FLOW_ID is set. The /registration endpoint already handles

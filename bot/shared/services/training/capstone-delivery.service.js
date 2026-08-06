@@ -439,19 +439,38 @@ async function finalizeAttempt(attempt, user, phoneNumber, { lastScore } = {}) {
 
   if (isPassed) {
     let certLine = '';
+    let earned = null;
     if (await levelFullyComplete(attempt.user_id, attempt.level_id)) {
-      const cert = await issueCertificate(supabase, {
+      earned = await issueCertificate(supabase, {
         userId: attempt.user_id,
         programId: attempt.program_id,
         levelId: attempt.level_id,
         attemptId: attempt.id,
       });
-      certLine = `\n\n🏆 Your *${cert.level_name}* certificate is earned!\nCertificate code: \`${cert.certificate_code}\`\nYou can also download it from your portal.`;
+      certLine = `\n\n🏆 Your *${earned.level_name}* certificate is earned!\nCertificate code: \`${earned.certificate_code}\`\nYou can also download it from your portal.`;
     }
     await WhatsAppService.sendMessage(
       phoneNumber,
       `🎉 *Grand Quiz passed!*\n\nYour score: *${score}/${attempt.total_score}* (needed ${passBar}).${certLine}`
     );
+
+    // Hand over the actual file. Best effort and strictly after the message:
+    // a certificate whose PDF never rendered (`pdf_r2_key` null) still reaches
+    // the teacher as a code, which is how it has always worked.
+    if (earned && earned.pdf_r2_key) {
+      try {
+        const { sendCertificateDocument } = require('./certificate-pdf.service');
+        await sendCertificateDocument(phoneNumber, {
+          certificate_code: earned.certificate_code,
+          level_name: earned.level_name,
+          pdf_r2_key: earned.pdf_r2_key,
+        });
+      } catch (err) {
+        logToFile('❌ Capstone certificate PDF delivery failed', {
+          certificateCode: earned.certificate_code, error: err.message,
+        });
+      }
+    }
   } else {
     await WhatsAppService.sendMessage(
       phoneNumber,
@@ -469,4 +488,9 @@ module.exports = {
   // exported for the certificate trigger tests
   levelFullyComplete,
   BUTTON_PREFIX,
+  // bd-2489 — the portal's capstone result card used to hardcode "70%". It is
+  // the same number as this constant, which made the copy correct by
+  // coincidence rather than by construction. Exported so the portal endpoint
+  // can send the bar it is ACTUALLY graded against, and the two cannot drift.
+  CAPSTONE_PASS_PCT: PASS_PCT,
 };

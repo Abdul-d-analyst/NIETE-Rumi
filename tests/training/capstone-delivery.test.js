@@ -36,6 +36,7 @@ let waSend;
 let waButtons;
 let llmCreate;
 let certIssue;
+let certPdfSend;
 
 function makeChain(tableName) {
   const state = tableStates[tableName] || {};
@@ -177,9 +178,17 @@ beforeEach(() => {
   certIssue = jest.fn().mockResolvedValue({
     certificate_code: 'NIETE-TEST-0001', teacher_name: 'Saira', level_name: 'English',
     issued_at: '2026-07-21T00:00:00Z', already_issued: false,
+    pdf_r2_key: 'certs/user-1/NIETE-TEST-0001.pdf',
   });
   jest.doMock('../../bot/shared/services/training/certificate.service', () => ({
     issueCertificate: certIssue,
+  }));
+
+  certPdfSend = jest.fn().mockResolvedValue(true);
+  jest.doMock('../../bot/shared/services/training/certificate-pdf.service', () => ({
+    sendCertificateDocument: certPdfSend,
+    generateAndStoreCertificatePdf: jest.fn().mockResolvedValue(null),
+    certificatePdfUrl: jest.fn().mockResolvedValue(null),
   }));
 
   Capstone = require('../../bot/shared/services/training/capstone-delivery.service');
@@ -276,6 +285,38 @@ describe('routeTextAnswer', () => {
     expect(upd.payload.score).toBe(8);
     expect(certIssue).toHaveBeenCalled();
     expect(waSend.mock.calls.map(c => c[1]).join('\n')).toContain('NIETE-TEST-0001');
+  });
+
+  test('a passed capstone also delivers the certificate PDF as a document', async () => {
+    seed({
+      inProgressAttempt: inProgress(1),
+      storedAnswers: [{ attempt_id: ATTEMPT, question_index: 0, answer_score: 4 }],
+    });
+    await Capstone.routeTextAnswer(PHONE, 'Final answer text with enough substance.');
+
+    expect(certPdfSend).toHaveBeenCalledTimes(1);
+    const [phone, cert] = certPdfSend.mock.calls[0];
+    expect(phone).toBe(PHONE);
+    expect(cert).toEqual(expect.objectContaining({
+      pdf_r2_key: 'certs/user-1/NIETE-TEST-0001.pdf',
+      certificate_code: 'NIETE-TEST-0001',
+      level_name: 'English',
+    }));
+  });
+
+  test('a certificate without a PDF sends no document (null key is a valid state)', async () => {
+    certIssue.mockResolvedValueOnce({
+      certificate_code: 'NIETE-TEST-0002', teacher_name: 'Saira', level_name: 'English',
+      issued_at: '2026-07-21T00:00:00Z', already_issued: false, pdf_r2_key: null,
+    });
+    seed({
+      inProgressAttempt: inProgress(1),
+      storedAnswers: [{ attempt_id: ATTEMPT, question_index: 0, answer_score: 4 }],
+    });
+    await Capstone.routeTextAnswer(PHONE, 'Final answer text with enough substance.');
+
+    expect(certPdfSend).not.toHaveBeenCalled();
+    expect(waSend.mock.calls.map(c => c[1]).join('\n')).toContain('NIETE-TEST-0002');
   });
 
   test('below 70% fails with a retry message, no certificate', async () => {

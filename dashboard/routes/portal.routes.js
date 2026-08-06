@@ -33,6 +33,9 @@ const { S3Client, GetObjectCommand } = require('@aws-sdk/client-s3');
 const { generatePresignedUrl, generatePresignedUrls, isValidR2Url } = require('../services/r2.service');
 const axios = require('axios');
 const { fetchAllPaged } = require('../lib/fetch-all-paged');
+// bd-2469 — the portal's single source of training decisions. Asks the bot;
+// holds no rules of its own. See dashboard/services/training-rules.service.js.
+const TrainingRules = require('../services/training-rules.service');
 // bd-2460 — Assessment Generator availability. Fail-closed, shared with the
 // bot via one app_settings row (see dashboard/lib/feature-flags.js).
 const {
@@ -1568,95 +1571,78 @@ async function _filterLevelsByScopes(userId, levels) {
   });
 }
 
+/**
+ * bd-2469 / bd-2480 — level state comes from the BOT, not from here.
+ *
+ * This function used to compute state locally, and its copy of the rules had
+ * drifted from the bot's in three ways while its comments still claimed
+ * parity ("mirror the WhatsApp endpoint's rule exactly"):
+ *
+ *   - isGrandPass tested `quiz_kind === 'grand'`, so a level certified by a
+ *     CAPSTONE read as un-passed. The first Beacon House certificate ever
+ *     issued was invisible here.
+ *   - "ready_for_quiz" used coursesStarted (>=1 module per course), the proxy
+ *     bd-2447 replaced on the bot with "every module passed" — a fix already
+ *     announced as shipped.
+ *   - a missing vendor row defaulted to chain-locked here, unlocked there.
+ *
+ * The decision fields now come over the wire verbatim. The two COUNTS below
+ * (module_count / completed_count) stay local deliberately: they are display
+ * rollups with no rule in them, and moving raw counting to the bot would buy
+ * nothing but a round trip.
+ *
+ * Throws when the bot cannot be reached — callers must not render a guess.
+ */
 async function _computeLevelStates(userId, levels) {
   const levelIds = levels.map(l => l.id);
-  const vendorIds = [...new Set(levels.map(l => l.vendor_id).filter(Boolean))];
-  const [{ data: courses }, { data: progressRows }, { data: attempts }, { data: vendorRows }] = await Promise.all([
+
+  const [botStates, { data: courses }, { data: progressRows }] = await Promise.all([
+    TrainingRules.getLevelStates(userId),
     supabase.from('training_courses').select('id, level_id').eq('is_active', true).in('level_id', levelIds),
     supabase.from('teacher_training_progress')
       .select('module_id, training_modules!inner(course_id, is_active)')
       .eq('user_id', userId)
       .eq('training_modules.is_active', true),
-    // bd-2391 — GRAND attempts only, matching _loadGrandQuizGate below. Module
-    // quick-check attempts carry a level_id and is_passed=true on a perfect
-    // score, so an unfiltered read certifies the level off one module quiz.
-    supabase.from('training_assessment_attempts')
-      .select('level_id, status, is_passed, cooldown_until, completed_at, quiz_kind')
-      .eq('user_id', userId).eq('quiz_kind', 'grand').in('level_id', levelIds),
-    vendorIds.length
-      ? supabase.from('training_vendors').select('id, unlock_logic').in('id', vendorIds)
-      : Promise.resolve({ data: [] }),
   ]);
-  const vendorById = new Map((vendorRows || []).map(v => [v.id, v]));
 
-  // module → course → level chain, plus overall completed_set for the module-count rollup
-  const progressByCourse = new Map();
-  const completedModuleIds = new Set();
-  for (const p of progressRows || []) {
-    completedModuleIds.add(p.module_id);
-    const cid = p?.training_modules?.course_id;
-    if (cid) progressByCourse.set(cid, (progressByCourse.get(cid) || 0) + 1);
-  }
+  const completedModuleIds = new Set((progressRows || []).map(p => p.module_id));
 
-  // Also need module counts per level for the "X/Y done" copy
+  // Module counts per level for the "X/Y done" copy. Pure arithmetic.
   const allCourseIds = (courses || []).map(c => c.id);
   const { data: modules } = allCourseIds.length
     ? await supabase.from('training_modules')
         .select('id, course_id').eq('is_active', true).in('course_id', allCourseIds)
     : { data: [] };
 
+  const courseLevel = new Map((courses || []).map(c => [c.id, c.level_id]));
   const moduleCountByLevel = new Map();
   const completedCountByLevel = new Map();
   for (const m of modules || []) {
-    const course = (courses || []).find(c => c.id === m.course_id);
-    if (!course) continue;
-    moduleCountByLevel.set(course.level_id, (moduleCountByLevel.get(course.level_id) || 0) + 1);
+    const levelId = courseLevel.get(m.course_id);
+    if (levelId == null) continue;
+    moduleCountByLevel.set(levelId, (moduleCountByLevel.get(levelId) || 0) + 1);
     if (completedModuleIds.has(m.id)) {
-      completedCountByLevel.set(course.level_id, (completedCountByLevel.get(course.level_id) || 0) + 1);
+      completedCountByLevel.set(levelId, (completedCountByLevel.get(levelId) || 0) + 1);
     }
   }
 
-  // Now compute state per level using the WhatsApp bot's rules
+  const botById = new Map((botStates || []).map(s => [s.id, s]));
   const byLevelId = new Map();
   for (const lv of levels) {
-    const lvCourses = (courses || []).filter(c => c.level_id === lv.id);
-    const coursesStarted = lvCourses.filter(c => (progressByCourse.get(c.id) || 0) > 0);
-    // bd-2391 — guard in memory too, so the rule holds even if a caller passes
-    // unfiltered rows. A missing quiz_kind predates the column (level exams only).
-    const isGrandPass = (a) => a && a.is_passed === true && (a.quiz_kind || 'grand') === 'grand';
-    const passedAttempt = (attempts || []).find(a => a.level_id === lv.id && isGrandPass(a));
-    const cooldownAttempt = (attempts || []).find(a =>
-      a.level_id === lv.id && a.status === 'failed' && a.cooldown_until && new Date(a.cooldown_until) > new Date()
-    );
-    // Chain-lock applies only to vendors whose unlock_logic says so — mirror
-    // the WhatsApp endpoint's rule exactly. Missing vendor row defaults to
-    // 'chain' (the legacy Taleemabad behaviour). Previous-level lookup is
-    // scoped WITHIN the vendor: with multiple vendors on the board, a global
-    // order_index-1 lookup crosses vendor boundaries and locks the wrong rows.
-    const vendor = vendorById.get(lv.vendor_id);
-    const chainLocked = (vendor?.unlock_logic || 'chain') === 'chain';
-    const prevLevel = levels
-      .filter(l => l.vendor_id === lv.vendor_id)
-      .find(l => l.order_index === lv.order_index - 1);
-    const prevPassed = !prevLevel || !!(attempts || []).find(a => a.level_id === prevLevel.id && isGrandPass(a));
-    const isFirst = !prevLevel;
-
-    let state;
-    if (chainLocked && !prevPassed && !isFirst) state = 'locked';
-    else if (passedAttempt) state = 'certified';
-    else if (coursesStarted.length === lvCourses.length && lvCourses.length > 0) state = 'ready_for_quiz';
-    else if (coursesStarted.length > 0) state = 'in_progress';
-    else state = 'not_started';
-
+    const bot = botById.get(lv.id);
+    // A level the bot does not return is not in this teacher's programme. Say
+    // nothing about it rather than inventing a state — callers treat a missing
+    // entry as "not found", which is the honest answer.
+    if (!bot) continue;
     byLevelId.set(lv.id, {
-      state,
-      courses_total: lvCourses.length,
-      courses_completed: coursesStarted.length,
+      state: bot.state,
+      courses_total: bot.courses_total,
+      courses_completed: bot.courses_completed,
       module_count: moduleCountByLevel.get(lv.id) || 0,
       completed_count: completedCountByLevel.get(lv.id) || 0,
-      passed_at: passedAttempt?.completed_at || null,
-      cooldown_until: cooldownAttempt?.cooldown_until || null,
-      previous_level_order: prevLevel ? prevLevel.order_index : null,
+      passed_at: bot.passed_at || null,
+      cooldown_until: bot.cooldown_until || null,
+      previous_level_order: bot.previous_level_order ?? null,
     });
   }
   return byLevelId;
@@ -1862,6 +1848,111 @@ router.get('/training/vendors', requirePortalAuth, async (req, res) => {
   }
 });
 
+/* ------------------------------------------------------------------------- *
+ * Certificates — identity here, everything else in the bot.
+ *
+ * These two routes used to read `training_certificates` and presign R2 keys in
+ * this process. Both moved to the bot, because the RENDER has to live there:
+ * `certificate-pdf.service.js` sits under bot/shared, so its
+ * `require('pdfkit')` resolves from bot/node_modules and then the repo root
+ * and never reaches dashboard/node_modules — Node resolves from the requiring
+ * FILE's directory upward, so the dashboard declaring pdfkit itself changes
+ * nothing. A portal-side mint therefore works in a dev tree where both
+ * installs exist and fails on the deployed service. Same trap as the LP
+ * enqueue, which degraded silently for two days.
+ *
+ * Once the mint is in the bot, keeping the read here would mean two places
+ * that know what a certificate is. So the portal keeps the one thing it
+ * genuinely owns — WHO IS ASKING — and asks the bot for the rest. Both routes
+ * take the userId from the SESSION and never from the path, query or body.
+ * ------------------------------------------------------------------------- */
+
+/**
+ * GET /api/portal/training/certificates
+ *
+ * The teacher's certificates, newest first, straight from the bot.
+ *
+ * This route NEVER mints. A teacher with 40 certificates must not trigger 40
+ * PDF renders just to see their names — rendering happens on the download
+ * route below, for the one certificate actually asked for. That split is also
+ * why a rendering problem can never take this list down.
+ *
+ * `download_url` is the portal's own download route, present for EVERY
+ * certificate. Before fetch-or-mint, a null `pdf_r2_key` meant a permanently
+ * undownloadable certificate; now it just means "not rendered yet", so a
+ * null download link here would be a bug rather than an honest state.
+ * `has_pdf` still reports whether the file already exists, so the UI can warn
+ * that a first download may take a moment.
+ *
+ * A lookup failure is a 500, NOT an empty list: `[]` is a legitimate answer
+ * ("none yet"), so returning it on error would tell a teacher their
+ * certificates do not exist.
+ */
+router.get('/training/certificates', requirePortalAuth, async (req, res) => {
+  try {
+    const userId = req.session.portalUserId;
+    const certificatesClient = require('../services/certificates.service');
+
+    const certificates = await certificatesClient.listCertificates(userId);
+
+    res.json({
+      success: true,
+      certificates: (certificates || []).map((c) => ({
+        ...c,
+        download_url: `/api/portal/training/certificates/${encodeURIComponent(c.certificate_code)}/download`,
+      })),
+    });
+  } catch (error) {
+    console.error('training/certificates error:', error.message);
+    res.status(500).json({ success: false, error: 'Failed to load certificates' });
+  }
+});
+
+/**
+ * GET /api/portal/training/certificates/:code/download
+ *
+ * Fetch-or-mint one certificate, then 302 to a short-lived signed R2 URL.
+ *
+ * Why a redirect rather than handing the signed URL out in the list: the URL
+ * is a bearer token for the file, and issuing one per rendered row would mint
+ * credentials for certificates nobody ever clicks. This way the session is
+ * re-checked at the moment of the download.
+ *
+ * The bot distinguishes "no such certificate for this user" (404) from "we
+ * could not produce the file" (502), and so does this route — collapsing both
+ * into one status would hide a rendering outage behind a not-found.
+ */
+router.get('/training/certificates/:code/download', requirePortalAuth, async (req, res) => {
+  const code = req.params && req.params.code;
+  if (!code) return res.status(400).json({ success: false, error: 'certificate code is required' });
+
+  try {
+    const userId = req.session.portalUserId;
+    const certificatesClient = require('../services/certificates.service');
+
+    const result = await certificatesClient.getCertificatePdf(userId, code);
+
+    if (result && result.notFound) {
+      return res.status(404).json({ success: false, error: 'Certificate not found' });
+    }
+    if (!result || !result.download_url) {
+      // The certificate exists; its PDF could not be produced. Say so — the
+      // list is unaffected and the teacher can retry.
+      return res.status(502).json({
+        success: false,
+        error: 'Your certificate PDF could not be prepared. Please try again in a moment.',
+      });
+    }
+    return res.redirect(302, result.download_url);
+  } catch (error) {
+    console.error('training/certificates download error:', error.message);
+    return res.status(502).json({
+      success: false,
+      error: 'Your certificate PDF could not be prepared. Please try again in a moment.',
+    });
+  }
+});
+
 /**
  * GET /api/portal/training/levels
  * Returns the 4 training levels with per-level module counts, completion %,
@@ -1922,7 +2013,9 @@ router.get('/training/levels', requirePortalAuth, async (req, res) => {
  * the level, with each answer's text, LLM score (0-5) and feedback line.
  * 200 with { attempt: null } when the teacher hasn't attempted it — the SPA
  * hides the panel on that. Grading internals (prompts, pass math) stay
- * server-side; only display fields are returned.
+ * server-side; only display fields are returned — plus `pass_mark_pct`, the
+ * bar the bot grades capstones against, so the card states it instead of
+ * carrying its own copy (bd-2489).
  */
 router.get('/training/level/:id/capstone', requirePortalAuth, async (req, res) => {
   try {
@@ -1952,8 +2045,14 @@ router.get('/training/level/:id/capstone', requirePortalAuth, async (req, res) =
         .from('training_questions').select('id, question_text').in('id', qIds);
       qText = new Map((qs || []).map(q => [q.id, q.question_text]));
     }
+    // bd-2489 — the SPA hardcoded "Below the 70% pass mark". 70 is this bot
+    // constant, so the copy was right by coincidence and would have gone stale
+    // silently. Send the bar the capstone is ACTUALLY graded against.
+    const { CAPSTONE_PASS_PCT } = require('../../bot/shared/services/training/capstone-delivery.service');
+
     return res.json({
       success: true,
+      pass_mark_pct: Math.round(CAPSTONE_PASS_PCT * 100),
       attempt: {
         id: attempt.id,
         status: attempt.status,
@@ -1993,10 +2092,19 @@ router.get('/training/level/:id/capstone', requirePortalAuth, async (req, res) =
  *     the bug this helper fixes (non-R2 video/audio silently rendered nothing).
  *
  * Returns null for empty/non-http values (e.g. a local path row).
+ *
+ * `options` is forwarded to the presigner, which defaults to
+ * `inline` + a Content-Type inferred from the key so migrated videos/PDFs
+ * render in the browser instead of downloading. Pass
+ * `{ disposition: 'attachment', filename }` to presign the SAME object as an
+ * explicit download. The overrides are signed — they cannot be bolted onto a
+ * URL this function already returned (403 SignatureDoesNotMatch).
+ * Externally-hosted public URLs are passed through as-is, so a download
+ * control over one of those must fall back to the browser's own behaviour.
  */
-async function _resolveMediaUrl(url, expiresIn = 3600) {
+async function _resolveMediaUrl(url, expiresIn = 3600, options) {
   if (!url) return null;
-  if (isValidR2Url(url)) return generatePresignedUrl(url, expiresIn);
+  if (isValidR2Url(url)) return generatePresignedUrl(url, expiresIn, options);
   if (/^https?:\/\//i.test(url)) return url;
   return null;
 }
@@ -2006,23 +2114,42 @@ function _isPdfSourceUrl(url) {
   return !!url && /\.pdf(\?|$)/i.test(url);
 }
 
+/**
+ * bd-2480 — the level gate, answered by the bot.
+ *
+ * Was a local re-derivation on top of _computeLevelStates, carrying its own
+ * phrasing of the refusal. Now a thin adapter: the bot decides, and the only
+ * work left here is renaming `message` to the `error` key every call site
+ * already reads.
+ *
+ * Fails CLOSED. TrainingRules denies on any transport or config failure, so an
+ * unreachable bot locks the level rather than opening it.
+ */
 async function _assertLevelUnlocked(userId, levelId) {
-  // vendor_id is required by _computeLevelStates for the per-vendor
-  // unlock_logic + within-vendor previous-level rule.
-  const { data: levels } = await supabase
-    .from('training_levels').select('id, name, order_index, vendor_id').eq('is_active', true).order('order_index');
-  const stateMap = await _computeLevelStates(userId, levels || []);
-  const s = stateMap.get(levelId);
-  if (!s) return { ok: false, status: 404, error: 'Level not found' };
-  if (s.state === 'locked') {
-    const prevOrder = s.previous_level_order;
-    return {
-      ok: false, status: 403,
-      error: `This level is locked. Pass Level ${prevOrder}'s grand quiz first.`,  // 0-based display (bd-2235)
-      previous_level_order: prevOrder,
-    };
-  }
-  return { ok: true };
+  const gate = await TrainingRules.checkLevelUnlocked(userId, levelId);
+  if (gate.ok) return { ok: true };
+  return {
+    ok: false,
+    status: gate.status || 403,
+    error: gate.message,
+    previous_level_order: gate.previous_level_order ?? null,
+  };
+}
+
+/**
+ * bd-2481 — the module-order gate, which the portal has never had.
+ *
+ * The bot enforces "exactly one unpassed module is open at a time"
+ * (bd-2448, announced as shipped). The portal gated only on the LEVEL, so a
+ * teacher could open any module in any order and skip everything before it.
+ *
+ * Same adapter shape as _assertLevelUnlocked, and the same fail-closed
+ * guarantee.
+ */
+async function _assertModuleUnlocked(userId, moduleId) {
+  const gate = await TrainingRules.checkModuleUnlocked(userId, moduleId);
+  if (gate.ok) return { ok: true };
+  return { ok: false, status: gate.status || 403, error: gate.message };
 }
 
 /**
@@ -2181,6 +2308,10 @@ router.get('/training/module/:id', requirePortalAuth, async (req, res) => {
       const gate = await _assertLevelUnlocked(userId, course.level_id);
       if (!gate.ok) return res.status(gate.status).json({ success: false, error: gate.error, previous_level_order: gate.previous_level_order });
     }
+    // bd-2481 — module ORDER, not just level lock. Unconditional: the bot
+    // denies an unknown or course-less module, closing the orphan hole too.
+    const modGate = await _assertModuleUnlocked(userId, moduleId);
+    if (!modGate.ok) return res.status(modGate.status).json({ success: false, error: modGate.error });
 
     // Progress
     let completedAt = null;
@@ -2321,6 +2452,52 @@ router.get('/training/module/:id/attempts', requirePortalAuth, async (req, res) 
  *          `questions: []` when the module has no active questions — the
  *          frontend uses that to hide the "Take Quiz" button entirely.
  */
+/* ------------------------------------------------------------------------- *
+ * bd-2490 — assessments happen on WhatsApp, not here. INTERIM.
+ *
+ * The portal renders quiz answers as one radio per option. A capstone paper is
+ * free text and carries none, so a Beacon House teacher got eight questions,
+ * no inputs and a dead Submit button. Beyond that, every assessment rule this
+ * surface owned has drifted from the bot at some point and been fixed
+ * separately: the pass bar (bd-2483), the progress write (bd-2450), the
+ * eligibility proxy (bd-2447).
+ *
+ * So the portal stops assessing. It keeps content — videos, PDFs, progress,
+ * past results — and the bot keeps grading, cooldowns and certificates. One
+ * engine instead of two that must be kept in step.
+ *
+ * THE API IS THE GATE, NOT THE BUTTON. #77 shipped the mirror image of this: a
+ * "Locked" label with no server-side check, which started the exam anyway when
+ * tapped. A session cookie and curl must hit the same wall the UI does.
+ *
+ * Checked FIRST in each route, ahead of eligibility, so the answer never
+ * depends on lock state and no paper or progress detail leaks in the refusal.
+ *
+ * To undo for real: delete this block and its call sites, once the portal can
+ * genuinely run both quiz kinds (bd-2488). This is deliberately NOT an ops
+ * toggle — re-enabling needs UI work, and a runtime switch would imply the
+ * form is ready when it is not.
+ *
+ * PORTAL_ASSESSMENTS_TEST_ENABLE is a TEST SEAM, not a feature flag. The
+ * grading, cooldown and certificate logic behind these routes is retained
+ * because we intend to restore this surface, and deleting its suites would
+ * leave that code unexercised until then. The four portal quiz suites set it;
+ * nothing else may. Production must never set it, and a test below pins the
+ * default to blocked so an accidental removal of that default fails the build.
+ * ------------------------------------------------------------------------- */
+const ASSESSMENTS_ON_WHATSAPP_ONLY = process.env.PORTAL_ASSESSMENTS_TEST_ENABLE !== '1';
+
+function _whatsappOnly(res) {
+  if (!ASSESSMENTS_ON_WHATSAPP_ONLY) return false;
+  res.status(409).json({
+    success: false,
+    code: 'whatsapp_only',
+    error: 'Quizzes and exams are taken on WhatsApp. Open a chat with NIETE and send /training to pick up where you left off.',
+    whatsapp_command: '/training',
+  });
+  return true;
+}
+
 /**
  * bd-2138 — multi-answer ("msq") questions. A question is multi iff its
  * correct_option holds a comma-joined set ('1,3,5', restored from the legacy
@@ -2339,6 +2516,7 @@ function _normalizeAnswerSet(value) {
 }
 
 router.get('/training/module/:id/questions', requirePortalAuth, async (req, res) => {
+  if (_whatsappOnly(res)) return;
   try {
     const userId = req.session.portalUserId;
     const moduleId = parseInt(req.params.id, 10);
@@ -2364,6 +2542,12 @@ router.get('/training/module/:id/questions', requirePortalAuth, async (req, res)
         const gate = await _assertLevelUnlocked(userId, course.level_id);
         if (!gate.ok) return res.status(gate.status).json({ success: false, error: gate.error, previous_level_order: gate.previous_level_order });
       }
+      // bd-2481 — the module-ORDER gate, outside the `if (course)` above on
+      // purpose. The bot denies an unknown module or one with no course, so
+      // running it unconditionally also closes the orphan-module hole the
+      // level gate leaves open.
+      const modGate = await _assertModuleUnlocked(userId, moduleId);
+      if (!modGate.ok) return res.status(modGate.status).json({ success: false, error: modGate.error });
     }
 
     // 3. Active questions, canonical order — the exact set the POST endpoint
@@ -2438,6 +2622,7 @@ router.get('/training/module/:id/questions', requirePortalAuth, async (req, res)
  * switching" promise.
  */
 router.post('/training/module/:id/quiz-attempts', requirePortalAuth, async (req, res) => {
+  if (_whatsappOnly(res)) return;
   try {
     const userId = req.session.portalUserId;
     const moduleId = parseInt(req.params.id, 10);
@@ -2472,6 +2657,12 @@ router.post('/training/module/:id/quiz-attempts', requirePortalAuth, async (req,
         if (!gate.ok) return res.status(gate.status).json({ success: false, error: gate.error, previous_level_order: gate.previous_level_order });
       }
     }
+    // bd-2481 — module ORDER, not just level lock. Unconditional, so the
+    // orphan-module case the comment above accepts is denied rather than
+    // waved through: submitting a quiz for a module you cannot open is the
+    // one place where skipping ahead also writes progress.
+    const modGate = await _assertModuleUnlocked(userId, moduleId);
+    if (!modGate.ok) return res.status(modGate.status).json({ success: false, error: modGate.error });
 
     // 3. Load active questions for the module, ordered — the canonical list
     //    the answer set must exhaustively cover.
@@ -2535,7 +2726,27 @@ router.post('/training/module/:id/quiz-attempts', requirePortalAuth, async (req,
     }
     const totalQuestions = qList.length;
     const score = graded.filter(g => g.is_correct).length;
-    const isPerfect = score === totalQuestions;
+    // bd-2483 — the PASS decision belongs to the bot. This was
+    // `score === totalQuestions`, which is only correct for vendors whose
+    // module bar happens to be 100 (NIETE). Beacon House and Oxbridge pass at
+    // 70, so their teachers were being failed on work that passed on WhatsApp.
+    //
+    // Throws rather than defaulting if the bot cannot be reached: a grading
+    // verdict has no safe default in either direction, so the write is
+    // abandoned and the teacher retries with nothing recorded.
+    let verdict;
+    try {
+      verdict = await TrainingRules.getModuleQuizVerdict(moduleId, score, totalQuestions);
+    } catch (gradeErr) {
+      console.error('training/module/:id/quiz-attempts — grading unavailable, nothing written', {
+        moduleId, error: gradeErr?.message,
+      });
+      return res.status(503).json({
+        success: false,
+        error: 'We could not mark this quiz just now. Please try again in a moment.',
+      });
+    }
+    const isPassed = verdict.is_passed;
     const completedAt = new Date().toISOString();
 
     // 6. Insert attempt row — shape parity with quiz-delivery.service.js
@@ -2551,9 +2762,12 @@ router.post('/training/module/:id/quiz-attempts', requirePortalAuth, async (req,
         current_question_index: totalQuestions,
         total_questions: totalQuestions,
         total_score: totalQuestions,
-        status: 'passed',                   // non-blocking, "attempt closed"
+        // bd-2450 — this was hardcoded 'passed' ("attempt closed"), which made a
+        // failed check indistinguishable from a passed one in the data. The bot
+        // has always recorded the real outcome; now so does the portal.
+        status: verdict.status,
         score,
-        is_passed: isPerfect,               // pedagogical "perfect score" flag
+        is_passed: isPassed,
         completed_at: completedAt,
         last_activity_at: completedAt,
         started_at: completedAt,            // submit-in-one-shot; the portal never had a partial
@@ -2577,15 +2791,26 @@ router.post('/training/module/:id/quiz-attempts', requirePortalAuth, async (req,
     const { error: ansErr } = await supabase.from('training_assessment_answers').insert(answerRows);
     if (ansErr) throw ansErr;
 
-    // 8. Upsert progress row — completing the quiz on portal ALSO marks the
-    //    module complete (matches WhatsApp: content delivery → quiz fires →
-    //    module counted). Unique (user_id, module_id) makes this idempotent.
-    await supabase
-      .from('teacher_training_progress')
-      .upsert(
-        { user_id: userId, module_id: moduleId, completed_at: completedAt },
-        { onConflict: 'user_id,module_id' }
-      );
+    // 8. Progress row — ONLY on a pass. bd-2450.
+    //
+    //    This used to run unconditionally, so submitting a quiz marked the
+    //    module complete whether or not the teacher passed it. That is not a
+    //    display bug: the bot treats ANY teacher_training_progress row as
+    //    "module passed" (teacher-training-endpoint.js, doneModuleIds has no
+    //    status filter), so portal-written failures counted toward level
+    //    completion on WhatsApp, unlocked the level exam, and could certify a
+    //    level off work that was never passed.
+    //
+    //    Matches the bot: gradeAttempt writes the progress row inside its
+    //    isPassed branch. Unique (user_id, module_id) keeps it idempotent.
+    if (isPassed) {
+      await supabase
+        .from('teacher_training_progress')
+        .upsert(
+          { user_id: userId, module_id: moduleId, completed_at: completedAt },
+          { onConflict: 'user_id,module_id' }
+        );
+    }
 
     // 9. Semantic event — same name/shape as WhatsApp side for observability
     //    parity. Payload keys deliberately avoid tripping the column-scanner
@@ -2600,7 +2825,8 @@ router.post('/training/module/:id/quiz-attempts', requirePortalAuth, async (req,
         module_row_id: moduleId,
         raw_score: score,
         total_qs: totalQuestions,
-        is_perfect: isPerfect,
+        is_passed: isPassed,
+        pct_required: verdict.pass_pct,
         surface: 'portal',
       });
     } catch (_) { /* logger not available — fine, this is best-effort telemetry */ }
@@ -2611,7 +2837,9 @@ router.post('/training/module/:id/quiz-attempts', requirePortalAuth, async (req,
         id: attempt.id,
         score,
         max_score: totalQuestions,
-        is_passed: isPerfect,
+        is_passed: isPassed,
+        pass_pct: verdict.pass_pct,
+        achieved_pct: verdict.achieved_pct,
         completed_at: completedAt,
       },
     });
@@ -2650,63 +2878,96 @@ const GRAND_QUIZ_COOLDOWN_HOURS = 24;
  *           coursesTotal, coursesStarted, questionCount }.
  */
 async function _loadGrandQuizGate(userId, levelId) {
-  const [{ data: quiz }, { data: attempts }, { data: courses }, { data: modules }, { data: progressRows }] = await Promise.all([
-    supabase.from('training_grand_quizzes')
-      .select('id, level_id')
-      .eq('level_id', levelId).eq('quiz_type', 'grand_quiz').eq('is_active', true)
-      .maybeSingle(),
-    supabase.from('training_assessment_attempts')
-      .select('id, status, is_passed, cooldown_until, completed_at')
-      .eq('user_id', userId).eq('level_id', levelId).eq('quiz_kind', 'grand'),
-    supabase.from('training_courses').select('id').eq('level_id', levelId).eq('is_active', true),
-    supabase.from('training_modules').select('id, course_id').eq('is_active', true),
-    supabase.from('teacher_training_progress').select('module_id').eq('user_id', userId),
-  ]);
+  // bd-2483 — the DECISION comes from the bot. This used to re-derive it, and
+  // its copy carried three faults the bot had already fixed:
+  //   - quiz_type='grand_quiz' excluded capstones, so every Beacon House level
+  //     reported no_quiz;
+  //   - quiz_kind='grand' excluded capstone attempts, so a capstone pass never
+  //     counted (bd-2485);
+  //   - eligibility used the ">=1 module per course" proxy bd-2447 replaced.
+  //
+  // The bot's refusal reasons map 1:1 onto the states this portal renders, so
+  // nothing is interpreted here — only relabelled.
+  const gate = await TrainingRules.checkExamGateByLevel(userId, levelId);
+  const level = gate.level || null;
 
-  const passedAttempt = (attempts || []).find(a => a.is_passed === true) || null;
-  const cooldownAttempt = (attempts || []).find(a =>
-    a.status === 'failed' && a.cooldown_until && new Date(a.cooldown_until) > new Date()
-  ) || null;
-
-  // Eligibility — EXACT WhatsApp criterion: every active course in the level
-  // has ≥1 module in teacher_training_progress ("started" proxy, matching
-  // loadGrandQuizState + the level-state 'ready_for_quiz' computation).
-  const doneIds = new Set((progressRows || []).map(r => r.module_id));
-  const courseIds = new Set((courses || []).map(c => c.id));
-  const startedCourseIds = new Set(
-    (modules || []).filter(m => courseIds.has(m.course_id) && doneIds.has(m.id)).map(m => m.course_id)
-  );
-  const allCoursesStarted = courseIds.size > 0 && startedCourseIds.size === courseIds.size;
-
+  // questionCount is data, not a decision: how many questions the paper has.
+  // Resolved by LEVEL and by exam TYPE so a capstone counts too.
   let questionCount = 0;
-  if (quiz) {
-    const { data: qs } = await supabase
-      .from('training_questions')
-      .select('id')
-      .eq('grand_quiz_id', quiz.id)
-      .eq('is_active', true);
+  let examKind = null;
+  const quizId = level && level.grand_quiz_id ? level.grand_quiz_id : null;
+  if (quizId) {
+    const [{ data: qs }, { data: quizRow }] = await Promise.all([
+      supabase.from('training_questions').select('id')
+        .eq('grand_quiz_id', quizId).eq('is_active', true),
+      // bd-2490 — the exam's KIND, read from the exam row rather than inferred
+      // from the vendor. What the portal can render depends on whether the
+      // paper is multiple choice or free text, not on whose programme it is.
+      supabase.from('training_grand_quizzes').select('quiz_type').eq('id', quizId).maybeSingle(),
+    ]);
     questionCount = (qs || []).length;
+    examKind = (quizRow && quizRow.quiz_type) || null;
   }
 
   return {
-    quiz: quiz || null,
-    passed: !!passedAttempt,
-    passedAttempt,
-    cooldownUntil: cooldownAttempt ? cooldownAttempt.cooldown_until : null,
-    allCoursesStarted,
-    coursesTotal: courseIds.size,
-    coursesStarted: startedCourseIds.size,
+    // `reason` is the bot's verdict and the only thing _grandQuizState reads.
+    ok: gate.ok === true,
+    reason: gate.reason || null,
+    message: gate.message || null,
+    unavailable: gate.unavailable === true,
+    passPct: typeof gate.pass_pct === 'number' ? gate.pass_pct : null,
+    examKind,
+    quiz: quizId ? { id: quizId, level_id: levelId } : null,
+    passed: gate.reason === 'already_passed',
+    passedAttempt: level && level.passed_at ? { completed_at: level.passed_at } : null,
+    cooldownUntil: (level && level.cooldown_until) || null,
+    allCoursesStarted: gate.ok === true || gate.reason === 'already_passed' || gate.reason === 'cooldown',
+    coursesTotal: level ? level.courses_total : 0,
+    coursesStarted: level ? level.courses_completed : 0,
     questionCount,
   };
 }
 
-/** Reduce a gate to the single state string the frontend renders on. */
+/**
+ * Reduce a gate to the single state string the frontend renders on.
+ *
+ * bd-2483 — a relabelling, not a decision. The bot already answered; this maps
+ * its `reason` onto the vocabulary the portal's UI was built against, so the
+ * frontend needs no change. Ordering is not a priority list any more, because
+ * the bot returns exactly one reason.
+ */
+const _EXAM_REASON_TO_STATE = {
+  no_exam: 'no_quiz',
+  not_in_program: 'no_quiz',
+  bad_level: 'no_quiz',
+  already_passed: 'passed',
+  cooldown: 'cooldown',
+  incomplete: 'courses_incomplete',
+  level_locked: 'courses_incomplete',
+};
+
 function _grandQuizState(gate) {
+  // A paper with no questions is not sittable whatever the gate says. The bot
+  // resolves the exam ROW; an active row with zero active questions is a
+  // content fault, and 'no_quiz' is what the UI already renders for it.
   if (!gate.quiz || gate.questionCount === 0) return 'no_quiz';
-  if (gate.passed) return 'passed';
-  if (gate.cooldownUntil) return 'cooldown';
-  if (!gate.allCoursesStarted) return 'courses_incomplete';
-  return 'ready';
+  // bd-2490 — INTERIM. Assessments are taken on WhatsApp, not here.
+  //
+  // This replaces 'ready' and ONLY 'ready'. An earlier version returned it
+  // ahead of every other state, which told a teacher to go take an exam on
+  // WhatsApp that she is not yet eligible to sit — the bot would refuse her
+  // there, having sent her for nothing. Locked, incomplete, cooling down and
+  // already-passed all still report themselves, because those are true
+  // regardless of which surface the exam is taken on.
+  //
+  // Display only. The routes refuse unconditionally and before any eligibility
+  // check, so the gate does not depend on this line being right.
+  if (gate.ok) return ASSESSMENTS_ON_WHATSAPP_ONLY ? 'whatsapp_only' : 'ready';
+  // Could not reach the bot. Never render 'ready' off a failure — the caller
+  // surfaces gate.message, and 'courses_incomplete' is the safe closed state
+  // the UI already knows how to show.
+  if (gate.unavailable) return 'courses_incomplete';
+  return _EXAM_REASON_TO_STATE[gate.reason] || 'courses_incomplete';
 }
 
 /**
@@ -2717,9 +2978,11 @@ function _grandQuizState(gate) {
  *
  * Response:
  *   { success: true, grand_quiz: {
- *       state: 'no_quiz'|'passed'|'cooldown'|'courses_incomplete'|'ready',
- *       question_count, pass_mark_pct: 100,
- *       cooldown_hours: 24, cooldown_until: ISO|null,
+ *       state: 'no_quiz'|'passed'|'cooldown'|'courses_incomplete'|'whatsapp_only'|'ready',
+ *       question_count,
+ *       pass_mark_pct: the VENDOR's bar (null if the bot could not supply it),
+ *       cooldown_hours: 24 for an MCQ grand quiz, 0 for a capstone,
+ *       cooldown_until: ISO|null,
  *       courses_total, courses_started,
  *       passed_at: ISO|null,
  *       certificate: { certificate_code, teacher_name, level_name, issued_at } | null
@@ -2767,9 +3030,17 @@ router.get('/training/level/:id/grand-quiz', requirePortalAuth, async (req, res)
       success: true,
       grand_quiz: {
         state,
+        exam_kind: gate.examKind,
         question_count: gate.questionCount,
-        pass_mark_pct: 100,
-        cooldown_hours: GRAND_QUIZ_COOLDOWN_HOURS,
+        // bd-2393 — was hardcoded 100. The bar is the vendor's.
+        pass_mark_pct: gate.passPct,
+        // bd-2475 — was GRAND_QUIZ_COOLDOWN_HOURS unconditionally. A capstone
+        // has no cooldown: capstone-delivery.service grades an attempt without
+        // ever writing `cooldown_until`, so there is no window to serve out and
+        // nothing for a retry gate to read. Advertising 24h there is the API
+        // inventing a rule the grader does not implement — and it is a rule the
+        // teacher would obey, waiting a day for nothing.
+        cooldown_hours: gate.examKind === 'capstone' ? 0 : GRAND_QUIZ_COOLDOWN_HOURS,
         cooldown_until: gate.cooldownUntil,
         courses_total: gate.coursesTotal,
         courses_started: gate.coursesStarted,
@@ -2795,6 +3066,7 @@ router.get('/training/level/:id/grand-quiz', requirePortalAuth, async (req, res)
  * it can't submit).
  */
 router.get('/training/level/:id/grand-quiz/questions', requirePortalAuth, async (req, res) => {
+  if (_whatsappOnly(res)) return;
   try {
     const userId = req.session.portalUserId;
     const levelId = parseInt(req.params.id, 10);
@@ -2806,6 +3078,9 @@ router.get('/training/level/:id/grand-quiz/questions', requirePortalAuth, async 
     if (!lock.ok) return res.status(lock.status).json({ success: false, error: lock.error, previous_level_order: lock.previous_level_order });
 
     const gate = await _loadGrandQuizGate(userId, levelId);
+    if (gate.unavailable) {
+      return res.status(503).json({ success: false, code: 'unavailable', error: gate.message });
+    }
     const state = _grandQuizState(gate);
     if (state !== 'ready') {
       return res.status(state === 'no_quiz' ? 404 : 403).json({
@@ -2877,6 +3152,7 @@ router.get('/training/level/:id/grand-quiz/questions', requirePortalAuth, async 
  *          cooldown_until, completed_at }, certificate: {...}|null }
  */
 router.post('/training/level/:id/grand-quiz/attempts', requirePortalAuth, async (req, res) => {
+  if (_whatsappOnly(res)) return;
   try {
     const userId = req.session.portalUserId;
     const levelId = parseInt(req.params.id, 10);
@@ -2889,6 +3165,25 @@ router.post('/training/level/:id/grand-quiz/attempts', requirePortalAuth, async 
       return res.status(400).json({ success: false, error: 'Body must include an answers array' });
     }
 
+    // 0. Enrolment, checked BEFORE the lock gate on purpose.
+    //
+    // bd-2469 — the bot's catalogue is program-scoped, so an unenrolled
+    // teacher's level simply is not in it and the gate answers a generic
+    // "Level not found" (404). True, but useless: "you are not enrolled on a
+    // training program" and "that level does not exist" are different problems
+    // with different fixes, and the caller can only act on the first if we say
+    // it. Running the specific check first keeps the 400 contract the frontend
+    // already branches on; the gate below would deny anyway.
+    const { data: enrolment } = await supabase
+      .from('teacher_training_assignments')
+      .select('program_id')
+      .eq('user_id', userId)
+      .eq('is_active', true)
+      .maybeSingle();
+    if (!enrolment) {
+      return res.status(400).json({ success: false, error: 'No active training program assignment' });
+    }
+
     // 1. Level chain-lock gate — same rule as every other training endpoint.
     const lock = await _assertLevelUnlocked(userId, levelId);
     if (!lock.ok) return res.status(lock.status).json({ success: false, error: lock.error, previous_level_order: lock.previous_level_order });
@@ -2897,6 +3192,13 @@ router.post('/training/level/:id/grand-quiz/attempts', requirePortalAuth, async 
     //    started (the WhatsApp eligibility rule, checked server-side so a
     //    hand-crafted request can't skip the level's coursework).
     const gate = await _loadGrandQuizGate(userId, levelId);
+    // Checked BEFORE !gate.quiz. When the bot is unreachable there is no level
+    // and therefore no quiz id, so this would otherwise answer "No grand quiz
+    // configured for this level" — the exact misleading message bd-2476 fixed,
+    // reachable again through a transport failure. Say what is actually wrong.
+    if (gate.unavailable) {
+      return res.status(503).json({ success: false, code: 'unavailable', error: gate.message });
+    }
     if (!gate.quiz) {
       return res.status(404).json({ success: false, code: 'no_quiz', error: 'No grand quiz configured for this level' });
     }
@@ -3145,6 +3447,12 @@ router.post('/training/module/:id/complete', requirePortalAuth, async (req, res)
         const gate = await _assertLevelUnlocked(userId, course.level_id);
         if (!gate.ok) return res.status(gate.status).json({ success: false, error: gate.error, previous_level_order: gate.previous_level_order });
       }
+      // bd-2481 — the module-ORDER gate, outside the `if (course)` above on
+      // purpose. The bot denies an unknown module or one with no course, so
+      // running it unconditionally also closes the orphan-module hole the
+      // level gate leaves open.
+      const modGate = await _assertModuleUnlocked(userId, moduleId);
+      if (!modGate.ok) return res.status(modGate.status).json({ success: false, error: modGate.error });
     }
 
     // 3. Quiz-less check — modules WITH active questions must complete via
@@ -4564,5 +4872,11 @@ router.get('/assessment/status/:jobId', requirePortalAuth, async (req, res) => {
 router.post('/assessment/callback', (req, res) => {
   return res.status(200).json({ received: true });
 });
+
+// Exported for tests only (an express Router is a function; attaching a
+// property to it does not affect mounting). Keeps the media-URL contract —
+// presign-vs-passthrough and the signed disposition options — testable
+// without standing up the whole endpoint.
+router._resolveMediaUrl = _resolveMediaUrl;
 
 module.exports = router;

@@ -619,6 +619,53 @@ function isPermanentR2Url(url) {
 }
 
 /**
+ * Content types we are willing to ASSERT on a presigned response. Narrow on
+ * purpose: an unknown extension gets no override at all, so the object's own
+ * stored metadata wins — no worse than before, and never a mislabelled file.
+ */
+const ATTACHMENT_CONTENT_TYPES = {
+  pdf: 'application/pdf',
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  mp3: 'audio/mpeg',
+  mp4: 'video/mp4',
+  csv: 'text/csv; charset=utf-8',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+};
+
+/**
+ * Build the response-header overrides for a presigned GET.
+ *
+ * ⚠️ These become SIGNED query params. They MUST be given to the
+ * GetObjectCommand before getSignedUrl runs — appending them to an
+ * already-signed URL yields 403 SignatureDoesNotMatch.
+ *
+ * Only `attachment` is supported: it is an explicit "save this as a file"
+ * intent. Everything else returns {} and leaves the object's metadata alone.
+ *
+ * @param {string} key - R2 object key
+ * @param {{disposition?: string, filename?: string}} [options]
+ * @returns {object} partial GetObjectCommand input, {} when nothing to override
+ */
+function buildPresignOverrides(key, options) {
+  const opts = options || {};
+  if (opts.disposition !== 'attachment') return {};
+
+  const base = String(key || '').split(/[?#]/)[0].split('/').pop() || 'download';
+  const raw = String(opts.filename || base);
+  // A DB-sourced name must never be able to inject header syntax: strip CR/LF
+  // and quotes down to a conservative ASCII set.
+  const ascii = raw.replace(/[^A-Za-z0-9 ._\-()[\]]/g, '_') || 'download';
+
+  const overrides = { ResponseContentDisposition: `attachment; filename="${ascii}"` };
+  const ext = base.includes('.') ? base.split('.').pop().toLowerCase() : '';
+  if (ATTACHMENT_CONTENT_TYPES[ext]) overrides.ResponseContentType = ATTACHMENT_CONTENT_TYPES[ext];
+  return overrides;
+}
+
+/**
  * Generate a presigned URL for temporary external access to R2 objects
  * This is the SECURE approach - no need to make bucket public
  *
@@ -627,9 +674,12 @@ function isPermanentR2Url(url) {
  *
  * @param {string} r2Url - R2 URL (private S3 API format)
  * @param {number} expiresIn - Expiration time in seconds (default: 3600 = 1 hour)
+ * @param {{disposition?: 'attachment', filename?: string}} [options] - optional
+ *        signed response-header overrides. Omitted by every pre-existing
+ *        caller, whose behaviour is unchanged (a bare { Bucket, Key } signing).
  * @returns {Promise<string>} Presigned URL with temporary access
  */
-async function getPresignedUrl(r2Url, expiresIn = 3600) {
+async function getPresignedUrl(r2Url, expiresIn = 3600, options = undefined) {
   if (!r2Url) return r2Url;
 
   // If it's already a presigned URL or not an R2 URL, return as-is
@@ -666,6 +716,7 @@ async function getPresignedUrl(r2Url, expiresIn = 3600) {
     const command = new GetObjectCommand({
       Bucket: bucketName,
       Key: key,
+      ...buildPresignOverrides(key, options),
     });
 
     const presignedUrl = await getSignedUrl(getR2Client(), command, { expiresIn });
@@ -820,6 +871,7 @@ module.exports = {
   // Issue #1: Video generation R2 persistence
   uploadVideoAsset,
   isPermanentR2Url,
+  buildPresignOverrides, // signed response-header overrides (attachment mode)
   getPresignedUrl,  // SECURE: Generate temporary presigned URLs for external access
   toPublicUrl,  // Alias for getPresignedUrl (backward compat, async!)
   uploadBuffer, // Generic buffer upload for attendance Excel

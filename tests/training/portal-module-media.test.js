@@ -154,6 +154,7 @@ function seedModule(moduleRow, { questions = [] } = {}) {
   tableStates.teacher_training_progress = { rows: [] };
   tableStates.training_assessment_attempts = { rows: [] };
   tableStates.training_grand_quizzes = { rows: [] };
+  require('../fixtures/delegate-training-to-bot').seedProgramScope(tableStates);
 }
 
 beforeEach(() => {
@@ -165,6 +166,8 @@ beforeEach(() => {
     from: supabaseFrom,
     rpc: jest.fn().mockResolvedValue({ error: null }),
   }));
+  const { installTrainingDelegation } = require('../fixtures/delegate-training-to-bot');
+  installTrainingDelegation(() => supabaseFrom);
   // Realistic R2 mock: only R2-hosted URLs validate + presign. Mirrors the
   // real isValidR2Url host check so pass-through behaviour is actually
   // exercised (a blanket `true` mock would hide the bug this guards).

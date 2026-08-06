@@ -191,6 +191,23 @@ The cheap diagnostic that separates all three: open `chrome://inspect`, force-cl
 at whether the request after restart **carries** the cookie. Cookie absent → 1 or 2. Cookie present
 but 401 → 3.
 
+### Fix applied (bd-2402) — cause #2, pending on-device acceptance
+
+Cause #1 is ruled out in code: `dashboard/index.js` sets the session cookie with an explicit
+`maxAge: 7 days`, `secure`, `httpOnly`, `sameSite: 'none'`, and `resave:false` / `saveUninitialized:false`
+with no `rolling` — so the `Set-Cookie` carries a real `Max-Age` and the WebView is allowed to persist it.
+Cause #3 is ruled out as the deterministic culprit: eviction is non-deterministic and would present as
+"cookie sent but 401," not "back to login *every* time, instantly, only on force-close." That leaves
+**cause #2** — the WebView never flushes the (persistent) cookie to disk before a swipe-away kills the
+process.
+
+Fix: `portal/android/app/src/main/java/pk/edu/niete/MainActivity.java` now overrides `onPause()` to call
+`CookieManager.getInstance().flush()`, persisting the cookie the moment the app is backgrounded so a
+later kill can no longer lose it. This is a native change and, per §2.3, **cannot be signed off in an
+emulator** — the acceptance run is still: log in on a physical device, swipe the app away, reopen, and
+land on the dashboard (not the login screen). Until that device run passes, treat this as
+**fix-implemented, not verified**.
+
 Note this is also the load-bearing dependency for zero-touch first run (`bd-2357`): "already logged
 in on reopen" is impossible until this is fixed, so the two should probably be picked up together.
 

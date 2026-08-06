@@ -20,9 +20,18 @@ const handleCurriculumLessonPlan = require('./lesson-plan-v2.handler');
 const RegionFeaturesService = require('../services/region-features.service');
 const { getUserRegion } = require('../utils/region');
 const VideoOrchestrator = require('../services/video/video-orchestrator.service');
+const ChildFlowToken = require('../services/quiz/child-flow-token'); // bd-2475 (ported from PK)
+// bd-2475 — tryChildVideoMenu reads the module-level constant (matches PK's
+// pattern); the existing /video block below still keeps its own local
+// process.env read (pre-existing NIETE code, untouched by this port).
+const { STUDENT_VIDEOS_FLOW_ID } = require('../utils/constants');
 const AttendanceDetectorService = require('../services/attendance-detector.service');
 const AttendanceConversationService = require('../services/attendance-conversation.service');
 const AttendanceDeliveryService = require('../services/attendance-delivery.service');
+// principal teacher-attendance channel (role-routed off the same keyword)
+const AttendanceRouterService = require('../services/attendance-router.service');
+const TeacherAttendanceConversationService = require('../services/teacher-attendance-conversation.service');
+const { getAttendanceRepository } = require('../../../dashboard/services/attendance-repository.service');
 const { logToFile } = require('../utils/logger');
 const { TEMP_DIR, LOADING_STICKER_PATH, LOADING_STICKER_MEDIA_ID, OPENAI_API_KEY, ATTENDANCE_SETUP_FLOW_ID, ATTENDANCE_MARKING_FLOW_ID } = require('../utils/constants');
 const { getClient } = require('../services/llm-client');
@@ -140,6 +149,78 @@ async function tryCurriculumLessonPlanServe(from, topic, user, language) {
 
 const { evaluateHomeworkTrigger } = require('./homework-trigger');
 const { detectEditClassIntent } = require('./edit-class-trigger');
+const {
+  parseCertificateCommand,
+  deliverCertificateByCode,
+} = require('../services/training/certificate-pdf.service');
+
+// bd-2482 (NIETE port of PK bd-1598): the "Select Video" QUICK_REPLY tap on
+// the video-library broadcast template. Matches the template button title,
+// an explicit `select_video` payload, or the Urdu equivalent — pure /
+// side-effect-free so it's unit-testable.
+const SELECT_VIDEO_BUTTON_RX = /^(select[_\s]?video|ویڈیو\s*منتخب\s*کریں)$/i;
+function isSelectVideoButton({ buttonId, buttonPayload, buttonText } = {}) {
+  return [buttonId, buttonPayload, buttonText].some(
+    (v) => v && SELECT_VIDEO_BUTTON_RX.test(String(v).trim())
+  );
+}
+
+// bd-2486 (ported from PK) — the /video command, extended to match a bare
+// "video" (no slash). A trimmed message equal to just "video" used to fall
+// all the way through to intent detection, which routes intent.type===
+// 'video' to the legacy AI VideoOrchestrator with the literal word "Video"
+// as a nonsense topic — confirmed via a real Axiom trace (2026-08-04, PK).
+// Exact-match only (never startsWith/contains), so "make me a video on
+// photosynthesis" still falls through to AI video generation as intended.
+// Pure / side-effect-free so it is unit-testable.
+function isVideoCommand(trimmedMessage) {
+  const t = String(trimmedMessage || '').trim();
+  return t === '/video' || t.startsWith('/video ') || t.toLowerCase() === 'video';
+}
+
+/**
+ * bd-2475 (ported from PK) — /video's promise to a binge-declining child
+ * ("send /video anytime") only holds if it actually works with no `users`
+ * row. Named by a SINGLE match on the phone (StudentIdentity.findByPhone —
+ * siblings on one handset are ambiguous, so they fall through unchanged)
+ * with at least one prior share_link quiz session (so we have a
+ * shareCodeId to attribute the next round to). Returns false — never
+ * throws — on any miss, so the caller can fall straight into the existing
+ * noAccount message.
+ */
+async function tryChildVideoMenu(from, language) {
+  try {
+    const StudentIdentity = require('../services/quiz/student-identity.service');
+    const known = await StudentIdentity.findByPhone(from);
+    if (known.length !== 1) return false;
+
+    const { data: lastSession } = await supabase
+      .from('quiz_sessions')
+      .select('share_code_id')
+      .eq('student_id', known[0].id)
+      .not('share_code_id', 'is', null)
+      .order('completed_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (!lastSession?.share_code_id || !STUDENT_VIDEOS_FLOW_ID) return false;
+
+    const flowToken = ChildFlowToken.build({
+      phone: from, shareCodeId: lastSession.share_code_id,
+      studentId: known[0].id, language: language || 'en',
+    });
+    await WhatsAppService.sendFlow(from, {
+      flowId: STUDENT_VIDEOS_FLOW_ID,
+      header: '🎬 More Videos',
+      body: 'Pick a class, subject and topic — I will send the video to your chat.',
+      buttonText: 'Browse',
+      flowToken,
+    });
+    return true;
+  } catch (err) {
+    logToFile('⚠️ /video: child fallback failed', { error: err.message });
+    return false;
+  }
+}
 
 async function handleTextMessage(message, from, messageBody, user = null) {
   logToFile(`Processing TEXT message: ${messageBody}`);
@@ -200,6 +281,37 @@ async function handleTextMessage(message, from, messageBody, user = null) {
         }
       } catch (qErr) {
         logToFile('⚠️ Quiz state intercept error (non-fatal)', { error: qErr.message });
+      }
+    }
+
+    // ============================================================
+    // bd-2482 (NIETE port of PK bd-2314/2315): Video-quiz share links.
+    //
+    // Deliberately BEFORE user lookup: a child arriving from a forwarded
+    // wa.me link may have no users row at all, and their first message is
+    // the auto-filled "QUIZ-ABC123". Routing that through normal onboarding
+    // would answer a code with a menu.
+    //
+    // Two steps, both short-circuiting:
+    //   1. the code itself -> greet, naming the teacher and the topic
+    //   2. the next two texts -> their name, then their class
+    // ============================================================
+    if (messageBody) {
+      try {
+        const VideoQuizShare = require('../services/quiz/video-quiz-share.service');
+        const code = VideoQuizShare.parseShareCode(messageBody);
+        if (code) {
+          await VideoQuizShare.beginFromCode(from, code);
+          typingController.stop();
+          return;
+        }
+        if (await VideoQuizShare.consumeJoinReply(from, messageBody)) {
+          logToFile('Text consumed as video-quiz join detail — short-circuit', { from });
+          typingController.stop();
+          return;
+        }
+      } catch (vqErr) {
+        logToFile('Video Quiz share: routing error', { error: vqErr.message });
       }
     }
 
@@ -655,40 +767,32 @@ async function handleTextMessage(message, from, messageBody, user = null) {
       );
       return;
     }
-    const TEACHER_TRAINING_FLOW_ID = process.env.TEACHER_TRAINING_FLOW_ID || '';
-    if (TEACHER_TRAINING_FLOW_ID) {
-      typingController.stop();
-      const flowToken = `${user.id}:teacher-training:${Date.now()}`;
-      const responseLanguage = await getUserLanguage(from) || 'en';
-      await WhatsAppService.sendFlow(from, {
-        flowId: TEACHER_TRAINING_FLOW_ID,
-        header: '🎓 Teacher Training',
-        body: ({
-          ur: 'اپنی تربیت کی پیش رفت دیکھیں اور اگلا سبق شروع کریں۔',
-        })[responseLanguage] || 'View your training progress and start your next level.',
-        buttonText: ({
-          ur: 'کھولیں',
-        })[responseLanguage] || 'Open',
-        flowToken,
-      });
-      logToFile('🎓 Sent teacher-training flow (/training)', { userId: user.id });
-      return;
-    }
-    // Fallback when the Flow has not been published to Meta yet.
+    // bd-2504 — one entry point, shared with the menu's Training row. A second
+    // copy here is how the two would drift.
     typingController.stop();
-    await WhatsAppService.sendMessage(
-      from,
-      "Teacher Training is being prepared for you. We'll notify you when it's live.\n\nاستاد کی تربیت آپ کے لیے تیار کی جا رہی ہے۔"
-    );
+    const trainingLanguage = await getUserLanguage(from) || 'en';
+    const TrainingEntry = require('../services/training/training-entry.service');
+    await TrainingEntry.openTrainingFlow(user, from, trainingLanguage);
     return;
   }
 
   // ============================================================
-  // CERTIFICATES COMMAND: /certificates — list the teacher's earned
-  // grand-quiz certifications. Text-only (PDF delivery is Layer 2).
+  // CERTIFICATES COMMAND
+  //   /certificates            → list the teacher's earned certifications
+  //   /certificate <CODE>      → send THAT certificate as a PDF document
+  //
+  // The PDF is fetched-or-minted through the same shared service the portal
+  // reaches over the internal API, so a certificate a teacher can download in
+  // the browser is exactly the one they get in chat — legacy certificates
+  // included, which render on first request either way.
+  //
+  // Parsing and delivery live in the service, not here: this handler pulls in
+  // ~40 services and cannot be booted in a test, so logic inlined in it is
+  // untestable by construction.
   // ============================================================
-  if (trimmedMessage === '/certificates' || trimmedMessage === '/certificate') {
-    logToFile('🏆 /certificates command detected', { userId: user?.id, phoneNumber: from });
+  const certCommand = parseCertificateCommand(trimmedMessage);
+  if (certCommand) {
+    logToFile('🏆 /certificates command detected', { userId: user?.id, phoneNumber: from, code: certCommand.code });
     if (!user) {
       typingController.stop();
       await WhatsAppService.sendMessage(
@@ -697,6 +801,24 @@ async function handleTextMessage(message, from, messageBody, user = null) {
       );
       return;
     }
+    // A named certificate: fetch-or-mint it and send the file itself.
+    if (certCommand.code) {
+      const result = await deliverCertificateByCode(supabase, {
+        userId: user.id,
+        phoneNumber: from,
+        certificateCode: certCommand.code,
+      });
+      typingController.stop();
+      if (result.ok) return;
+      await WhatsAppService.sendMessage(
+        from,
+        result.reason === 'not_found'
+          ? `I could not find a certificate with the code \`${certCommand.code}\` in your records.\n\nSend /certificates to see the ones you have earned.`
+          : "I could not prepare that certificate just now. Please try again in a moment — it is safe in your records either way."
+      );
+      return;
+    }
+
     const { data: certs } = await supabase
       .from('training_certificates')
       .select('certificate_code, teacher_name_snapshot, level_name_snapshot, issued_at, level_id, training_levels(order_index)')
@@ -722,7 +844,8 @@ async function handleTextMessage(message, from, messageBody, user = null) {
     const body =
       `🏆 *NIETE Certifications — ${teacherName}*\n\n` +
       lines.join('\n\n') +
-      `\n\n_Type /training to continue with your next level._`;
+      `\n\n_Send_ \`/certificate <code>\` _to get the PDF._` +
+      `\n_Type /training to continue with your next level._`;
     await WhatsAppService.sendMessage(from, body);
     logToFile('🏆 Sent certificates list', { userId: user.id, count: certs.length });
     return;
@@ -861,11 +984,21 @@ async function handleTextMessage(message, from, messageBody, user = null) {
 
   // ============================================================
   // VIDEO GENERATION COMMAND: Check for /video command
+  // bd-2482/bd-2486 (ported from PK): a bare "video" (no slash) also opens
+  // the library — teachers type the plain word more often than the slash
+  // form. Exact-match only (not startsWith/substring) so a real sentence
+  // like "make me a video on photosynthesis" still falls through to AI
+  // video generation below. isVideoCommand() is shared with PK's identical
+  // fix, extracted into a named/testable matcher (mirrors isSelectVideoButton).
   // ============================================================
-  if (trimmedMessage === '/video' || trimmedMessage.startsWith('/video ')) {
+  if (isVideoCommand(trimmedMessage)) {
     logToFile('🎬 /video command detected', { userId: user?.id, phoneNumber: from });
 
     if (!user) {
+      // bd-2475 (ported from PK) — a binge-declining child was told
+      // "/video always works". Honour that before falling to the
+      // teacher-only noAccount message.
+      if (await tryChildVideoMenu(from, user?.preferred_language)) return;
       await WhatsAppService.sendMessage(
         from,
         'Sorry, I could not find your account. Please send me a message first to register.\n\nمعذرت، میں آپ کا اکاؤنٹ نہیں مل سکا۔'
@@ -1238,6 +1371,36 @@ async function handleTextMessage(message, from, messageBody, user = null) {
         .single();
 
       if (activeCoaching) {
+        // bd-2508 — a slash command ENDS the conversation and falls through.
+        //
+        // conducting_conversation was the only waiting state with no way out.
+        // The bot's own escape-path map tells teachers to "type /menu" to leave
+        // AWAITING_MENU_CHOICE / VIDEO_TOPIC / LESSON_PLAN / CLASSROOM_AUDIO —
+        // but CONDUCTING_CONVERSATION was never added to it, and this block
+        // swallowed the very command that map recommends. One teacher was held
+        // for 269 hours.
+        //
+        // Exempting the command is NOT enough on its own: the session would
+        // stay open and recapture the next free-text message, so the teacher
+        // escapes and is immediately caught again. The session has to end.
+        //
+        // Answers already given are preserved — they live in
+        // conversation_state.questions and are written as each one arrives, so
+        // ending the session discards nothing the teacher said.
+        if (trimmedMessage.startsWith('/')) {
+          logToFile('🎓 Slash command during coaching — ending the session and continuing', {
+            coachingSessionId: activeCoaching.id,
+            command: trimmedMessage.split(/\s+/)[0],
+          });
+          await supabase
+            .from('coaching_sessions')
+            .update({ status: 'abandoned', updated_at: new Date().toISOString() })
+            .eq('id', activeCoaching.id);
+          // Deliberately no extra chat message: the command's own reply lands
+          // immediately after this and a preamble in front of it is noise.
+          // Fall through — do NOT return — so the command runs normally.
+        } else {
+
         // Check if session is stuck (no update in last hour)
         const lastUpdate = new Date(activeCoaching.updated_at);
         const now = new Date();
@@ -1281,6 +1444,7 @@ async function handleTextMessage(message, from, messageBody, user = null) {
         );
 
         return; // Exit early - coaching flow handled
+        }
       }
     } catch (error) {
       // If no active coaching or error, continue with normal flow
@@ -1735,6 +1899,78 @@ async function handleTextMessage(message, from, messageBody, user = null) {
   }
 
   // ============================================================
+  // PENDING ACTOR CHOICE (principal who also runs a class picked
+  // teachers vs students). Intercepted before either session router.
+  // ============================================================
+  if (user?.id) {
+    try {
+      const pendingChoice = await redisService.get(`attendance:actor-choice:${user.id}`);
+      if (pendingChoice) {
+        typingController.stop();
+        const choice = String(messageBody || '').trim().toLowerCase();
+        const wantsTeachers = choice === '1' || choice.includes('teacher') || choice.includes('اساتذہ') || choice.includes('استاد');
+        const wantsStudents = choice === '2' || choice.includes('student') || choice.includes('طالب') || choice.includes('بچ');
+        if (wantsTeachers) {
+          await redisService.delete(`attendance:actor-choice:${user.id}`);
+          const repo = getAttendanceRepository(supabase);
+          const result = await TeacherAttendanceConversationService.startSession(user.id, { user, repository: repo });
+          await WhatsAppService.sendMessage(from, result.message);
+          return;
+        }
+        if (wantsStudents) {
+          await redisService.delete(`attendance:actor-choice:${user.id}`);
+          const result = await AttendanceConversationService.startAttendanceSession(user.id);
+          if (result.action === 'SEND_SETUP_FLOW' && ATTENDANCE_SETUP_FLOW_ID) {
+            await WhatsAppService.sendFlow(from, { flowId: ATTENDANCE_SETUP_FLOW_ID, header: '📋 Class Setup', body: result.message, buttonText: 'Set Up Class', screen: 'CLASS_INFO', flowToken: user.id });
+          } else {
+            await WhatsAppService.sendMessage(from, result.message);
+          }
+          return;
+        }
+        // Unrecognised — re-ask, keep the pending flag alive.
+        await WhatsAppService.sendMessage(from, 'Please reply 1 for Teachers or 2 for Students.');
+        return;
+      }
+    } catch (error) {
+      logToFile('Error handling attendance actor choice', { error: error.message, userId: user?.id });
+    }
+  }
+
+  // ============================================================
+  // PRINCIPAL TEACHER-ATTENDANCE SESSION (takes precedence)
+  // A principal marking their own school's teachers. Uses a separate Redis
+  // namespace from the student flow, so the two can never collide.
+  // ============================================================
+  if (user?.id) {
+    try {
+      if (await TeacherAttendanceConversationService.isInSession(user.id)) {
+        typingController.stop();
+        const repo = getAttendanceRepository(supabase);
+        const teacherSession = await TeacherAttendanceConversationService.getSessionState(user.id);
+        let result;
+        switch (teacherSession?.state) {
+          case TeacherAttendanceConversationService.STATES.AWAITING_MARKING:
+            result = await TeacherAttendanceConversationService.handleMarkingInput(user.id, messageBody, { repository: repo });
+            break;
+          case TeacherAttendanceConversationService.STATES.AWAITING_LEAVE_TYPE:
+            result = await TeacherAttendanceConversationService.handleLeaveTypeInput(user.id, messageBody);
+            break;
+          case TeacherAttendanceConversationService.STATES.AWAITING_VERIFICATION:
+            result = await TeacherAttendanceConversationService.handleVerification(user.id, messageBody, { repository: repo });
+            break;
+          default:
+            await TeacherAttendanceConversationService.clearSessionState(user.id);
+            result = { message: 'Say "attendance" to start again.' };
+        }
+        if (result?.message) await WhatsAppService.sendMessage(from, result.message);
+        return;
+      }
+    } catch (error) {
+      logToFile('Error routing teacher-attendance session', { error: error.message, userId: user?.id });
+    }
+  }
+
+  // ============================================================
   // ATTENDANCE SYSTEM INTEGRATION
   // ============================================================
   // Check if user is in an active attendance session
@@ -1968,6 +2204,39 @@ async function handleTextMessage(message, from, messageBody, user = null) {
   if (user?.id && attendanceDetection.detected) {
     logToFile('📋 Attendance keyword detected, starting session', { userId: user.id, message: messageBody, confidence: attendanceDetection.confidence });
     typingController.stop();
+
+    // role-route the keyword. Principal → mark TEACHERS; teacher → mark
+    // STUDENTS; a principal who ALSO runs a class is asked which they mean. A
+    // principal is NEVER silently routed into the student flow.
+    if (AttendanceRouterService.isPrincipal(user)) {
+      let hasStudentClasses = false;
+      try {
+        const StudentListService = require('../services/student-list.service');
+        const { data: classList } = await StudentListService.getStudentListsByUser(user.id);
+        hasStudentClasses = Array.isArray(classList) && classList.length > 0;
+      } catch (e) {
+        hasStudentClasses = false;
+      }
+      const decision = AttendanceRouterService.resolveAttendanceActor(user, { hasStudentClasses });
+
+      if (decision.actor === AttendanceRouterService.ACTOR.ASK) {
+        await redisService.set(`attendance:actor-choice:${user.id}`, { pending: true }, 300);
+        await WhatsAppService.sendMessage(from,
+          'Are you marking *teachers* or *students*?\n\n1. Teachers (your school\'s staff)\n2. Students (your class)\n\nReply 1 or 2.');
+        return;
+      }
+
+      // PRINCIPAL_MARKS_TEACHERS
+      try {
+        const repo = getAttendanceRepository(supabase);
+        const result = await TeacherAttendanceConversationService.startSession(user.id, { user, repository: repo });
+        await WhatsAppService.sendMessage(from, result.message);
+      } catch (error) {
+        logToFile('Error starting teacher-attendance session', { error: error.message, userId: user.id });
+        await WhatsAppService.sendMessage(from, 'Sorry, something went wrong. Please try again.');
+      }
+      return;
+    }
 
     try {
       const result = await AttendanceConversationService.startAttendanceSession(user.id);
@@ -2761,4 +3030,7 @@ module.exports = {
   evaluateHomeworkTrigger, // exported for trigger unit tests
   tryCurriculumLessonPlanServe, // exported for intercept unit tests
   handleLessonPlanRequest, // exported for the Oxbridge-picker "Generate NIETE LP" tap
+  isSelectVideoButton, // bd-2482 — video-library broadcast "Select Video" button
+  isVideoCommand, // bd-2486 — exported for unit tests
+  tryChildVideoMenu, // bd-2475 — exported for unit tests
 };
