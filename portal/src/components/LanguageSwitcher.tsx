@@ -8,11 +8,13 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Globe } from 'lucide-react';
 
+// The deployment's offer, Urdu first — mirroring bot/shared/config/languages.js.
+// This array was its own fourth language list, disagreeing with the bot, the i18n
+// config and the reading-assessment filter. Spanish and Arabic had no content
+// behind them on any surface.
 const languages = [
-  { code: 'en', name: 'English', nativeName: 'English' },
-  { code: 'es', name: 'Spanish', nativeName: 'Español' },
   { code: 'ur', name: 'Urdu', nativeName: 'اردو' },
-  { code: 'ar', name: 'Arabic', nativeName: 'العربية' },
+  { code: 'en', name: 'English', nativeName: 'English' },
 ];
 
 const LanguageSwitcher = () => {
