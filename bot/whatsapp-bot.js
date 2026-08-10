@@ -169,6 +169,58 @@ async function handleBroadcastStatusWebhook(statuses) {
  * gate in text-message.handler.js. On any sendFlow error, falls back to the
  * keyword path (handleTextMessage 'video') so the tap never dead-ends.
  */
+/**
+ * Attendance taps — the class picker and the teachers/students choice.
+ *
+ * Registered for BOTH button_reply and list_reply: a 4+ class picker is sent as a
+ * list, and a list selection arrives in a different branch than a button. Emitting
+ * an id with a consumer in only one branch is how a tap silently does nothing.
+ */
+async function handleAttendanceTap(interactiveId, from, user) {
+  const AttendanceRouter = require('./shared/services/attendance-router.service');
+  const constants = require('./shared/utils/constants');
+
+  let decision;
+  if (interactiveId.startsWith('att_subject_')) {
+    decision = await AttendanceRouter.resolveSubjectChoice(user.id, interactiveId);
+  } else if (interactiveId.startsWith('att_class_')) {
+    decision = AttendanceRouter.resolveClassChoice(user.id, interactiveId);
+  } else {
+    return false;
+  }
+
+  if (decision.action === 'MARK_TEACHERS' || decision.action === 'MARK_STUDENTS') {
+    if (!constants.ATTENDANCE_MARKING_FLOW_ID) {
+      await WhatsAppService.sendMessage(from, 'Attendance is not available on this number yet.');
+      return true;
+    }
+    await WhatsAppService.sendFlow(from, {
+      flowId: constants.ATTENDANCE_MARKING_FLOW_ID,
+      header: '📋 Attendance',
+      body: decision.action === 'MARK_TEACHERS'
+        ? "Mark your school's teachers for today."
+        : 'Mark your class for today.',
+      buttonText: 'Mark attendance',
+      flowToken: decision.flowToken,
+    });
+    return true;
+  }
+
+  if (decision.action === 'SEND_SETUP' && constants.ATTENDANCE_SETUP_FLOW_ID) {
+    await WhatsAppService.sendFlow(from, {
+      flowId: constants.ATTENDANCE_SETUP_FLOW_ID,
+      header: '📋 Set up a class',
+      body: decision.message,
+      buttonText: 'Set up class',
+      flowToken: user.id,
+    });
+    return true;
+  }
+
+  await WhatsAppService.sendMessage(from, decision.message || 'Sorry, something went wrong.');
+  return true;
+}
+
 async function openStudentVideosFlowFromCta(message, from, user) {
   const { STUDENT_VIDEOS_FLOW_ID } = require('./shared/utils/constants');
   logToFile('🎬 Student Videos: Select Video CTA tapped', { from, userId: user?.id });
@@ -553,7 +605,10 @@ app.post('/webhook', async (req, res) => {
       if (buttonId.startsWith('coaching_confirm_')) {
         const sessionId = buttonId.replace('coaching_confirm_', '');
         await CoachingService.handleConfirmation(sessionId, from, true);
-      } else if (buttonId.startsWith('coaching_cancel_')) {
+      } else if (buttonId.startsWith('att_subject_') || buttonId.startsWith('att_class_')) {
+        if (user?.id) { await handleAttendanceTap(buttonId, from, user); }
+        else { await WhatsAppService.sendMessage(from, 'Please say "register" first.'); }
+} else if (buttonId.startsWith('coaching_cancel_')) {
         const sessionId = buttonId.replace('coaching_cancel_', '');
         await CoachingService.handleConfirmation(sessionId, from, false);
       }
@@ -1459,6 +1514,10 @@ app.post('/webhook', async (req, res) => {
       // list_reply whenever the question has 4 options or a title too long
       // for a 20-char button. Same `vq_` ids as the button path — routed
       // here too, or a four-option question would accept no answer at all.
+      if (listId.startsWith('att_class_') || listId.startsWith('att_subject_')) {
+        if (user?.id && await handleAttendanceTap(listId, from, user)) return;
+      }
+
       if (listId.startsWith('vq_')) {
         const VideoQuizService = require('./shared/services/quiz/video-quiz.service');
         if (await VideoQuizService.handleAnswer(from, listId)) return;
