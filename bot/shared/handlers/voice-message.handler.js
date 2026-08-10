@@ -188,7 +188,19 @@ async function handleVoiceMessage(message, from, user = null) {
           return; // Exit early - handled by attendance system
         }
       } catch (error) {
-        logToFile('⚠️ Error checking attendance voice state', { error: error.message, stack: error.stack, userId: user?.id });
+        logToFile('⚠️ Error processing attendance voice note', { error: error.message, stack: error.stack, userId: user?.id });
+        // [attendance fix] Do NOT stay silent. If we were in the
+        // attendance voice step, the teacher just sent a roll call and got
+        // nothing back; tell her, and offer the way out.
+        try {
+          const st = await AttendanceConversationService.getSessionState(user?.id);
+          if (st?.state === AttendanceConversationService.STATES.AWAITING_VOICE_INPUT) {
+            typingController.stop();
+            await WhatsAppService.sendMessage(from,
+              "Sorry — I couldn't process that voice note. Please try again in a quieter spot, or reply *2* to switch to Tap to Mark.");
+            return;
+          }
+        } catch (_) { /* fall through to normal flow */ }
         // Continue with normal flow if attendance check fails
       }
     }

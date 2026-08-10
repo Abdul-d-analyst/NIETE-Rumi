@@ -344,7 +344,7 @@ class AttendanceDeliveryService {
       const totalStudents = records.length;
       const presentCount = records.filter(r => r.status === 'present').length;
       const absentCount = records.filter(r => r.status === 'absent').length;
-      const leaveCount = records.filter(r => r.status === 'leave').length;   // [BUG-141 / bd-2529]
+      const leaveCount = records.filter(r => r.status === 'leave').length;   // [attendance fix]
 
       // Create attendance session
       // Use metadata.date for session_date
@@ -381,7 +381,7 @@ class AttendanceDeliveryService {
         };
       }
 
-      // [BUG-141 / bd-2529] Explicit overwrite: replace the existing day's session
+      // [attendance fix] Explicit overwrite: replace the existing day's session
       // + records. Only reachable when the teacher opts in after being told the day
       // is already marked — the duplicate guard above is otherwise untouched.
       if (existingSession && sessionData.overwrite) {
@@ -427,7 +427,7 @@ class AttendanceDeliveryService {
           total_students: totalStudents,
           present_count: presentCount,
           absent_count: absentCount,
-          leave_count: leaveCount             // [BUG-141 / bd-2529] requires add_attendance_leave_status.sql
+          leave_count: leaveCount             // [attendance fix] requires add_attendance_leave_status.sql
         })
         .select('id')
         .single();

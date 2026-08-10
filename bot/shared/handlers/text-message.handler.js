@@ -1885,16 +1885,21 @@ async function handleTextMessage(message, from, messageBody, user = null) {
         flowToken
       });
     } else {
-      // Multiple classes → interactive buttons (max 3); each tap routes via
-      // the edit_class_<id> handler in whatsapp-bot.js.
-      const buttons = classes.slice(0, 3).map(cls => ({
+      // Multiple classes → interactive LIST (up to 10 rows), not buttons.
+      // WhatsApp caps buttons at 3, so a teacher with 4 or more classes could
+      // never reach the 4th — it was silently dropped. Each row keeps the same
+      // edit_class_<id> id; the list_reply branch in whatsapp-bot.js routes it.
+      const rows = classes.slice(0, 10).map(cls => ({
         id: `edit_class_${cls.id}`,
-        title: cls.section ? `${cls.class_name}-${cls.section}` : cls.class_name
+        title: (cls.section ? `${cls.class_name} - ${cls.section}` : cls.class_name).substring(0, 24)
       }));
-      await WhatsAppService.sendInteractiveButtons(from, {
-        body: 'Which class would you like to edit?',
-        buttons
+      await WhatsAppService.sendInteractiveMessage(from, {
+        body: { text: 'Which class would you like to edit?' },
+        action: { button: 'Choose class', sections: [{ title: 'Your classes', rows }] }
       });
+      if (classes.length > 10) {
+        await WhatsAppService.sendMessage(from, 'Showing your first 10 classes. Reply with a class name to edit another.');
+      }
     }
     return;
   }
@@ -2012,14 +2017,17 @@ async function handleTextMessage(message, from, messageBody, user = null) {
             break;
 
           case AttendanceConversationService.STATES.AWAITING_VOICE_INPUT:
-            // User sent text when expecting voice - prompt them
-            result = {
-              action: 'PROMPT_VOICE',
-              message: 'Please send a *voice message* with your roll call.\n\nOr reply "2" to switch to Tap to Mark.'
-            };
-            // Allow switching to tap method
+            // [attendance fix] Use the dedicated switch. The old call
+            // went to handleMarkingMethodSelection, whose guard requires
+            // AWAITING_MARKING_METHOD — from here it returned INVALID_STATE and
+            // re-prompted "reply 2" forever.
             if (messageBody === '2' || messageBody.toLowerCase().includes('tap')) {
-              result = await AttendanceConversationService.handleMarkingMethodSelection(user.id, '2');
+              result = await AttendanceConversationService.switchToTapFromVoice(user.id);
+            } else {
+              result = {
+                action: 'PROMPT_VOICE',
+                message: 'Please send a *voice message* with your roll call.\n\nOr reply "2" to switch to Tap to Mark.'
+              };
             }
             break;
 
@@ -2036,6 +2044,11 @@ async function handleTextMessage(message, from, messageBody, user = null) {
           case AttendanceConversationService.STATES.AWAITING_SESSION_TYPE:
             // User selecting AM/PM session type
             result = await AttendanceConversationService.handleSessionTypeSelection(user.id, messageBody);
+            break;
+
+          case AttendanceConversationService.STATES.AWAITING_OVERWRITE_CONFIRM:
+            // Teacher chose to overwrite (or keep) an already-marked day
+            result = await AttendanceConversationService.handleOverwriteConfirm(user.id, messageBody);
             break;
 
           case AttendanceConversationService.STATES.IDLE:

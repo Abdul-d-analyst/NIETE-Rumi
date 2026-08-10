@@ -27,7 +27,7 @@ const STATES = {
   AWAITING_MARKING_METHOD: 'AWAITING_MARKING_METHOD',
   AWAITING_VOICE_INPUT: 'AWAITING_VOICE_INPUT',
   AWAITING_VERIFICATION: 'AWAITING_VERIFICATION',
-  AWAITING_OVERWRITE_CONFIRM: 'AWAITING_OVERWRITE_CONFIRM',  // BUG-141 #9 (opt-in overwrite)
+  AWAITING_OVERWRITE_CONFIRM: 'AWAITING_OVERWRITE_CONFIRM',  // opt-in overwrite of an already-marked day
   PROCESSING: 'PROCESSING',
   COMPLETED: 'COMPLETED'
 };
@@ -330,7 +330,7 @@ class AttendanceConversationService {
       '',
       'Reply 1 or 2',
       '',
-      // [BUG-141 / bd-2529 — #2/#3] Advertise the already-built hidden keywords.
+      // [attendance fix] Advertise the already-built hidden keywords.
       '_Tip: reply "add class" to set up another class, or "edit class" to change students._'
     ].join('\n');
   }
@@ -394,7 +394,7 @@ class AttendanceConversationService {
 
       // Base session data. NOTE: selectedDate is now chosen by the teacher in the
       // AWAITING_DATE_SELECTION step below — the date step existed but was never
-      // entered, so backdating was unreachable (BUG-141 #5/#8).
+      // entered, so backdating was unreachable .
       const baseSessionData = {
         userId,
         startedAt: new Date().toISOString(),
@@ -403,7 +403,7 @@ class AttendanceConversationService {
         classList
       };
 
-      // [BUG-141 / bd-2529] Always ask which day first, unless caller pre-set a date.
+      // [attendance fix] Always ask which day first, unless caller pre-set a date.
       if (!options.selectedDate) {
         await this.saveSessionState(userId, {
           ...baseSessionData,
@@ -513,7 +513,7 @@ class AttendanceConversationService {
       selectedDate.setDate(selectedDate.getDate() - (selection - 1));
       const iso = selectedDate.toISOString().split('T')[0];
 
-      // [BUG-141 / bd-2529] persist under selectedDate; _proceedAfterDate threads it onward.
+      // [attendance fix] persist under selectedDate; _proceedAfterDate threads it onward.
       return this._proceedAfterDate(userId, { ...sessionState, selectedDate: iso });
 
     } catch (error) {
@@ -528,7 +528,7 @@ class AttendanceConversationService {
   /**
    * Shared router used after a date is known. Decides class-selection vs
    * session-type vs marking-method, honoring attendance_frequency.
-   * [BUG-141 / bd-2529 — Fix B/E]
+   * [attendance fix]
    */
   static async _proceedAfterDate(userId, s) {
     const classList = s.classList || [];
@@ -546,7 +546,7 @@ class AttendanceConversationService {
   /**
    * Enter session-type only for twice-daily classes; else full_day.
    * Fixes the hardcoded "Morning" label — a once-daily class was always
-   * reported as a morning session. [BUG-141 / bd-2529 — Fix E / #14]
+   * reported as a morning session. [attendance fix]
    */
   static async _selectClass(userId, s, selectedClass) {
     const base = { ...s, selectedClass, selectedListId: selectedClass.id };
@@ -655,7 +655,7 @@ class AttendanceConversationService {
       }
 
       // Update session state
-      // [BUG-141 / bd-2529 — Fix E] Route through the shared class-selection helper
+      // [attendance fix] Route through the shared class-selection helper
       // so twice-daily classes get the AM/PM prompt and once-daily get full_day.
       return this._selectClass(userId, sessionState, selectedClass);
     } catch (error) {
@@ -699,7 +699,7 @@ class AttendanceConversationService {
         return {
           action: 'AWAIT_VOICE_INPUT',
           message: [
-            // [BUG-141 / bd-2529 — #10] Clearer prompt: absentees-only shortcut,
+            // [attendance fix] Clearer prompt: absentees-only shortcut,
             // bilingual example, and a visible way back to Tap to Mark.
             '*Voice Roll Call* 🎙️',
             '',
@@ -755,7 +755,7 @@ class AttendanceConversationService {
   /**
    * Switch from Voice Roll Call to Tap to Mark.
    *
-   * [BUG-141 / bd-2529 — Fix A / #12] The old code called
+   * [attendance fix] The old code called
    * handleMarkingMethodSelection('2'), whose guard requires
    * AWAITING_MARKING_METHOD — so from AWAITING_VOICE_INPUT it always returned
    * INVALID_STATE and re-prompted "reply 2", which is the infinite loop a
@@ -1055,7 +1055,7 @@ class AttendanceConversationService {
 
   /**
    * Park the just-marked records so an "overwrite" reply can replay them.
-   * [BUG-141 / bd-2529 — #9]
+   * [attendance fix]
    */
   static async storePendingOverwrite(userId, pending) {
     const s = (await this.getSessionState(userId)) || {};
@@ -1066,7 +1066,7 @@ class AttendanceConversationService {
   /**
    * Handle the overwrite/cancel reply for an already-marked day.
    * Previously this was a dead end: the teacher was told the day was already
-   * marked and had no way to replace it. [BUG-141 / bd-2529 — #9]
+   * marked and had no way to replace it. [attendance fix]
    */
   static async handleOverwriteConfirm(userId, input) {
     const s = await this.getSessionState(userId);

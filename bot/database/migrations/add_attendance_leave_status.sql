@@ -1,6 +1,6 @@
 -- Migration: Attendance — surface "leave" status + leave_count
 -- Depends on: 014_attendance_tables.sql
--- Bead: bd-2529 (BUG-141 port from main bot bd-2340)  Date: 2026-08-10
+-- Date: 2026-08-10
 --
 -- Why: attendance_records.status ALREADY allows 'late'/'excused' (see 014, line 110),
 -- but there is no 'leave' value, and attendance_sessions only stores
