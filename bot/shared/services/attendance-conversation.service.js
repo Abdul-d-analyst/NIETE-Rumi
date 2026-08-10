@@ -27,6 +27,7 @@ const STATES = {
   AWAITING_MARKING_METHOD: 'AWAITING_MARKING_METHOD',
   AWAITING_VOICE_INPUT: 'AWAITING_VOICE_INPUT',
   AWAITING_VERIFICATION: 'AWAITING_VERIFICATION',
+  AWAITING_OVERWRITE_CONFIRM: 'AWAITING_OVERWRITE_CONFIRM',  // opt-in overwrite of an already-marked day
   PROCESSING: 'PROCESSING',
   COMPLETED: 'COMPLETED'
 };
@@ -327,7 +328,10 @@ class AttendanceConversationService {
       '1. Voice Roll Call - Read out names',
       '2. Tap to Mark - Select absent students',
       '',
-      'Reply 1 or 2'
+      'Reply 1 or 2',
+      '',
+      // [attendance fix] Advertise the already-built hidden keywords.
+      '_Tip: reply "add class" to set up another class, or "edit class" to change students._'
     ].join('\n');
   }
 
@@ -388,43 +392,29 @@ class AttendanceConversationService {
         };
       }
 
-      // Base session data
+      // Base session data. NOTE: selectedDate is now chosen by the teacher in the
+      // AWAITING_DATE_SELECTION step below — the date step existed but was never
+      // entered, so backdating was unreachable .
       const baseSessionData = {
         userId,
         startedAt: new Date().toISOString(),
         selectedDate: options.selectedDate || new Date().toISOString().split('T')[0],
-        sessionType: options.sessionType || 'full_day'
+        sessionType: options.sessionType || 'full_day',
+        classList
       };
 
-      // One class - proceed directly to marking method
-      if (classList.length === 1) {
-        const selectedClass = classList[0];
+      // [attendance fix] Always ask which day first, unless caller pre-set a date.
+      if (!options.selectedDate) {
         await this.saveSessionState(userId, {
           ...baseSessionData,
-          state: STATES.AWAITING_MARKING_METHOD,
-          selectedListId: selectedClass.id,
-          selectedClass
+          state: STATES.AWAITING_DATE_SELECTION
         });
-
-        return {
-          action: 'ASK_MARKING_METHOD',
-          selectedClass,
-          message: this.generateMarkingMethodMessage(selectedClass)
-        };
+        const { message } = this.generateDateSelectionMessage();
+        return { action: 'ASK_DATE_SELECTION', message };
       }
 
-      // Multiple classes - ask for selection
-      await this.saveSessionState(userId, {
-        ...baseSessionData,
-        state: STATES.AWAITING_CLASS_SELECTION,
-        classList
-      });
-
-      return {
-        action: 'ASK_CLASS_SELECTION',
-        classes: classList,
-        message: this.generateClassSelectionMessage(classList)
-      };
+      // Caller supplied a date → keep the original fast paths.
+      return this._proceedAfterDate(userId, baseSessionData);
     } catch (error) {
       logToFile('Error starting attendance session', { userId, error: error.message });
       return {
@@ -521,37 +511,10 @@ class AttendanceConversationService {
       const today = new Date();
       const selectedDate = new Date(today);
       selectedDate.setDate(selectedDate.getDate() - (selection - 1));
+      const iso = selectedDate.toISOString().split('T')[0];
 
-      // Update session with selected date and move to next state
-      await this.saveSessionState(userId, {
-        ...sessionState,
-        state: STATES.AWAITING_CLASS_SELECTION,
-        selectedDate: selectedDate.toISOString().split('T')[0]
-      });
-
-      // If user has only one class, skip to marking method
-      if (sessionState.classList && sessionState.classList.length === 1) {
-        const selectedClass = sessionState.classList[0];
-        await this.saveSessionState(userId, {
-          ...sessionState,
-          state: STATES.AWAITING_MARKING_METHOD,
-          selectedDate: selectedDate.toISOString().split('T')[0],
-          selectedListId: selectedClass.id,
-          selectedClass
-        });
-
-        return {
-          action: 'ASK_MARKING_METHOD',
-          selectedClass,
-          message: this.generateMarkingMethodMessage(selectedClass)
-        };
-      }
-
-      return {
-        action: 'ASK_CLASS_SELECTION',
-        classes: sessionState.classList,
-        message: this.generateClassSelectionMessage(sessionState.classList)
-      };
+      // [attendance fix] persist under selectedDate; _proceedAfterDate threads it onward.
+      return this._proceedAfterDate(userId, { ...sessionState, selectedDate: iso });
 
     } catch (error) {
       logToFile('Error handling date selection', { userId, error: error.message });
@@ -560,6 +523,43 @@ class AttendanceConversationService {
         message: 'Sorry, something went wrong. Please try again.'
       };
     }
+  }
+
+  /**
+   * Shared router used after a date is known. Decides class-selection vs
+   * session-type vs marking-method, honoring attendance_frequency.
+   * [attendance fix]
+   */
+  static async _proceedAfterDate(userId, s) {
+    const classList = s.classList || [];
+    if (classList.length > 1) {
+      await this.saveSessionState(userId, { ...s, state: STATES.AWAITING_CLASS_SELECTION });
+      return {
+        action: 'ASK_CLASS_SELECTION',
+        classes: classList,
+        message: this.generateClassSelectionMessage(classList)
+      };
+    }
+    return this._selectClass(userId, s, classList[0]);
+  }
+
+  /**
+   * Enter session-type only for twice-daily classes; else full_day.
+   * Fixes the hardcoded "Morning" label — a once-daily class was always
+   * reported as a morning session. [attendance fix]
+   */
+  static async _selectClass(userId, s, selectedClass) {
+    const base = { ...s, selectedClass, selectedListId: selectedClass.id };
+    if ((selectedClass.attendance_frequency || 'once') === 'twice') {
+      await this.saveSessionState(userId, { ...base, state: STATES.AWAITING_SESSION_TYPE });
+      return { action: 'ASK_SESSION_TYPE', message: this.generateSessionTypeMessage() };
+    }
+    await this.saveSessionState(userId, { ...base, state: STATES.AWAITING_MARKING_METHOD, sessionType: 'full_day' });
+    return {
+      action: 'ASK_MARKING_METHOD',
+      selectedClass,
+      message: this.generateMarkingMethodMessage(selectedClass)
+    };
   }
 
   /**
@@ -655,18 +655,9 @@ class AttendanceConversationService {
       }
 
       // Update session state
-      await this.saveSessionState(userId, {
-        ...sessionState,
-        state: STATES.AWAITING_MARKING_METHOD,
-        selectedListId: selectedClass.id,
-        selectedClass
-      });
-
-      return {
-        action: 'ASK_MARKING_METHOD',
-        selectedClass,
-        message: this.generateMarkingMethodMessage(selectedClass)
-      };
+      // [attendance fix] Route through the shared class-selection helper
+      // so twice-daily classes get the AM/PM prompt and once-daily get full_day.
+      return this._selectClass(userId, sessionState, selectedClass);
     } catch (error) {
       logToFile('Error handling class selection', { userId, error: error.message });
       return {
@@ -708,14 +699,16 @@ class AttendanceConversationService {
         return {
           action: 'AWAIT_VOICE_INPUT',
           message: [
-            '*Voice Roll Call*',
+            // [attendance fix] Clearer prompt: absentees-only shortcut,
+            // bilingual example, and a visible way back to Tap to Mark.
+            '*Voice Roll Call* 🎙️',
             '',
-            'Please send a voice message reading your attendance.',
+            'Send ONE voice note. Easiest: name only the students who are *absent* or on *leave* — everyone else is marked present automatically.',
             '',
-            'Example:',
-            '"Zara hazir, Ahmed hazir, Fatima ghair hazir..."',
+            'Urdu, English, or a mix is fine. For example:',
+            '"Ahmed absent, Fatima chhutti par" — or — "صرف علی غیر حاضر ہے"',
             '',
-            'I\'ll recognize names and their status.'
+            'Or reply *2* to switch to Tap to Mark.'
           ].join('\n')
         };
       }
@@ -757,6 +750,33 @@ class AttendanceConversationService {
         message: 'Sorry, something went wrong. Please try again.'
       };
     }
+  }
+
+  /**
+   * Switch from Voice Roll Call to Tap to Mark.
+   *
+   * [attendance fix] The old code called
+   * handleMarkingMethodSelection('2'), whose guard requires
+   * AWAITING_MARKING_METHOD — so from AWAITING_VOICE_INPUT it always returned
+   * INVALID_STATE and re-prompted "reply 2", which is the infinite loop a
+   * teacher hit when she tried to escape the voice step.
+   */
+  static async switchToTapFromVoice(userId) {
+    const sessionState = await this.getSessionState(userId);
+    if (!sessionState || sessionState.state !== STATES.AWAITING_VOICE_INPUT) {
+      return { action: 'INVALID_STATE', message: 'Nothing to switch right now. Say "attendance" to start.' };
+    }
+    const { data: students, error } = await StudentListService.getStudentsByList(sessionState.selectedListId);
+    if (error || !students) {
+      return { action: 'ERROR', message: 'Sorry, could not load students. Please try again.' };
+    }
+    await this.saveSessionState(userId, {
+      ...sessionState,
+      state: STATES.AWAITING_VERIFICATION,
+      students,
+      markingMethod: 'tap'
+    });
+    return { action: 'SEND_MARKING_FLOW', students, selectedClass: sessionState.selectedClass, message: 'Please mark attendance.' };
   }
 
   /**
@@ -1031,6 +1051,44 @@ class AttendanceConversationService {
       action: 'SESSION_CANCELLED',
       message: 'Attendance session cancelled. Say "attendance" to start again.'
     };
+  }
+
+  /**
+   * Park the just-marked records so an "overwrite" reply can replay them.
+   * [attendance fix]
+   */
+  static async storePendingOverwrite(userId, pending) {
+    const s = (await this.getSessionState(userId)) || {};
+    await this.saveSessionState(userId, { ...s, ...(pending || {}), state: STATES.AWAITING_OVERWRITE_CONFIRM });
+    return true;
+  }
+
+  /**
+   * Handle the overwrite/cancel reply for an already-marked day.
+   * Previously this was a dead end: the teacher was told the day was already
+   * marked and had no way to replace it. [attendance fix]
+   */
+  static async handleOverwriteConfirm(userId, input) {
+    const s = await this.getSessionState(userId);
+    if (!s || s.state !== STATES.AWAITING_OVERWRITE_CONFIRM) {
+      return { action: 'INVALID_STATE', message: 'Nothing to overwrite. Say "attendance" to start.' };
+    }
+    const t = String(input).trim().toLowerCase();
+    if (['overwrite', 'replace', 'yes', 'haan', 'ہاں'].some(k => t.includes(k))) {
+      await this.saveSessionState(userId, { ...s, state: STATES.PROCESSING, processingStartedAt: new Date().toISOString() });
+      return {
+        action: 'GENERATE_ATTENDANCE',
+        overwrite: true,
+        records: s.records,
+        selectedClass: s.selectedClass,
+        message: 'Replacing the existing attendance and regenerating your register…'
+      };
+    }
+    if (['cancel', 'no', 'keep', 'نہیں'].some(k => t.includes(k))) {
+      await this.clearSessionState(userId);
+      return { action: 'SESSION_CANCELLED', message: 'Kept the existing attendance. Say "attendance" to start again.' };
+    }
+    return { action: 'INVALID_SELECTION', message: 'Reply "overwrite" to replace, or "cancel" to keep the existing record.' };
   }
 
   /**
