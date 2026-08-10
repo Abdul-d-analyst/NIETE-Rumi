@@ -17,6 +17,7 @@ const FLOW_ENV_VARS = [
   'SETTINGS_FLOW_ID',
   'STATUS_FLOW_ID',
   'FLOW_PRIVATE_KEY',
+  'FLOW_PRIVATE_KEY_B64',
   'INTERNAL_API_KEY',
 ];
 
@@ -182,6 +183,36 @@ describe('validateBootRequirements', () => {
   // -----------------------------------------------------------------------
   // Console output
   // -----------------------------------------------------------------------
+  // FLOW_PRIVATE_KEY_B64 is what the deployments actually set; the encryption
+  // service accepts either form. Before this, the validator only looked at the
+  // raw-PEM var and logged a decryption error on every boot while Flows worked.
+  describe('FLOW_PRIVATE_KEY_B64 satisfies the encryption requirement', () => {
+    it('does not error when only the base64 form is set', () => {
+      process.env.SETTINGS_FLOW_ID = 'flow_settings_2';
+      process.env.FLOW_PRIVATE_KEY_B64 = Buffer.from('-----BEGIN PRIVATE KEY-----x').toString('base64');
+      delete process.env.FLOW_PRIVATE_KEY;
+
+      const { validateBootRequirements } = require('../../bot/shared/utils/setup-validator');
+      const result = validateBootRequirements();
+
+      expect(result.errors).toEqual([]);
+      expect(result.ok).toBe(true);
+    });
+
+    it('still errors when NEITHER form is set', () => {
+      process.env.SETTINGS_FLOW_ID = 'flow_settings_2';
+      delete process.env.FLOW_PRIVATE_KEY;
+      delete process.env.FLOW_PRIVATE_KEY_B64;
+
+      const { validateBootRequirements } = require('../../bot/shared/utils/setup-validator');
+      const result = validateBootRequirements();
+
+      expect(result.errors).toEqual([
+        expect.stringMatching(/FLOW_PRIVATE_KEY/),
+      ]);
+    });
+  });
+
   describe('console output', () => {
     it('logs warnings with [setup-validator] prefix', () => {
       // Leave all flow IDs unset

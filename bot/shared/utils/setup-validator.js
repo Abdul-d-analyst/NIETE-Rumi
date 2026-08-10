@@ -28,7 +28,11 @@ function validateBootRequirements() {
   // 1. Check individual flow IDs — warn if not set
   // -----------------------------------------------------------------------
   const readingFlowId = process.env.READING_ASSESSMENT_FLOW_ID;
-  const flowPrivateKey = process.env.FLOW_PRIVATE_KEY;
+  // flow-encryption.service.js accepts EITHER the raw PEM in FLOW_PRIVATE_KEY
+  // or a base64 blob in FLOW_PRIVATE_KEY_B64 (which is what the deployments
+  // actually set). Checking only the former made this error fire on every
+  // boot while Flow decryption was working fine.
+  const flowPrivateKey = process.env.FLOW_PRIVATE_KEY || process.env.FLOW_PRIVATE_KEY_B64;
 
   if (!readingFlowId) {
     const msg = `${PREFIX} READING_ASSESSMENT_FLOW_ID is not set. Reading assessment flows will not be available.`;
