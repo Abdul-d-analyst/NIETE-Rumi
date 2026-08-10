@@ -78,8 +78,20 @@ function deriveProgress(remarks, scores) {
   const out = {};
   for (const r of remarks || []) {
     const answered = byRemark.get(r.id) || new Set();
+    // Comment state is THREE-valued and nextStep() branches on it:
+    //   NULL → not asked yet        (offer the comment step)
+    //   ''   → asked and SKIPPED    (spec §10: comment is optional)
+    //   text → written              (go to review)
+    // saveComment writes '' deliberately for a skip so "skipped" is
+    // distinguishable from "not asked". Collapsing the two here made REVIEW —
+    // and therefore SUBMIT — unreachable (caught by the staging E2E, not units).
+    const hasComment = typeof r.comment_text === 'string' && r.comment_text.trim().length > 0;
+    const commentSkipped = typeof r.comment_text === 'string' && r.comment_text.trim().length === 0;
     if (r.submitted_at) {
-      out[r.teacher_id] = { state: 'done', answered: answered.size, remarkId: r.id, resumeAt: null };
+      out[r.teacher_id] = {
+        state: 'done', answered: answered.size, remarkId: r.id, resumeAt: null,
+        hasComment, commentSkipped,
+      };
     } else {
       // Resume at the first UNANSWERED ordinal — not max+1, which would skip a
       // gap if she jumped around or an earlier write failed.
@@ -89,6 +101,7 @@ function deriveProgress(remarks, scores) {
       }
       out[r.teacher_id] = {
         state: 'in_progress', answered: answered.size, remarkId: r.id, resumeAt,
+        hasComment, commentSkipped,
       };
     }
   }
@@ -103,7 +116,9 @@ function deriveProgress(remarks, scores) {
 async function getProgress(principalUserId, cycleId) {
   const { data: remarks, error } = await db()
     .from('supervisor_remarks')
-    .select('id, teacher_id, submitted_at')
+    // comment_text is REQUIRED here — deriveProgress derives the three-valued
+    // comment state from it, and nextStep cannot reach REVIEW without it.
+    .select('id, teacher_id, submitted_at, comment_text')
     .eq('principal_user_id', principalUserId)
     .eq('cycle_id', cycleId);
   if (error) throw new Error(`remark-cycle: getProgress failed — ${error.message}`);
