@@ -70,13 +70,15 @@ class AttendanceGeneratorService {
   /**
    * Get display character for attendance status
    *
-   * @param {string} status - present/absent/unknown
-   * @returns {string} P, A, or ?
+   * @param {string} status - present/absent/leave/unknown
+   * @returns {string} P, A, L, or ?
    */
   static getStatusDisplay(status) {
     const lower = (status || '').toLowerCase();
     if (lower === 'present') return 'P';
     if (lower === 'absent') return 'A';
+    // [BUG-141 / bd-2529] v1 3-state set: Present / Absent / Leave (no Late).
+    if (lower === 'leave' || lower === 'excused') return 'L';
     return '?';
   }
 
@@ -108,6 +110,8 @@ class AttendanceGeneratorService {
     const total = records.length;
     const present = records.filter(r => r.status === 'present').length;
     const absent = records.filter(r => r.status === 'absent').length;
+    // [BUG-141 / bd-2529] v1 3-state set: Present / Absent / Leave (no Late).
+    const leave = records.filter(r => (r.status || '').toLowerCase() === 'leave').length;
 
     const rate = total > 0 ? ((present / total) * 100) : 0;
     const attendanceRate = rate === 100 || rate === 0
@@ -118,6 +122,7 @@ class AttendanceGeneratorService {
       total,
       present,
       absent,
+      leave,
       attendanceRate
     };
   }
@@ -452,8 +457,9 @@ class AttendanceGeneratorService {
 
       for (const record of session.attendance_records || []) {
         if (matrix[record.student_id]) {
-          matrix[record.student_id].days[day] =
-            record.status === 'present' ? 'P' : 'A';
+          // [BUG-141 / bd-2529] keep L (leave) instead of collapsing every
+          // non-present status to A.
+          matrix[record.student_id].days[day] = this.getStatusDisplay(record.status);
         }
       }
     }
