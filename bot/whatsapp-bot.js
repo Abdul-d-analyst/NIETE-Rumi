@@ -1464,41 +1464,6 @@ app.post('/webhook', async (req, res) => {
         if (await VideoQuizService.handleAnswer(from, listId)) return;
       }
 
-      // The edit-class picker switched from buttons (capped at 3, so a teacher
-      // with 4+ classes could never reach the 4th) to an interactive list. The
-      // ids are unchanged, but a list selection arrives HERE rather than in the
-      // button_reply branch — without this route, picking a class would do
-      // nothing at all.
-      if (listId.startsWith('edit_class_')) {
-        const editListId = listId.replace('edit_class_', '');
-        logToFile('📋 Edit class list item selected', { listId: editListId, userId: user?.id, from });
-        if (!user?.id) {
-          await WhatsAppService.sendMessage(from, 'Sorry, I could not identify your account. Please try "edit class" again.');
-        } else if (!constants.EDIT_CLASS_FLOW_ID) {
-          await WhatsAppService.sendMessage(from, 'Sorry, class editing is not available right now. Please try again later.');
-        } else {
-          const { data: classRow } = await supabase
-            .from('student_lists')
-            .select('id, class_name, section')
-            .eq('id', editListId)
-            .eq('user_id', user.id)
-            .eq('is_active', true)
-            .single();
-          if (!classRow) {
-            await WhatsAppService.sendMessage(from, 'I could not find that class. Please say "edit class" to refresh your class list.');
-          } else {
-            await WhatsAppService.sendFlow(from, {
-              flowId: constants.EDIT_CLASS_FLOW_ID,
-              header: '📋 Edit Class',
-              body: `Edit roster for ${classRow.section ? `${classRow.class_name} - ${classRow.section}` : classRow.class_name}`,
-              buttonText: 'Edit Class',
-              flowToken: `${user.id}:${classRow.id}`
-            });
-          }
-        }
-        return;
-      }
-
       // Teacher-training grand quiz answers — handle before Reading Assessment routing.
       if (listId && listId.startsWith('training_quiz_')) {
         const QuizDelivery = require('./shared/services/training/quiz-delivery.service');
