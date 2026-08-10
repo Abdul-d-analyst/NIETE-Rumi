@@ -11,7 +11,6 @@ const CoachingService = require('../services/coaching-orchestrator.service');
 const MenuService = require('../services/menu.service');
 const VideoOrchestrator = require('../services/video/video-orchestrator.service');
 const LessonPlanQueueService = require('../services/lesson-plan-queue.service');
-const AttendanceConversationService = require('../services/attendance-conversation.service');
 const { logToFile } = require('../utils/logger');
 const { TEMP_DIR, LOADING_STICKER_PATH, LOADING_STICKER_MEDIA_ID } = require('../utils/constants');
 const {
@@ -131,67 +130,9 @@ async function handleVoiceMessage(message, from, user = null) {
       }
     }
 
-    // ============================================================
-    // ATTENDANCE VOICE INPUT CHECK
-    // Check if user is awaiting voice input for attendance roll call
-    // ============================================================
-    if (user) {
-      try {
-        const attendanceState = await AttendanceConversationService.getSessionState(user.id);
-
-        if (attendanceState?.state === AttendanceConversationService.STATES.AWAITING_VOICE_INPUT) {
-          logToFile('📋 Attendance voice input detected', { userId: user.id, sessionState: attendanceState.state });
-
-          // Download the audio
-          const audioBuffer = await WhatsAppService.downloadMedia(audioId);
-
-          // Save to temp file for processing
-          const tempAudioPath = path.join(TEMP_DIR, `attendance_${user.id}_${Date.now()}.ogg`);
-          fs.writeFileSync(tempAudioPath, audioBuffer);
-
-          // Convert to WAV for Soniox (16kHz mono)
-          const wavPath = path.join(TEMP_DIR, `attendance_${user.id}_${Date.now()}.wav`);
-          await AudioService.convertToWav(audioBuffer, wavPath);
-
-          logToFile('Attendance audio saved', { tempAudioPath, wavPath });
-
-          // Process voice attendance using the conversation service
-          const result = await AttendanceConversationService.handleVoiceInput(user.id, wavPath);
-
-          // Cleanup temp files
-          try {
-            if (fs.existsSync(tempAudioPath)) fs.unlinkSync(tempAudioPath);
-            if (fs.existsSync(wavPath)) fs.unlinkSync(wavPath);
-          } catch (cleanupError) {
-            logToFile('⚠️ Temp file cleanup failed', { error: cleanupError.message });
-          }
-
-          // Stop typing indicator
-          typingController.stop();
-
-          // Handle the result
-          if (result.action === 'VERIFY_ATTENDANCE') {
-            // Send verification message
-            await WhatsAppService.sendMessage(from, result.message);
-            logToFile('✅ Attendance verification sent', {
-              present: result.summary.present,
-              absent: result.summary.absent
-            });
-          } else if (result.action === 'ERROR') {
-            // Send error message
-            await WhatsAppService.sendMessage(from, result.message);
-          } else {
-            // Unexpected action
-            await WhatsAppService.sendMessage(from, result.message || 'Please try again.');
-          }
-
-          return; // Exit early - handled by attendance system
-        }
-      } catch (error) {
-        logToFile('⚠️ Error checking attendance voice state', { error: error.message, stack: error.stack, userId: user?.id });
-        // Continue with normal flow if attendance check fails
-      }
-    }
+    // ATTENDANCE voice roll call — removed 2026-08-10, rebuilding from scratch.
+    // Voice marking never reached a single teacher on this deployment
+    // (attendance_sessions: 0 rows, ever).
 
     // PRIORITY 1: CHECK FOR COMPREHENSION QUESTION ANSWER (Sprint 1.8)
     // CRITICAL: Must check BEFORE reading assessment to avoid routing comprehension answers as new readings
