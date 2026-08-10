@@ -607,6 +607,19 @@ async function handleTextMessage(message, from, messageBody, user = null) {
     if (observeHandled) return;
   }
 
+  // ============================================================
+  // REMARK COMMAND (bd-2531): /remark — STEPS "S" Supervisor Remark, the
+  // principal's quarterly evaluation of each teacher in her school. All gating
+  // (capability `remark.author` via feature_permissions, plus an OPEN
+  // evaluation cycle) lives in remark-gate.js + remark-command.handler.js.
+  // Returns false on a non-match so normal chat is untouched.
+  // ============================================================
+  if (/^\/remark\b/i.test(trimmedMessage)) {
+    const { handleRemarkCommand } = require('./remark-command.handler');
+    const remarkHandled = await handleRemarkCommand(user, from, trimmedMessage);
+    if (remarkHandled) return;
+  }
+
   // FEAT-102: a school leader mid send-flow — the next text is the observed
   // teacher's name + phone (state-gated; teachers and normal chat untouched).
   {
