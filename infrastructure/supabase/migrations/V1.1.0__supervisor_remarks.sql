@@ -188,6 +188,54 @@ CREATE POLICY supervisor_remark_scores_read_principal ON supervisor_remark_score
 -- Writes restricted to service_role (routes do the work).
 -- No INSERT/UPDATE/DELETE policies -> default-deny for non-service-role.
 
+-- ─── S_pct view (the ONE definition of the score) ───────────────────────────
+-- S      = SUM(5 indicators)  -> 5..20   (floor is 5, NOT 0)
+-- S_pct  = S / 20 * 100       -> 25..100 (floor is 25, NOT 0)
+-- STEPS applies the 10% weight; we hand it s_pct.
+--
+-- A VIEW, not stored columns. The design spec's draft stored s_score + s_pct on
+-- the remark row, which means the same fact exists twice: five scores and a
+-- total. Edit a score without recomputing and they disagree SILENTLY — in the
+-- number that feeds a teacher's promotion file. A view cannot drift.
+--
+-- The two safety rules live HERE so no caller can forget them:
+--   * submitted_at IS NOT NULL  — a partial never reaches STEPS.
+--   * COUNT(*) = 5              — an incomplete rubric scores NOTHING rather
+--                                 than a plausible-looking low percentage
+--                                 (3 answered summing to 12 would read 60%).
+-- Mirrors bot/shared/services/remark/remark-rubric.js :: computeS(), which
+-- enforces the identical rules in JS and throws instead of returning a number.
+-- Both are covered by boundary tests (all-4 -> 100, all-1 -> 25, partial -> absent).
+--
+-- Emits the flat sub-score columns the STEPS export expects (design spec §8),
+-- so row-based storage produces the published contract without a second table.
+CREATE OR REPLACE VIEW v_supervisor_remark_scores AS
+SELECT
+    r.id                AS remark_id,
+    r.cycle_id,
+    r.teacher_id,
+    r.principal_user_id,
+    r.school_id,
+    r.submitted_at,
+    MAX(s.score) FILTER (WHERE s.indicator_ordinal = 1) AS score_growth,
+    MAX(s.score) FILTER (WHERE s.indicator_ordinal = 2) AS score_collaboration,
+    MAX(s.score) FILTER (WHERE s.indicator_ordinal = 3) AS score_leadership,
+    MAX(s.score) FILTER (WHERE s.indicator_ordinal = 4) AS score_student_support,
+    MAX(s.score) FILTER (WHERE s.indicator_ordinal = 5) AS score_parents,
+    SUM(s.score)::INT                                   AS s_score,
+    ROUND((SUM(s.score)::NUMERIC / 20) * 100, 1)        AS s_pct
+FROM supervisor_remarks r
+JOIN supervisor_remark_scores s ON s.remark_id = r.id
+WHERE r.submitted_at IS NOT NULL
+GROUP BY r.id, r.cycle_id, r.teacher_id, r.principal_user_id, r.school_id, r.submitted_at
+HAVING COUNT(s.id) = 5;
+
+COMMENT ON VIEW v_supervisor_remark_scores IS
+ 'STEPS "S" scores. THE single definition of s_score/s_pct — never store them. '
+ 'Only submitted, fully-answered (5/5) remarks appear; partials are absent by '
+ 'construction, so a partial can never be exported as a real score. '
+ 'JS accessor: bot/shared/services/remark/remark-score.repository.js';
+
 COMMIT;
 
 -- ─── PostgREST reload ───────────────────────────────────────────────────────
