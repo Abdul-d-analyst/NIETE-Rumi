@@ -114,3 +114,48 @@ worth reading before touching their area — `unresolved-requires` is flagging a
 test that requires a script which no longer exists, plus two stale allowlist
 entries; `source-hygiene` and the `no-hardcoded-*` guards are the family we
 intend to widen for teacher-facing copy.
+
+---
+
+## The gate is now computed, not read
+
+Until 2026-08-07 this file *described* the rule and nothing enforced it. That gave
+the gate one bit of resolution — the suite is red — so a new violation inside an
+already-red suite changed nothing observable.
+
+It happened: `source-hygiene` was already failing when internal ticket references
+were added to public source, the exact thing that guard exists to prevent. Suite
+result before and after: red. Offender list: 682 entries → 683. Only the third
+number was a regression, and nothing was looking at it.
+
+```bash
+npm run test:baseline           # compare this tree against the snapshot
+npm run test:baseline:update    # re-record it (review the diff before committing)
+```
+
+[`tests/baseline-gate.js`](baseline-gate.js) compares at three levels:
+
+| | Catches |
+|---|---|
+| **Suite** | a suite that was passing now fails |
+| **Test** | a suite already failing now fails *additional* tests |
+| **Offender** | a suite already failing reports entries it did not report before |
+
+The offender level is the one that matters for the `tests/setup/` guards, because
+those assert `expect(offenders).toEqual([])` — the entire finding lives in the
+array diff, not in the pass/fail.
+
+Improvements are reported and never gate: fewer offenders, fewer failing tests, or
+a suite going green are all clean. The three suites in **Flaky** above are read
+straight out of this file by the gate and are excluded from gating, so a random
+presign failure cannot make the gate red for reasons nobody can act on.
+
+The snapshot is [`tests/baseline.snapshot.json`](baseline.snapshot.json) — 24
+failing suites, 71 failing tests, 1,173 offenders, matching the counts recorded
+above. Its own logic is covered by
+[`tests/setup/baseline-gate.test.js`](setup/baseline-gate.test.js), including a
+test that pins the offender-level case specifically.
+
+**`--update` is the dangerous flag.** It swallows every regression present in the
+tree at the time it runs. Only re-record from a tree you have separately verified,
+and read the resulting diff.
