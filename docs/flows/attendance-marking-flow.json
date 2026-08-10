@@ -16,16 +16,28 @@
   "version": "6.3",
   "data_api_version": "3.0",
   "routing_model": {
-    "MARK": ["LEAVE_TYPE", "CONFIRM"],
-    "LEAVE_TYPE": ["CONFIRM"],
-    "CONFIRM": ["MARK"]
+    "MARK": [
+      "LEAVE_TYPE",
+      "CONFIRM"
+    ],
+    "LEAVE_TYPE": [
+      "CONFIRM"
+    ],
+    "CONFIRM": [
+      "MARK",
+      "SAVED"
+    ],
+    "SAVED": []
   },
   "screens": [
     {
       "id": "MARK",
       "title": "Mark attendance",
       "data": {
-        "heading": { "type": "string", "__example__": "Grade 5 - A · Mon 10 Aug" },
+        "heading": {
+          "type": "string",
+          "__example__": "Grade 5 - A · Mon 10 Aug"
+        },
         "subject_note": {
           "type": "string",
           "__example__": "Tap only the students who are away. Everyone else is marked present."
@@ -35,14 +47,28 @@
           "items": {
             "type": "object",
             "properties": {
-              "id": { "type": "string" },
-              "title": { "type": "string" },
-              "description": { "type": "string" }
+              "id": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              }
             }
           },
           "__example__": [
-            { "id": "s1", "title": "Ahmed Raza", "description": "Roll 4" },
-            { "id": "s2", "title": "Ayesha Bibi", "description": "Roll 7" }
+            {
+              "id": "s1",
+              "title": "Ahmed Raza",
+              "description": "Roll 4"
+            },
+            {
+              "id": "s2",
+              "title": "Ayesha Bibi",
+              "description": "Roll 7"
+            }
           ]
         }
       },
@@ -96,21 +122,40 @@
       "id": "LEAVE_TYPE",
       "title": "Type of leave",
       "data": {
-        "heading": { "type": "string", "__example__": "1 person on leave" },
-        "names": { "type": "string", "__example__": "Hamza Ali" },
+        "heading": {
+          "type": "string",
+          "__example__": "1 person on leave"
+        },
+        "names": {
+          "type": "string",
+          "__example__": "Hamza Ali"
+        },
         "leave_types": {
           "type": "array",
           "items": {
             "type": "object",
             "properties": {
-              "id": { "type": "string" },
-              "title": { "type": "string" }
+              "id": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
             }
           },
           "__example__": [
-            { "id": "casual", "title": "Casual" },
-            { "id": "sick", "title": "Sick" },
-            { "id": "official", "title": "Official duty" }
+            {
+              "id": "casual",
+              "title": "Casual"
+            },
+            {
+              "id": "sick",
+              "title": "Sick"
+            },
+            {
+              "id": "official",
+              "title": "Official duty"
+            }
           ]
         }
       },
@@ -155,15 +200,19 @@
     {
       "id": "CONFIRM",
       "title": "Confirm",
-      "terminal": true,
-      "success": true,
       "data": {
-        "heading": { "type": "string", "__example__": "25 present · 2 absent · 1 on leave" },
+        "heading": {
+          "type": "string",
+          "__example__": "25 present · 2 absent · 1 on leave"
+        },
         "detail": {
           "type": "string",
           "__example__": "Absent: Ahmed Raza, Bilal Hussain\nOn leave (casual): Hamza Ali"
         },
-        "overwrite_note": { "type": "string", "__example__": "" }
+        "overwrite_note": {
+          "type": "string",
+          "__example__": ""
+        }
       },
       "layout": {
         "type": "SingleColumnLayout",
@@ -193,6 +242,57 @@
                     "screen": "CONFIRM",
                     "confirm": "save"
                   }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "SAVED",
+      "title": "Saved",
+      "terminal": true,
+      "success": true,
+      "data": {
+        "heading": {
+          "type": "string",
+          "__example__": "Saved · 25 present · 2 absent · 1 on leave"
+        },
+        "detail": {
+          "type": "string",
+          "__example__": "Thank you — that is today done."
+        },
+        "overwrite_note": {
+          "type": "string",
+          "__example__": ""
+        }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "Form",
+            "name": "saved_form",
+            "children": [
+              {
+                "type": "TextHeading",
+                "text": "${data.heading}"
+              },
+              {
+                "type": "TextBody",
+                "text": "${data.detail}"
+              },
+              {
+                "type": "TextCaption",
+                "text": "${data.overwrite_note}"
+              },
+              {
+                "type": "Footer",
+                "label": "Done",
+                "on-click-action": {
+                  "name": "complete",
+                  "payload": {}
                 }
               }
             ]
