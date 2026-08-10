@@ -15,9 +15,17 @@
   "version": "6.3",
   "data_api_version": "3.0",
   "routing_model": {
-    "CLASS": ["ROSTER"],
-    "ROSTER": ["REVIEW"],
-    "REVIEW": ["ROSTER"]
+    "CLASS": [
+      "ROSTER"
+    ],
+    "ROSTER": [
+      "REVIEW"
+    ],
+    "REVIEW": [
+      "ROSTER",
+      "SUCCESS"
+    ],
+    "SUCCESS": []
   },
   "screens": [
     {
@@ -29,13 +37,23 @@
           "items": {
             "type": "object",
             "properties": {
-              "id": { "type": "string" },
-              "title": { "type": "string" }
+              "id": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
             }
           },
           "__example__": [
-            { "id": "grade_3", "title": "Grade 3" },
-            { "id": "grade_5", "title": "Grade 5" }
+            {
+              "id": "grade_3",
+              "title": "Grade 3"
+            },
+            {
+              "id": "grade_5",
+              "title": "Grade 5"
+            }
           ]
         },
         "grade_hint": {
@@ -95,7 +113,10 @@
       "title": "Add students",
       "refresh_on_back": true,
       "data": {
-        "class_display": { "type": "string", "__example__": "Grade 5 - A" },
+        "class_display": {
+          "type": "string",
+          "__example__": "Grade 5 - A"
+        },
         "existing_note": {
           "type": "string",
           "__example__": "Paste or type the whole list — one name per line."
@@ -146,15 +167,19 @@
     {
       "id": "REVIEW",
       "title": "Check the list",
-      "terminal": true,
-      "success": true,
       "data": {
-        "heading": { "type": "string", "__example__": "28 students in Grade 5 - A" },
+        "heading": {
+          "type": "string",
+          "__example__": "28 students in Grade 5 - A"
+        },
         "preview": {
           "type": "string",
           "__example__": "1. Ayesha Bibi\n2. Ahmed Raza\n3. Fatima Noor"
         },
-        "warning": { "type": "string", "__example__": "" }
+        "warning": {
+          "type": "string",
+          "__example__": ""
+        }
       },
       "layout": {
         "type": "SingleColumnLayout",
@@ -184,6 +209,57 @@
                     "screen": "REVIEW",
                     "confirm": "save"
                   }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "SUCCESS",
+      "title": "Class saved",
+      "terminal": true,
+      "success": true,
+      "data": {
+        "heading": {
+          "type": "string",
+          "__example__": "Grade 5 - A is ready"
+        },
+        "preview": {
+          "type": "string",
+          "__example__": "28 students saved. Say \"attendance\" whenever you want to mark them."
+        },
+        "warning": {
+          "type": "string",
+          "__example__": ""
+        }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "Form",
+            "name": "done_form",
+            "children": [
+              {
+                "type": "TextHeading",
+                "text": "${data.heading}"
+              },
+              {
+                "type": "TextBody",
+                "text": "${data.preview}"
+              },
+              {
+                "type": "TextCaption",
+                "text": "${data.warning}"
+              },
+              {
+                "type": "Footer",
+                "label": "Done",
+                "on-click-action": {
+                  "name": "complete",
+                  "payload": {}
                 }
               }
             ]
