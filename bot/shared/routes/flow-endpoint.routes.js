@@ -18,6 +18,18 @@ const { handleObserveMewakaRequest } = require('./observe-mewaka-endpoint'); // 
 const supabase = require('../config/supabase');
 const { logToFile } = require('../utils/logger');
 const {
+  handleMarkingInit,
+  handleMarkingDataExchange
+} = require('./attendance-marking-endpoint');
+const {
+  handleEditClassInit,
+  handleEditClassDataExchange
+} = require('./edit-class-endpoint');
+const {
+  handleSetupInit,
+  handleSetupDataExchange
+} = require('./attendance-setup-endpoint');
+const {
   handleRegistrationInit,
   handleRegistrationDataExchange,
   handleRegistrationBack
@@ -318,6 +330,155 @@ async function handlePicLpRequest(data) {
 // ============================================================
 // SETTINGS FLOW ENDPOINT
 // ============================================================
+
+router.post('/attendance-setup', async (req, res) => {
+  try {
+    if (!FlowEncryptionService.isConfigured()) {
+      logToFile('Flow encryption not configured', { endpoint: 'attendance-setup' });
+      return res.status(500).json({ error: 'Flow encryption not configured' });
+    }
+
+    const encryptedResponse = await FlowEncryptionService.processEncryptedRequest(
+      req.body,
+      async (decryptedData) => {
+        return await handleAttendanceSetupRequest(decryptedData);
+      }
+    );
+
+    res.set('Content-Type', 'text/plain');
+    res.send(encryptedResponse);
+  } catch (error) {
+    logToFile('Flow endpoint error', {
+      endpoint: 'attendance-setup',
+      error: error.message,
+      stack: error.stack,
+    });
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Class setup — CLASS -> ROSTER -> REVIEW -> SUCCESS.
+ * flow_token is the user id (set when the Flow is sent).
+ */
+async function handleAttendanceSetupRequest(data) {
+  const { action, flow_token, screen, data: screenData } = data;
+
+  logToFile('Handling attendance-setup request', {
+    action,
+    screen,
+    hasFlowToken: !!flow_token,
+    screenDataKeys: screenData ? Object.keys(screenData) : []
+  });
+
+  if (action === 'ping') {
+    return FlowEncryptionService.handlePing();
+  }
+
+  const userId = (flow_token || '').split(':')[0];
+
+  if (action === 'INIT' || action === 'init') {
+    return await handleSetupInit(userId);
+  }
+  if (action === 'data_exchange') {
+    return await handleSetupDataExchange(userId, screen, screenData);
+  }
+
+  logToFile('Unknown attendance-setup flow action', { action });
+  return FlowEncryptionService.createErrorResponse('Unknown action');
+}
+
+router.post('/attendance-marking', async (req, res) => {
+  try {
+    if (!FlowEncryptionService.isConfigured()) {
+      logToFile('Flow encryption not configured', { endpoint: 'attendance-marking' });
+      return res.status(500).json({ error: 'Flow encryption not configured' });
+    }
+
+    const encryptedResponse = await FlowEncryptionService.processEncryptedRequest(
+      req.body,
+      async (decryptedData) => {
+        return await handleAttendanceMarkingRequest(decryptedData);
+      }
+    );
+
+    res.set('Content-Type', 'text/plain');
+    res.send(encryptedResponse);
+  } catch (error) {
+    logToFile('Flow endpoint error', { endpoint: 'attendance-marking', error: error.message, stack: error.stack });
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/** Marking — MARK -> LEAVE_TYPE -> CONFIRM -> SAVED. flow_token: "<userId>:<student|teacher>:<targetId>". */
+async function handleAttendanceMarkingRequest(data) {
+  const { action, flow_token, screen, data: screenData } = data;
+
+  logToFile('Handling attendance-marking request', {
+    action, screen, hasFlowToken: !!flow_token,
+    screenDataKeys: screenData ? Object.keys(screenData) : []
+  });
+
+  if (action === 'ping') {
+    return FlowEncryptionService.handlePing();
+  }
+
+  if (action === 'INIT' || action === 'init') {
+    return await handleMarkingInit(flow_token);
+  }
+  if (action === 'data_exchange') {
+    return await handleMarkingDataExchange(flow_token, screen, screenData);
+  }
+
+  logToFile('Unknown attendance-marking flow action', { action });
+  return FlowEncryptionService.createErrorResponse('Unknown action');
+}
+
+router.post('/edit-class', async (req, res) => {
+  try {
+    if (!FlowEncryptionService.isConfigured()) {
+      logToFile('Flow encryption not configured', { endpoint: 'edit-class' });
+      return res.status(500).json({ error: 'Flow encryption not configured' });
+    }
+
+    const encryptedResponse = await FlowEncryptionService.processEncryptedRequest(
+      req.body,
+      async (decryptedData) => {
+        return await handleEditClassRequest(decryptedData);
+      }
+    );
+
+    res.set('Content-Type', 'text/plain');
+    res.send(encryptedResponse);
+  } catch (error) {
+    logToFile('Flow endpoint error', { endpoint: 'edit-class', error: error.message, stack: error.stack });
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/** Edit class — ROSTER -> ADD|REMOVE|RENAME -> SAVED. flow_token: "<userId>:<listId>". */
+async function handleEditClassRequest(data) {
+  const { action, flow_token, screen, data: screenData } = data;
+
+  logToFile('Handling edit-class request', {
+    action, screen, hasFlowToken: !!flow_token,
+    screenDataKeys: screenData ? Object.keys(screenData) : []
+  });
+
+  if (action === 'ping') {
+    return FlowEncryptionService.handlePing();
+  }
+
+  if (action === 'INIT' || action === 'init') {
+    return await handleEditClassInit(flow_token);
+  }
+  if (action === 'data_exchange') {
+    return await handleEditClassDataExchange(flow_token, screen, screenData);
+  }
+
+  logToFile('Unknown edit-class flow action', { action });
+  return FlowEncryptionService.createErrorResponse('Unknown action');
+}
 
 router.post('/settings', async (req, res) => {
   try {

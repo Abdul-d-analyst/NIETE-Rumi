@@ -27,7 +27,9 @@ const ChildFlowToken = require('../services/quiz/child-flow-token'); // bd-2475 
 // process.env read (pre-existing NIETE code, untouched by this port).
 const { STUDENT_VIDEOS_FLOW_ID } = require('../utils/constants');
 const { logToFile } = require('../utils/logger');
-const { TEMP_DIR, LOADING_STICKER_PATH, LOADING_STICKER_MEDIA_ID, OPENAI_API_KEY, ATTENDANCE_SETUP_FLOW_ID, ATTENDANCE_MARKING_FLOW_ID } = require('../utils/constants');
+const { TEMP_DIR, LOADING_STICKER_PATH, LOADING_STICKER_MEDIA_ID, OPENAI_API_KEY,
+  ATTENDANCE_SETUP_FLOW_ID, ATTENDANCE_MARKING_FLOW_ID, EDIT_CLASS_FLOW_ID } = require('../utils/constants');
+const AttendanceRouter = require('../services/attendance-router.service');
 const { getClient } = require('../services/llm-client');
 
 const openai = getClient();
@@ -1853,18 +1855,81 @@ async function handleTextMessage(message, from, messageBody, user = null) {
   }
 
   // ============================================================
-  // ATTENDANCE — removed 2026-08-10, being rebuilt from scratch.
+  // ATTENDANCE — one keyword, routed by role.
   //
-  // The student flow (class setup, roster entry, voice/tap marking, edit
-  // class) and the principal teacher-attendance flow were deleted wholesale:
-  // 113 registered teachers had produced 0 completed class setups, and the
-  // principal channel asked for typed coordinates ("2,5,6L") against a
-  // numbered wall of names. The defects were in the design, not the wiring.
-  //
-  // Nothing routes "attendance" / "حاضری" / "add class" / "edit class" until
-  // the rebuilt flow lands. Kept deliberately: the dashboard attendance
-  // repository and the STEPS BigQuery export (a partner contract).
+  // A principal marks teachers, a teacher marks students, and a principal who
+  // also runs a class is ASKED. Everything the teacher sees is a Flow screen;
+  // there is no typed-number step anywhere in this path.
   // ============================================================
+  if (user?.id && AttendanceRouter.detect(messageBody).detected) {
+    typingController.stop();
+    try {
+      const decision = await AttendanceRouter.route(user.id);
+      logToFile('📋 Attendance routed', { userId: user.id, action: decision.action });
+
+      switch (decision.action) {
+        case 'MARK_TEACHERS':
+        case 'MARK_STUDENTS':
+          if (!ATTENDANCE_MARKING_FLOW_ID) {
+            await WhatsAppService.sendMessage(from, 'Attendance is not available on this number yet. Please try again later.');
+            break;
+          }
+          await WhatsAppService.sendFlow(from, {
+            flowId: ATTENDANCE_MARKING_FLOW_ID,
+            header: '📋 Attendance',
+            body: decision.action === 'MARK_TEACHERS'
+              ? "Mark your school's teachers for today."
+              : 'Mark your class for today.',
+            buttonText: 'Mark attendance',
+            flowToken: decision.flowToken,
+          });
+          break;
+
+        case 'SEND_SETUP':
+          if (!ATTENDANCE_SETUP_FLOW_ID) {
+            await WhatsAppService.sendMessage(from, 'Class setup is not available on this number yet. Please try again later.');
+            break;
+          }
+          await WhatsAppService.sendFlow(from, {
+            flowId: ATTENDANCE_SETUP_FLOW_ID,
+            header: '📋 Set up a class',
+            body: decision.message,
+            buttonText: 'Set up class',
+            flowToken: user.id,
+          });
+          break;
+
+        case 'ASK_SUBJECT':
+        case 'ASK_CLASS_BUTTONS':
+          await WhatsAppService.sendInteractiveButtons(from, {
+            body: decision.message,
+            buttons: decision.buttons,
+          });
+          break;
+
+        case 'ASK_CLASS_LIST':
+          await WhatsAppService.sendInteractiveMessage(from, {
+            body: { text: decision.message },
+            action: { button: 'Choose class', sections: [{ title: 'Your classes', rows: decision.rows }] },
+          });
+          if (decision.truncated) {
+            await WhatsAppService.sendMessage(from, 'Showing your first 10 classes.');
+          }
+          break;
+
+        case 'NO_SCHOOL':
+        case 'ERROR':
+        default:
+          await WhatsAppService.sendMessage(from, decision.message || 'Sorry, something went wrong.');
+          break;
+      }
+      return;
+    } catch (error) {
+      logToFile('Error routing attendance', { error: error.message, userId: user?.id });
+      await WhatsAppService.sendMessage(from, 'Sorry, something went wrong with attendance. Please try again.');
+      return;
+    }
+  }
 
   // ============================================================
   // REGISTRATION KEYWORD DETECTION
