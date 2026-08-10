@@ -16,8 +16,6 @@ const PREFIX = '[setup-validator]';
  *
  * Checks:
  *  - READING_ASSESSMENT_FLOW_ID    → warn if missing
- *  - ATTENDANCE_SETUP_FLOW_ID      → warn if missing
- *  - ATTENDANCE_MARKING_FLOW_ID    → warn if missing
  *  - FLOW_PRIVATE_KEY              → error if missing AND any attendance flow ID is set
  *
  * @returns {{ ok: boolean, warnings: string[], errors: string[] }}
@@ -30,8 +28,6 @@ function validateBootRequirements() {
   // 1. Check individual flow IDs — warn if not set
   // -----------------------------------------------------------------------
   const readingFlowId = process.env.READING_ASSESSMENT_FLOW_ID;
-  const attendanceSetupFlowId = process.env.ATTENDANCE_SETUP_FLOW_ID;
-  const attendanceMarkingFlowId = process.env.ATTENDANCE_MARKING_FLOW_ID;
   const flowPrivateKey = process.env.FLOW_PRIVATE_KEY;
 
   if (!readingFlowId) {
@@ -40,25 +36,23 @@ function validateBootRequirements() {
     console.warn(msg);
   }
 
-  if (!attendanceSetupFlowId) {
-    const msg = `${PREFIX} ATTENDANCE_SETUP_FLOW_ID is not set. Attendance setup flow will not be available.`;
-    warnings.push(msg);
-    console.warn(msg);
-  }
-
-  if (!attendanceMarkingFlowId) {
-    const msg = `${PREFIX} ATTENDANCE_MARKING_FLOW_ID is not set. Attendance marking flow will not be available.`;
-    warnings.push(msg);
-    console.warn(msg);
-  }
-
   // -----------------------------------------------------------------------
-  // 2. Check FLOW_PRIVATE_KEY — error if attendance flows are set without it
+  // 2. Check FLOW_PRIVATE_KEY — error if endpoint flows are set without it
   // -----------------------------------------------------------------------
-  const hasAttendanceFlows = attendanceSetupFlowId || attendanceMarkingFlowId;
+  // Any endpoint (data-exchange) Flow needs FLOW_PRIVATE_KEY to decrypt Meta's
+  // payload. This used to key off the attendance flow IDs; attendance was torn
+  // out on 2026-08-10, so it now keys off the endpoint flows that actually ship.
+  const hasEndpointFlows = Boolean(
+    process.env.SETTINGS_FLOW_ID
+    || process.env.STATUS_FLOW_ID
+    || process.env.HOMEWORK_FLOW_ID
+    || process.env.STUDENT_VIDEOS_FLOW_ID
+    || process.env.QUIZ_FLOW_ID
+    || process.env.EXAM_CHECKER_STUDENTS_FLOW_ID,
+  );
 
-  if (hasAttendanceFlows && !flowPrivateKey) {
-    const msg = `${PREFIX} FLOW_PRIVATE_KEY is not set but attendance flow IDs are configured. Flow decryption will fail.`;
+  if (hasEndpointFlows && !flowPrivateKey) {
+    const msg = `${PREFIX} FLOW_PRIVATE_KEY is not set but endpoint flow IDs are configured. Flow decryption will fail.`;
     errors.push(msg);
     console.error(msg);
     console.error(
