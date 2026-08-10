@@ -344,7 +344,6 @@ class AttendanceDeliveryService {
       const totalStudents = records.length;
       const presentCount = records.filter(r => r.status === 'present').length;
       const absentCount = records.filter(r => r.status === 'absent').length;
-      const leaveCount = records.filter(r => r.status === 'leave').length;   // [attendance fix]
 
       // Create attendance session
       // Use metadata.date for session_date
@@ -359,7 +358,7 @@ class AttendanceDeliveryService {
         metadata.sessionType || 'full_day'
       );
 
-      if (existingSession && !sessionData.overwrite) {
+      if (existingSession) {
         logToFile('⚠️ Duplicate attendance session detected', {
           existingSessionId: existingSession.id,
           listId,
@@ -379,31 +378,6 @@ class AttendanceDeliveryService {
               : '0%'
           }
         };
-      }
-
-      // [attendance fix] Explicit overwrite: replace the existing day's session
-      // + records. Only reachable when the teacher opts in after being told the day
-      // is already marked — the duplicate guard above is otherwise untouched.
-      if (existingSession && sessionData.overwrite) {
-        logToFile('✏️ Overwriting existing attendance session', {
-          existingSessionId: existingSession.id, listId, sessionDate: sessionDateStr
-        });
-        await supabase.from('attendance_records').delete().eq('session_id', existingSession.id);
-        await supabase.from('attendance_sessions').update({
-          total_students: totalStudents,
-          present_count: presentCount,
-          absent_count: absentCount,
-          leave_count: leaveCount,                        // requires add_attendance_leave_status.sql
-          marking_method: sessionData.markingMethod || 'tap',
-          transcript: sessionData.transcript || null,
-          was_manually_edited: true
-        }).eq('id', existingSession.id);
-        const overwriteInserts = records.map(r => ({
-          session_id: existingSession.id, student_id: r.studentId, student_name: r.studentName,
-          status: r.status, confidence: r.confidence || 1.0, detected_response: r.detectedResponse || null
-        }));
-        await supabase.from('attendance_records').insert(overwriteInserts);
-        return { sessionId: existingSession.id, updated: true };
       }
 
       logToFile('📊 Saving attendance session', {
@@ -426,8 +400,7 @@ class AttendanceDeliveryService {
           excel_url: excelUrl,
           total_students: totalStudents,
           present_count: presentCount,
-          absent_count: absentCount,
-          leave_count: leaveCount             // [attendance fix] requires add_attendance_leave_status.sql
+          absent_count: absentCount
         })
         .select('id')
         .single();
