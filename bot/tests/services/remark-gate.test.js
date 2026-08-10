@@ -21,6 +21,7 @@ const {
 } = require('../../shared/services/remark/remark-gate');
 
 const CYCLE = { id: 'c-1', name: 'Second Quarter 2026' };
+const PRINCIPAL_USER = { id: 'u-p', role: 'principal' };
 
 describe('bd-2529 — /remark trigger matching', () => {
   test('matches /remark as a command', () => {
@@ -55,6 +56,71 @@ describe('bd-2529 — REMARK_ROLES is principal-only', () => {
       expect(isPrincipal({ role: r })).toBe(false);
     }
     expect(isPrincipal(null)).toBe(false);
+  });
+});
+
+describe('bd-2531 — the gate defers to the CAPABILITY layer, not its own list', () => {
+  const { evaluateRemarkTriggerAsync } = require('../../shared/services/remark/remark-gate');
+  const { CAPABILITIES } = require('../../shared/services/authz/capability');
+
+  test('it asks for remark.author, not for a role', async () => {
+    const asked = [];
+    const has = async (user, cap) => { asked.push(cap); return true; };
+    await evaluateRemarkTriggerAsync(
+      { messageBody: '/remark', user: PRINCIPAL_USER, activeCycle: CYCLE }, { hasCapability: has });
+    expect(asked).toEqual([CAPABILITIES.REMARK_AUTHOR]);
+  });
+
+  test('capability granted + open cycle → proceed', async () => {
+    const has = async () => true;
+    await expect(evaluateRemarkTriggerAsync(
+      { messageBody: '/remark', user: PRINCIPAL_USER, activeCycle: CYCLE }, { hasCapability: has }))
+      .resolves.toEqual({ match: true, action: 'proceed', cycle: CYCLE });
+  });
+
+  test('capability denied → deny_role, even for role=principal', async () => {
+    // The matrix is authoritative. If the grant row is pulled, a principal is
+    // denied — that is the point of moving permission into data.
+    const has = async () => false;
+    await expect(evaluateRemarkTriggerAsync(
+      { messageBody: '/remark', user: PRINCIPAL_USER, activeCycle: CYCLE }, { hasCapability: has }))
+      .resolves.toEqual({ match: true, action: 'deny_role' });
+  });
+
+  test('a NON-principal granted the capability is allowed — no hardcoded role wins', async () => {
+    // Grant remark.author to 'aeo' in the matrix and it works, with NO code
+    // change. This is the test that proves the list is not load-bearing.
+    const has = async () => true;
+    await expect(evaluateRemarkTriggerAsync(
+      { messageBody: '/remark', user: { id: 'u-a', role: 'aeo' }, activeCycle: CYCLE },
+      { hasCapability: has }))
+      .resolves.toEqual({ match: true, action: 'proceed', cycle: CYCLE });
+  });
+
+  test('capability is checked BEFORE the cycle — no window leak to the unauthorised', async () => {
+    const has = async () => false;
+    await expect(evaluateRemarkTriggerAsync(
+      { messageBody: '/remark', user: { id: 'u-t', role: 'teacher' }, activeCycle: null },
+      { hasCapability: has }))
+      .resolves.toEqual({ match: true, action: 'deny_role' });
+  });
+
+  test('no user → deny_no_user without consulting the matrix', async () => {
+    const asked = [];
+    const has = async (u, c) => { asked.push(c); return true; };
+    await expect(evaluateRemarkTriggerAsync(
+      { messageBody: '/remark', user: null, activeCycle: CYCLE }, { hasCapability: has }))
+      .resolves.toEqual({ match: true, action: 'deny_no_user' });
+    expect(asked).toHaveLength(0);
+  });
+
+  test('a non-trigger message never consults the matrix', async () => {
+    const asked = [];
+    const has = async (u, c) => { asked.push(c); return true; };
+    await expect(evaluateRemarkTriggerAsync(
+      { messageBody: 'hello', user: PRINCIPAL_USER, activeCycle: CYCLE }, { hasCapability: has }))
+      .resolves.toEqual({ match: false });
+    expect(asked).toHaveLength(0);
   });
 });
 

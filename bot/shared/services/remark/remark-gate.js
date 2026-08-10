@@ -16,6 +16,8 @@
  * cycle" and "no permission" are therefore the same condition.
  */
 
+const { CAPABILITIES } = require('../authz/capability');
+
 // Matches "/remark" as a command (leading slash, word boundary so "/remarks"
 // does NOT match). Handler passes the trimmed message.
 const REMARK_TRIGGER_RX = /^\/remark\b/i;
@@ -74,10 +76,39 @@ function evaluateRemarkTrigger({ messageBody, user, activeCycle }) {
   return { match: true, action: 'proceed', cycle: activeCycle };
 }
 
+/**
+ * The CAPABILITY-driven evaluator — prefer this one.
+ *
+ * Identical decision sequence to evaluateRemarkTrigger, except "may this user
+ * author a remark?" is answered by the permission matrix
+ * (feature_permissions → remark.author) instead of the REMARK_ROLES array.
+ * Granting a new role becomes an INSERT rather than a deploy, and /remark stops
+ * being a fifth bespoke gating pattern in this repo (see services/authz/capability.js).
+ *
+ * REMARK_ROLES survives only as the DEFAULT SEED for that matrix and as the
+ * sync gate's pure fallback — it is no longer the authority. A principal whose
+ * grant row is pulled IS denied; an AEO who is granted one IS allowed.
+ *
+ * @param {{messageBody: string, user: object|null, activeCycle: object|null}} input
+ * @param {{hasCapability: (user: object, cap: string) => Promise<boolean>}} deps
+ */
+async function evaluateRemarkTriggerAsync({ messageBody, user, activeCycle }, { hasCapability }) {
+  if (!REMARK_TRIGGER_RX.test((messageBody || '').trim())) return { match: false };
+  if (!user) return { match: true, action: 'deny_no_user' };
+  // Capability BEFORE cycle: someone who may not author a remark must not learn
+  // whether an evaluation window is currently open on their school.
+  if (!(await hasCapability(user, CAPABILITIES.REMARK_AUTHOR))) {
+    return { match: true, action: 'deny_role' };
+  }
+  if (!activeCycle) return { match: true, action: 'deny_no_cycle' };
+  return { match: true, action: 'proceed', cycle: activeCycle };
+}
+
 module.exports = {
   REMARK_TRIGGER_RX,
   REMARK_ROLES,
   isPrincipal,
   resolveActiveCycle,
   evaluateRemarkTrigger,
+  evaluateRemarkTriggerAsync,
 };

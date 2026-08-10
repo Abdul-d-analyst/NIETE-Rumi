@@ -152,6 +152,24 @@ CREATE TABLE IF NOT EXISTS supervisor_remark_scores (
 CREATE INDEX IF NOT EXISTS idx_supervisor_remark_scores_remark
     ON supervisor_remark_scores (remark_id);
 
+-- ─── Capability grant (permission as DATA, not a conditional) ───────────────
+-- /remark is gated on the capability `remark.author`, resolved from the
+-- existing feature_permissions(role, feature_key, can_access) matrix — the same
+-- table the dashboard's requireFeatureAccess() already uses. See
+-- bot/shared/services/authz/capability.js for why this exists rather than a
+-- fifth bespoke `role === 'principal'` check.
+--
+-- Seeding `principal` here is the DEFAULT, not the rule: when ICT decides an
+-- AEO may also author remarks, that is ONE INSERT — no code change, no deploy.
+-- Equally, revoking is an UPDATE; a principal whose row is pulled is denied by
+-- the same path. Default-deny means any role without a row is refused.
+--
+-- feature_permissions has no FK to dashboard_users, so it holds `users`-table
+-- roles (teacher/principal) alongside portal-staff roles without modification.
+INSERT INTO feature_permissions (role, feature_key, can_access)
+VALUES ('principal', 'remark.author', true)
+ON CONFLICT (role, feature_key) DO UPDATE SET can_access = EXCLUDED.can_access;
+
 -- ─── RLS ────────────────────────────────────────────────────────────────────
 -- Mirrors V1.0.7: portal/bot routes use the service role key (bypasses RLS);
 -- policies here are defence-in-depth for ad-hoc analyst queries and future
