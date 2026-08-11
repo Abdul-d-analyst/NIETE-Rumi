@@ -28,6 +28,7 @@ const MIDFLIGHT_STATUSES = new Set([
   'analysis_complete',
   'generating_report',
   'awaiting_photo',
+  'awaiting_classroom_photo', // bd-2636 — the photo_yes-button naming
   'awaiting_lesson_plan',
 ]);
 
