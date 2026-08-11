@@ -89,16 +89,21 @@ async function handleImageMessage(message, from, user = null) {
       // ============================================================
       try {
         const coachingSupabase = require('../config/supabase');
+        // bd-2636: accept BOTH the transcription-flow status ('awaiting_photo')
+        // and the photo_yes-button status ('awaiting_classroom_photo'). Filtering
+        // on only 'awaiting_photo' orphaned every photo a teacher sent after
+        // tapping "yes", freezing her session with no analysis or report.
+        const { CLASSROOM_PHOTO_STATUSES, isClassroomPhotoState } = require('../services/coaching/coaching-photo-status');
         const { data: photoSession } = await coachingSupabase
           .from('coaching_sessions')
-          .select('id, conversation_state')
+          .select('id, conversation_state, status')
           .eq('user_id', user.id)
-          .eq('status', 'awaiting_photo')
+          .in('status', CLASSROOM_PHOTO_STATUSES)
           .order('created_at', { ascending: false })
           .limit(1)
-          .single();
+          .maybeSingle();
 
-        if (photoSession && (photoSession.conversation_state?.current_state === 'COLLECTING_PHOTOS' || photoSession.conversation_state?.current_state === 'AWAITING_PHOTO')) {
+        if (photoSession && isClassroomPhotoState(photoSession.conversation_state?.current_state)) {
           // bd-2371: de-dup at-least-once webhook redelivery for the classroom
           // photo branch too — a redelivered copy must not append the same photo
           // twice or re-fire the "photo N received" ack.
