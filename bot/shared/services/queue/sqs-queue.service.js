@@ -67,7 +67,16 @@ class SQSQueueService {
       }
 
       // Check Redis for duplicate job (idempotency check)
-      const idempotencyKey = `${this.JOB_PREFIX}${sessionId}:${jobType}`;
+      // bd-2645: the key MUST include the payload phase. The observe
+      // teacher-report flow queues three distinct phases (preview →
+      // deliver → teacher_tap) under ONE jobType, so a phase-blind key
+      // made the coach's 'yes, send' look like a duplicate of the preview
+      // for the whole 1-hour TTL: the deliver job was dropped, the
+      // delivery froze at 'awaiting_confirm', and the teacher never got
+      // the report while the coach was told it was on its way.
+      // Jobs without a phase keep their historical key shape exactly.
+      const phaseSuffix = payload && payload.phase ? `:${payload.phase}` : '';
+      const idempotencyKey = `${this.JOB_PREFIX}${sessionId}:${jobType}${phaseSuffix}`;
 
       try {
         const existingMessageId = await RedisService.get(idempotencyKey);
