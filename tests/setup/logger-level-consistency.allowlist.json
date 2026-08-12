@@ -375,16 +375,6 @@
     "snippet": "logToFile('❌ Session query error', { sessionError, coachingSessionId });"
   },
   {
-    "file": "bot/shared/services/coaching/analysis-processor.service.js",
-    "line": 233,
-    "snippet": "logToFile('❌ Error in processAnalysis', {"
-  },
-  {
-    "file": "bot/shared/services/coaching/analysis-processor.service.js",
-    "line": 263,
-    "snippet": "logToFile('❌ Error in handleAnalysisError', {"
-  },
-  {
     "file": "bot/shared/services/coaching/coaching-job-queue.service.js",
     "line": 77,
     "snippet": "logToFile('❌ Error queuing job to SQS', {"
