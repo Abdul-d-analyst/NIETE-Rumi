@@ -33,13 +33,18 @@ The reflective question we asked her:
 Her answer:
 "${answer}"
 
-Write ONE short, warm sentence in ${langName} that reflects HER answer back to her — name the specific thing SHE said so she feels genuinely heard. Rules:
-- Do NOT ask a new question. Do NOT add advice or a next step.
+Respond like a thoughtful coach who was genuinely listening — NOT an echo. Write ONE or TWO warm sentences in ${langName} that:
+1. Name the specific thing SHE realised or decided (so she feels heard), then
+2. Affirm WHY that matters for her students' learning — a genuine, specific coaching insight that adds a little to what she said.
+So instead of just repeating "you said you'd pause more", say why that pause is what gives quieter students room to think.
+Rules:
+- Do NOT simply repeat / echo her words back with nothing added — the insight in point 2 is the whole point.
+- Do NOT ask a new question. Do NOT give advice, a to-do, or a next step.
 - Gender-neutral — never gendered second-person verb forms; we do not know her gender.
 - Plain language; keep any pedagogical/technical terms in English (Latin letters) inline.
-- Max ~25 words. Warm, specific, human. End on a statement, not a question.
+- Max ~35 words. Warm, specific, human. End on an affirming statement that leaves her with the value of what she noticed.
 ${voiceRules}
-Return ONLY the sentence — no quotes, no preamble.`;
+Return ONLY the sentence(s) — no quotes, no preamble.`;
 }
 
 /**
