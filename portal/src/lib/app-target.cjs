@@ -85,6 +85,14 @@ function resolveApiBaseUrl({ isNative = false, isProd = false, apiBaseUrl, origi
 }
 
 /**
+ * The path an OTA build loads. Not `/` — the portal root 302-redirects to the
+ * public marketing site, which sent the WebView to Chrome and left the app
+ * grey (bd-2562). `/portal/login` is the app's entry point and returns 200
+ * with no redirect; the SPA router forwards an authenticated user onward.
+ */
+const OTA_ENTRY_PATH = '/portal/login';
+
+/**
  * Where should the native shell load its web assets from? (bd-2553)
  *
  * The Android app is a pure WebView wrap with no native plugins, so the web
@@ -116,9 +124,18 @@ function resolveOtaUrl({ isNative = false, apiBaseUrl } = {}) {
     // https only: a WebView loading over http is mixed content, and any other
     // scheme (file:, ftp:) is not something we should ever boot from.
     if (url.protocol !== 'https:') return null;
-    // `origin` drops the path, query and fragment — the app loads the SITE,
-    // not the API endpoint — while preserving an explicit non-default port.
-    return url.origin;
+    // bd-2562: return a PORTAL PATH, not the bare origin.
+    //
+    // The origin alone looked right and was wrong on real hardware: the portal
+    // root 302-redirects to the public marketing site (niete.edu.pk), so the
+    // WebView followed the redirect, judged it an external site, and handed
+    // off to Chrome — leaving the app on a grey screen. `/portal/login`
+    // returns 200 with no redirect and is the app's real entry point; the SPA
+    // router sends an already-authenticated user on to the dashboard.
+    //
+    // `origin` is still what strips the API path, query and fragment while
+    // preserving an explicit non-default port.
+    return `${url.origin}${OTA_ENTRY_PATH}`;
   } catch {
     // Unparseable or relative — fall back to the bundled assets.
     return null;
