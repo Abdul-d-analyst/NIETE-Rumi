@@ -118,7 +118,16 @@ class SQSQueueService {
 
         // FIFO queue parameters
         MessageGroupId: sessionId,  // Ensures all jobs for a session are processed in order
-        MessageDeduplicationId: `${sessionId}-${jobType}`,  // Stable deduplication ID (no timestamp)
+        // bd-2652: the dedup id MUST include the payload phase. This queue is
+        // FIFO with a 5-MINUTE dedup window, and the observe teacher-report
+        // flow queues three phases (preview → deliver → teacher_tap) under one
+        // jobType. A coach taps "send" seconds after seeing the preview, so the
+        // deliver message landed inside the window with an identical dedup id
+        // and SQS discarded it — while still returning a MessageId, so the send
+        // looked successful and the report simply never arrived. Jobs without a
+        // phase keep their historical id exactly. (bd-2645 fixed the Redis
+        // idempotency key the same way; this is the second dedupe layer.)
+        MessageDeduplicationId: `${sessionId}-${jobType}${payload && payload.phase ? `-${payload.phase}` : ''}`,
 
         // Message attributes for filtering/monitoring
         MessageAttributes: {
