@@ -44,7 +44,7 @@ function resolveIsPortal({ isNative = false, appTarget, hostname = '' } = {}) {
  * @param {string}  [opts.apiBaseUrl] configured absolute URL (VITE_API_BASE_URL)
  * @returns {string}
  */
-function resolveApiBaseUrl({ isNative = false, isProd = false, apiBaseUrl } = {}) {
+function resolveApiBaseUrl({ isNative = false, isProd = false, apiBaseUrl, origin } = {}) {
   const configured = typeof apiBaseUrl === 'string' ? apiBaseUrl.trim() : '';
   const isAbsolute = /^https?:\/\//i.test(configured);
 
@@ -82,6 +82,34 @@ function resolveApiBaseUrl({ isNative = false, isProd = false, apiBaseUrl } = {}
   if (isServedByRealHost(origin)) return '/api/portal';
 
   return 'http://localhost:4000/api/portal';
+}
+
+/**
+ * Was this page served by a real remote host? (bd-2559)
+ *
+ * The signal for "this is a developer running `vite dev`" is the page's own
+ * origin — localhost:5173, with the API on a separate port — not what NODE_ENV
+ * happened to say when the bundle was built. A page served by a real https host
+ * is served by something that also serves the API, so a relative path is right.
+ *
+ * Deliberately conservative: anything unrecognised returns false, which falls
+ * back to the dev URL. That is the safe direction here — a developer sees an
+ * obviously wrong localhost call immediately, whereas a deployed build that
+ * guessed "real host" wrongly would be silently broken for users.
+ */
+function isServedByRealHost(origin) {
+  if (typeof origin !== 'string') return false;
+  try {
+    const { protocol, hostname } = new URL(origin);
+    // https only: a portal served over plain http is not a host we should
+    // trust for the API, and file:// is not a server at all.
+    if (protocol !== 'https:') return false;
+    // Local origins are the dev case, which is what the fallback is for.
+    if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]') return false;
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function stripTrailingSlash(url) {
