@@ -11,13 +11,20 @@
  * returns null (empty answer, LLM failure, blank output).
  */
 
+const { voiceLanguageRules } = require('../../config/voice-language-rules');
+
 /**
  * @param {string} answer    the teacher's reflective answer
  * @param {string} question  the question she was answering (for context)
  * @param {string} langName  target language name (English/Urdu/…)
+ * @param {string} languageCode  ISO code ('ur','en',…) — selects voice-safe rules (bd-2651)
  * @returns {string} system prompt
  */
-function buildAcknowledgementPrompt(answer, question, langName = 'English') {
+function buildAcknowledgementPrompt(answer, question, langName = 'English', languageCode = 'en') {
+  // bd-2651: this line is spoken aloud (closing voice note), so it must obey the
+  // same voice rules as every other TTS surface — Urdu in Nastaliq with pure
+  // Urdu (not Hindi) vocabulary and English terms in Latin; English kept pure.
+  const voiceRules = voiceLanguageRules(languageCode);
   return `The teacher just finished a short reflective coaching conversation.
 
 The reflective question we asked her:
@@ -31,6 +38,7 @@ Write ONE short, warm sentence in ${langName} that reflects HER answer back to h
 - Gender-neutral — never gendered second-person verb forms; we do not know her gender.
 - Plain language; keep any pedagogical/technical terms in English (Latin letters) inline.
 - Max ~25 words. Warm, specific, human. End on a statement, not a question.
+${voiceRules}
 Return ONLY the sentence — no quotes, no preamble.`;
 }
 
@@ -46,7 +54,7 @@ async function generateAcknowledgement(answer, question, languageCode, deps = {}
   if (typeof generator !== 'function') return null;
   if (!answer || typeof answer !== 'string' || answer.trim().length < 2) return null;
   try {
-    const prompt = buildAcknowledgementPrompt(answer, question || '', langName || 'English');
+    const prompt = buildAcknowledgementPrompt(answer, question || '', langName || 'English', languageCode);
     const raw = await generator(prompt);
     const line = String(raw || '').trim().replace(/^["'\s]+|["'\s]+$/g, '');
     return line.length ? line : null;
