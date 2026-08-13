@@ -49,14 +49,27 @@ function resolveApiBaseUrl({ isNative = false, isProd = false, apiBaseUrl, origi
   const isAbsolute = /^https?:\/\//i.test(configured);
 
   if (isNative) {
-    if (!isAbsolute) {
-      throw new Error(
-        'Native builds need an absolute API base URL. Set VITE_API_BASE_URL to the ' +
-          "portal's full origin (e.g. https://portal.example.com/api/portal) — a " +
-          'relative path resolves to the WebView host, where no server is listening.'
-      );
-    }
-    return stripTrailingSlash(configured);
+    if (isAbsolute) return stripTrailingSlash(configured);
+
+    // bd-2554/bd-2566: under remote-first OTA the WebView runs the WEB bundle,
+    // served by the portal itself — so there is no VITE_API_BASE_URL, but there
+    // IS a real origin, and a relative path resolves against the very server
+    // that sent the page. Requiring an absolute URL here throws at first render
+    // and white-screens the app on every launch. That shipped as versionCode
+    // 1208: the app loaded https://portal.niete.edu.pk/portal/login correctly,
+    // then died on this line before React could mount.
+    //
+    // The rule was never "native => absolute"; it is "no usable origin =>
+    // absolute". A bundled app sits on https://localhost (or
+    // capacitor://localhost) where nothing is listening — that case must stay
+    // loud. Being SERVED by a real https host is the evidence that it is safe.
+    if (isServedByRealHost(origin)) return isProd ? '/api/portal' : stripTrailingSlash(origin) + '/api/portal';
+
+    throw new Error(
+      'Native builds need an absolute API base URL. Set VITE_API_BASE_URL to the ' +
+        "portal's full origin (e.g. https://portal.example.com/api/portal) — a " +
+        'relative path resolves to the WebView host, where no server is listening.'
+    );
   }
 
   // An explicit absolute override is honoured on the web too (useful for
