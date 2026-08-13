@@ -138,3 +138,121 @@ describe('bd-2473 — HTML escaping (unchanged contract)', () => {
     expect(html).toMatch(/&lt;script&gt;/);
   });
 });
+
+// bd-2664 — Urdu quizzes (270 of ~440 real share codes) rendered as tofu
+// boxes: no Nastaliq @font-face was embedded, and every chrome label stayed
+// English regardless of the quiz's own language. Fixed by porting the
+// language-aware pattern already proven in hero-report.template.js.
+describe('bd-2664 — Urdu report is fully localised + RTL', () => {
+  const UR_BASE = {
+    topic: 'چھوٹی یے اور بڑی یے کی آوازیں',
+    teacherName: 'مہام', grade: 'Prep',
+    started: 8, finished: 6, average: 79,
+    students: [
+      { student_name: 'زینب بی بی', student_class: 'Nursery', correct_answers: 9, total_questions_answered: 10, mastery_percentage: 90 },
+    ],
+    hardest: [{
+      question_text: 'لفظ "آزادی" میں یے کی آواز کیا بتائی گئی؟', wrong: 4, total: 8,
+      top_wrong_text: 'ی', correct_text: 'ای', misconception: 'بچے آخر کی آواز الجھا دیتے ہیں۔',
+    }],
+    guidance: 'وہ سمجھتے ہیں یے ہمیشہ ایک جیسی آواز دیتی ہے۔ بورڈ پر آزادی اور یرقان لکھیں۔ اب آپ خود بتائیں کون سی آواز ہے؟',
+    unfinished: ['محمد ولید'],
+    generatedAt: '5 Aug 2026',
+    language: 'ur',
+  };
+
+  test('the <html> tag carries dir="rtl" lang="ur"', () => {
+    const html = renderHtml(UR_BASE);
+    expect(html).toMatch(/<html dir="rtl" lang="ur">/);
+  });
+
+  test('embeds the Nastaliq font as base64 — the actual bug (tofu boxes)', () => {
+    const html = renderHtml(UR_BASE);
+    expect(html).toMatch(/@font-face\{font-family:'NastaliqUrdu'/);
+    // the base64 payload itself must be non-empty, not just the @font-face rule
+    expect(html).toMatch(/@font-face\{font-family:'NastaliqUrdu';font-weight:400;src:url\(data:font\/ttf;base64,[A-Za-z0-9+/]{100,}/);
+  });
+
+  test('chrome labels are translated, not left in English', () => {
+    const html = renderHtml(UR_BASE);
+    expect(html).toMatch(/کلاس کوئز کے نتائج/); // "Class quiz results"
+    expect(html).toMatch(/ہر طالب علم کی کارکردگی/); // "How each student did"
+    expect(html).toMatch(/کل کے لیے/); // "For tomorrow"
+    expect(html).not.toMatch(/Class quiz results/);
+    expect(html).not.toMatch(/Worth reteaching/);
+    expect(html).not.toMatch(/How each student did/);
+  });
+
+  test('an HTML entity in a translated chrome string is not double-escaped', () => {
+    // worthReteachingHeading contains a real &mdash; — must render as the
+    // entity, never as literal text "&amp;mdash;" (the double-escape bug).
+    const html = renderHtml(UR_BASE);
+    expect(html).toMatch(/دوبارہ پڑھانے کے قابل &mdash; سب سے زیادہ غلط/);
+    expect(html).not.toMatch(/&amp;mdash;/);
+  });
+
+  test('the teacher-name lockup keeps its real <b> tag, not an escaped one', () => {
+    const html = renderHtml(UR_BASE);
+    expect(html).toMatch(/مہام <b>کے لیے<\/b>/);
+    expect(html).not.toMatch(/&lt;b&gt;/);
+  });
+
+  test('real Urdu question/option/explanation content passes through verbatim', () => {
+    const html = renderHtml(UR_BASE);
+    // the source quote is a real " character — esc() correctly turns it into
+    // &quot;, so the assertion matches the ESCAPED form, not the raw string.
+    expect(html).toMatch(/لفظ &quot;آزادی&quot; میں یے کی آواز کیا بتائی گئی؟/);
+    expect(html).toMatch(/class="wrongpill">ی</);
+    expect(html).toMatch(/class="rightpill">ای</);
+    expect(html).toMatch(/بچے آخر کی آواز الجھا دیتے ہیں۔/);
+  });
+
+  test('the guidance paragraph renders in Urdu inside the "کل کے لیے" card', () => {
+    const html = renderHtml(UR_BASE);
+    expect(html).toMatch(/class="try"/);
+    expect(html).toMatch(/وہ سمجھتے ہیں یے ہمیشہ ایک جیسی آواز دیتی ہے۔/);
+  });
+
+  test('a student name with HTML-special characters is still escaped in RTL mode', () => {
+    const html = renderHtml({
+      ...UR_BASE,
+      students: [{ student_name: '<script>x</script>', student_class: 'Nursery', correct_answers: 1, total_questions_answered: 1, mastery_percentage: 100 }],
+    });
+    // wrapLatin() correctly isolates "script"/"x" as Latin runs (each becomes
+    // its own <span class="ltr">), so the entities are no longer contiguous —
+    // assert the dangerous raw tag is gone and both escaped entities exist,
+    // rather than requiring an exact adjacent substring.
+    expect(html).not.toMatch(/<script>x</);
+    expect(html).toMatch(/&lt;/);
+    expect(html).toMatch(/&gt;/);
+    expect(html).toMatch(/<span class="ltr">script<\/span>/);
+  });
+
+  test('a stray Latin word inside Urdu content is isolated in an .ltr span', () => {
+    const html = renderHtml({ ...UR_BASE, topic: 'Science کا سبق' });
+    expect(html).toMatch(/<span class="ltr">Science<\/span>/);
+  });
+
+  // Caught by rendering the REAL bd-2664 verification PDF and reading it:
+  // the footer date "13 Aug 2026" visually painted as "Aug 2026 13" under
+  // <html dir="rtl"> because unicode-bidi:isolate alone doesn't force LTR —
+  // it still resolves direction from the inherited (rtl) `direction`
+  // property. A text-matching test can't see the bug (raw HTML order is
+  // unchanged, only paint order); this locks in the actual fix so a future
+  // edit can't silently drop it.
+  test('the .ltr isolation class forces its own LTR base direction', () => {
+    const html = renderHtml(UR_BASE);
+    expect(html).toMatch(/\.ltr\{[^}]*direction:ltr/);
+  });
+
+  test('the footer date is wrapped in the LTR-forcing class, not a bare isolate', () => {
+    const html = renderHtml(UR_BASE);
+    expect(html).toMatch(/<div class="ltr" style="font-family:'Lexend',sans-serif">5 Aug 2026<\/div>/);
+  });
+
+  test('default language (no field passed) stays English/LTR — no regression', () => {
+    const html = renderHtml(BASE);
+    expect(html).toMatch(/<html dir="ltr" lang="en">/);
+    expect(html).toMatch(/Worth reteaching/);
+  });
+});
