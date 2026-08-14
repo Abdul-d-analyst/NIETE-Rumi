@@ -20,7 +20,8 @@
  * anything else; there is no partial map.
  */
 
-const { logToFile } = require('../utils/logger');
+const { logToFile, logError } = require('../utils/logger');
+const { resolveUx } = require('../config/ux-strings');
 const { REMARK_TRIGGER_RX } = require('../services/remark/remark-gate');
 const { CAPABILITIES } = require('../services/authz/capability');
 
@@ -87,7 +88,17 @@ async function handleRemarkCommand(user, from, messageBody, deps = {}) {
     getActiveCycle = require('../services/remark/remark-cycle.repository').getActiveCycle,
     listSchoolTeachers = require('../services/remark/remark-cycle.repository').listSchoolTeachers,
     getProgress = require('../services/remark/remark-cycle.repository').getProgress,
-    sendMessage = require('../services/whatsapp.service').sendMessage,
+    // bd-2711 — MUST stay a method call. `WhatsAppService.sendMessage` is a
+    // STATIC method whose first line is `this._removeEmotionTags(message)`, so
+    // destructuring it (`.sendMessage` into a bare reference) drops `this` and
+    // every send throws TypeError before reaching the Graph API. That shipped:
+    // /remark was silent on staging AND prod from the first commit, while still
+    // logging "roster sent". Wrapped rather than bound at module load so the
+    // require stays lazy — whatsapp.service pulls in r2.js → @aws-sdk.
+    sendMessage = (to, text) => require('../services/whatsapp.service').sendMessage(to, text),
+    // Same static-method binding rule as sendMessage above (bd-2711) — sendFlow
+    // is also a static on WhatsAppService.
+    sendFlow = (to, flowData) => require('../services/whatsapp.service').sendFlow(to, flowData),
   } = deps;
 
   const S = strings(user);
@@ -124,11 +135,53 @@ async function handleRemarkCommand(user, from, messageBody, deps = {}) {
       await sendMessage(from, S.no_teachers);
       return true;
     }
+
+    // bd-2712 — the Flow is the real surface. Presence-gated on REMARK_FLOW_ID
+    // (feature-availability convention): when the Flow has not been published to
+    // this WABA yet, fall through to the plain-text roster below so behaviour is
+    // never WORSE than before this change.
+    //
+    // flowToken is the bare user id — whatsapp-flows rule 3. No `screen`, so
+    // sendFlow chooses data_exchange mode and Meta calls INIT on our endpoint,
+    // which builds the roster server-side.
+    const { REMARK_FLOW_ID } = require('../utils/constants');
+    if (REMARK_FLOW_ID) {
+      const sentFlow = await sendFlow(from, {
+        flowId: REMARK_FLOW_ID,
+        flowToken: user.id,
+        header: resolveUx('remarkFlowHeader', { user }),
+        body: resolveUx('remarkFlowBody', { user, params: { cycle: cycle.name } }),
+        buttonText: resolveUx('remarkFlowButton', { user }),
+      });
+      if (sentFlow !== false) {
+        logToFile('📝 /remark flow sent', {
+          userId: user.id, cycleId: cycle.id, teachers: teachers.length,
+        });
+        return true;
+      }
+      // Send failed — say so loudly and fall back to the text roster rather than
+      // leaving her with silence (the bd-2711 failure mode).
+      logError('❌ /remark: flow send FAILED — falling back to text roster', {
+        userId: user.id, cycleId: cycle.id, flowId: REMARK_FLOW_ID,
+      });
+    }
+
     const progress = await getProgress(user.id, cycle.id);
-    await sendMessage(from, buildRoster(teachers, progress || {}, S, cycle.name));
-    logToFile('📝 /remark roster sent', {
-      userId: user.id, cycleId: cycle.id, teachers: teachers.length,
-    });
+    // bd-2711 — sendMessage RETURNS false on failure (it catches its own
+    // exceptions), so an unconditional success log reports a delivery that
+    // never happened. That is how a totally silent /remark read as healthy in
+    // Axiom for four days. Trust the return value, and log the failure at
+    // ERROR so it reaches the error-level monitor.
+    const delivered = await sendMessage(from, buildRoster(teachers, progress || {}, S, cycle.name));
+    if (delivered === false) {
+      logError('❌ /remark: roster send FAILED — principal got nothing', {
+        userId: user.id, cycleId: cycle.id, teachers: teachers.length,
+      });
+    } else {
+      logToFile('📝 /remark roster sent', {
+        userId: user.id, cycleId: cycle.id, teachers: teachers.length,
+      });
+    }
   } catch (err) {
     // Degrade to a message; never drop silently. A principal who gets no reply
     // assumes the feature is broken and stops trying.

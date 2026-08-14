@@ -20,7 +20,7 @@ const { handleImageMessage } = require('./shared/handlers/image-message.handler'
 const ExamCheckerHandler = require('./shared/handlers/exam-checker.handler');
 
 // Import Utils
-const { logToFile, LOGS_DIR } = require('./shared/utils/logger');
+const { logToFile, logError, LOGS_DIR } = require('./shared/utils/logger');
 const validators = require('./shared/utils/validators');
 const constants = require('./shared/utils/constants');
 const { setUserLanguage } = require('./shared/utils/language-cache');
@@ -512,6 +512,17 @@ app.post('/webhook', async (req, res) => {
       // Handle interactive button responses
       const buttonId = message.interactive.button_reply.id;
       logToFile('📱 Interactive button clicked', { buttonId, from });
+
+      // bd-2712 — "Grade another teacher?" after a Supervisor Remark submit.
+      // Re-enters through handleRemarkCommand rather than reaching into the flow
+      // sender directly, so BOTH gates (capability + open cycle) are re-checked:
+      // a cycle can close between two teachers, and a principal must not keep a
+      // private door open just because she was mid-session.
+      if (buttonId === 'remark_next') {
+        const { handleRemarkCommand } = require('./shared/handlers/remark-command.handler');
+        await handleRemarkCommand(user, from, '/remark');
+        return;
+      }
 
       // Teacher-training module + quiz buttons
       if (buttonId.startsWith('training_module_done_')) {
@@ -1419,6 +1430,48 @@ app.post('/webhook', async (req, res) => {
           from,
           responseFields: Object.keys(responseJson)
         });
+      } else if (flowType === 'remark') {
+        // Supervisor Remark (bd-2712). The endpoint already did every write
+        // before the Flow closed, so this branch ONLY acknowledges — it must not
+        // re-persist anything. Without it the principal lands on the catch-all
+        // "Thanks for your response! Type /menu…", which reads as the evaluation
+        // having gone nowhere (whatsapp-flows rules 10 + 11).
+        logToFile('📝 Detected supervisor remark flow submission', {
+          from, responseFields: Object.keys(responseJson),
+        });
+        try {
+          const { resolveUx } = require('./shared/config/ux-strings');
+          const left = Number(responseJson.remark_left || 0);
+          const teacher = responseJson.remark_teacher || '';
+
+          // ONE message, not two. The confirmation and the next-step prompt are
+          // the same beat, and an earlier version sent the ack ("…Send /remark
+          // again for the next teacher.") AND a button underneath — telling her
+          // the same thing twice, once in prose she must retype and once as a tap.
+          //
+          // The button is single, not a yes/no pair: finishing is the common case
+          // and must not cost a tap, so "no" is simply not answering. Any other
+          // reply falls through to normal chat, which is why there is no state to
+          // clear either.
+          if (left > 0) {
+            await WhatsAppService.sendInteractiveButtons(from, {
+              body: resolveUx('remarkAckSubmitted', {
+                user,
+                params: { teacher, left: resolveUx('remarkAnotherPrompt', { user }) },
+              }),
+              buttons: [{ id: 'remark_next', title: resolveUx('remarkAnotherButton', { user }) }],
+            });
+          } else {
+            await WhatsAppService.sendMessage(from, resolveUx('remarkAckSubmitted', {
+              user,
+              params: { teacher, left: resolveUx('remarkAckAllDone', { user }) },
+            }));
+          }
+        } catch (ackError) {
+          logError('❌ Exception acking supervisor remark', {
+            from, error: ackError.message, stack: ackError.stack,
+          });
+        }
       } else if (flowType === 'teacher_training') {
         // Teacher Training Flow — hand off to FlowResponseHandler which routes
         // by training_action to content delivery or grand quiz start.
