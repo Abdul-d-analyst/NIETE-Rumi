@@ -6,17 +6,19 @@
  * lazily requires the template inside sendAsPdf(). Putting a shared helper in
  * one of them and importing it from the other would close that loop into a
  * circular require.
+ *
+ * Ported from the main bot (bd-2610/2611/2612) as a prerequisite for the
+ * video-quiz report i18n foundation — self-contained, no other deps.
  */
 
 /**
  * bd-2611 — take markdown emphasis out of LLM prose before a teacher reads it.
  *
- * The "For tomorrow" paragraph is written by gpt-5.4-mini, which reaches for
- * markdown unprompted: 4 of the 10 largest real Rawalpindi class reports read
- * "They think **the** is the word for any thing". Nothing stripped it, so the
- * asterisks went out in the PDF. Telling the prompt not to use markdown helps
- * but cannot be relied on — a model is free to ignore an instruction, so the
- * guarantee has to be deterministic and live here.
+ * The "For tomorrow" paragraph is written by an LLM, which reaches for
+ * markdown unprompted. Nothing stripped it, so the asterisks went out in the
+ * PDF. Telling the prompt not to use markdown helps but cannot be relied on —
+ * a model is free to ignore an instruction, so the guarantee has to be
+ * deterministic and live here.
  *
  * Deliberately does NOT touch a lone `*`. In the WhatsApp text fallback a
  * single asterisk IS bold, so stripping it would break the one place it is

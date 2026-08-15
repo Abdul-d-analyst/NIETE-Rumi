@@ -45,13 +45,12 @@ const JOB_TYPE = 'quiz_video_report';
 const LEGACY_JOB_TYPE = 'video_quiz_report';
 
 /**
- * bd-2664 — Perso-Arabic-script (RTL) quiz languages this report localises
- * for. 'pa-PK'/'sd-PK' have no dedicated chrome/guidance translation (small
- * volume, no linguistic review yet) and fall back to the Urdu strings — a
- * documented approximation, not a claim of Punjabi/Sindhi precision. See the
- * PlayWriteReports skill.
+ * RTL (Perso-Arabic-script) quiz languages this report localises for.
+ * NIETE is flat en/ur (root CLAUDE.md language-protocol) — no pa-PK/sd-PK
+ * concept here, unlike the main bot's 5-market region-keyed offer. Ported
+ * from the main bot's bd-2664/bd-2679. See the PlayWriteReports skill.
  */
-const RTL_LANGS = new Set(['ur', 'pa-PK', 'sd-PK']);
+const RTL_LANGS = new Set(['ur']);
 
 const PKT_OFFSET_MIN = 5 * 60;
 
@@ -591,13 +590,11 @@ async function hardestQuestions(shareCodeId, limit = 3) {
  * class that got everything right, and inventing some would train her to skip
  * this section.
  *
- * bd-2664: `language` picks the prompt AND the requested output language.
- * The evidence itself needs no translation — question_text/top_wrong_text/
+ * `language` picks the prompt AND the requested output language. The
+ * evidence itself needs no translation — question_text/top_wrong_text/
  * correct_text/misconception already come from `quiz_questions`, authored in
  * whatever script the quiz was written in (Urdu quizzes carry Urdu evidence).
  * Only the instructions-to-the-model and the requested prose language change.
- * pa-PK/sd-PK route through the Urdu prompt (see RTL_LANGS comment above —
- * documented approximation, not a claim of Punjabi/Sindhi precision).
  */
 function buildGuidancePrompt({ topic, grade, average, finished, started, hardest, language = 'en' }) {
   if (!hardest || !hardest.length) return null;
