@@ -208,15 +208,22 @@ describe('bd-2664 — Urdu quizzes get Urdu guidance', () => {
     expect(prompt).not.toMatch(/سمجھتی ہوں گی|کریں گی|لکھتی ہے|پڑھتی ہے/);
   });
 
-  test('pa-PK and sd-PK route through the Urdu prompt (documented fallback)', () => {
+  // bd-2693 — NIETE is flat en/ur (root CLAUDE.md language-protocol): there
+  // is no product surface where a NIETE teacher's quiz could ever carry
+  // 'pa-PK'/'sd-PK', unlike the main bot's 5-market region-keyed offer this
+  // test previously assumed (wholesale-copied from PK without adapting to
+  // NIETE's actual language model, in the pre-develop `f34ba17` port). An
+  // out-of-scope language value now falls back to the SAFE default (English)
+  // rather than silently guessing Urdu for a language NIETE never offers.
+  test('an unsupported language value (e.g. pa-PK/sd-PK, out of NIETE\'s en/ur scope) falls back to English, not a silent Urdu guess', () => {
     const paPrompt = report.buildGuidancePrompt({
       topic: 'ٹیسٹ', average: 70, finished: 5, started: 6, hardest: UR_HARDEST, language: 'pa-PK',
     });
     const sdPrompt = report.buildGuidancePrompt({
       topic: 'ٹیسٹ', average: 70, finished: 5, started: 6, hardest: UR_HARDEST, language: 'sd-PK',
     });
-    expect(paPrompt).toMatch(/بالکل تین جملے لکھیں/);
-    expect(sdPrompt).toMatch(/بالکل تین جملے لکھیں/);
+    expect(paPrompt).toMatch(/Write EXACTLY three sentences/);
+    expect(sdPrompt).toMatch(/Write EXACTLY three sentences/);
   });
 
   test('no language field (default) is unchanged — still the English prompt', () => {

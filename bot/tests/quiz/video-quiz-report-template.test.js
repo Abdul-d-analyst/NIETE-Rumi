@@ -138,7 +138,6 @@ describe('bd-2473 — HTML escaping (unchanged contract)', () => {
     expect(html).toMatch(/&lt;script&gt;/);
   });
 });
-
 // bd-2664 — Urdu quizzes (270 of ~440 real share codes) rendered as tofu
 // boxes: no Nastaliq @font-face was embedded, and every chrome label stayed
 // English regardless of the quiz's own language. Fixed by porting the
@@ -199,9 +198,12 @@ describe('bd-2664 — Urdu report is fully localised + RTL', () => {
 
   test('real Urdu question/option/explanation content passes through verbatim', () => {
     const html = renderHtml(UR_BASE);
-    // the source quote is a real " character — esc() correctly turns it into
-    // &quot;, so the assertion matches the ESCAPED form, not the raw string.
-    expect(html).toMatch(/لفظ &quot;آزادی&quot; میں یے کی آواز کیا بتائی گئی؟/);
+    // bd-2679 — esc() no longer entity-escapes quote characters (T()/L() are
+    // only ever interpolated into text content, never an attribute value, so
+    // a literal quote is markup-safe; entity-escaping it was actively
+    // fragmenting mixed-script sentences at the entity boundary — see esc()'s
+    // own comment). The source " now passes through as a literal character.
+    expect(html).toMatch(/لفظ "آزادی" میں یے کی آواز کیا بتائی گئی؟/);
     expect(html).toMatch(/class="wrongpill">ی</);
     expect(html).toMatch(/class="rightpill">ای</);
     expect(html).toMatch(/بچے آخر کی آواز الجھا دیتے ہیں۔/);
@@ -254,5 +256,119 @@ describe('bd-2664 — Urdu report is fully localised + RTL', () => {
     const html = renderHtml(BASE);
     expect(html).toMatch(/<html dir="ltr" lang="en">/);
     expect(html).toMatch(/Worth reteaching/);
+  });
+});
+
+// bd-2679 — an Urdu-medium quiz whose SUBJECT is English (a real, expected
+// shape: English vocabulary taught via Urdu instruction, e.g. Maham Riaz's
+// real "Tall and Short" report) renders its mostly-English question text as
+// visually scrambled clauses. wrapLatin()'s Latin-run regex excludes ASCII
+// digits and common punctuation (, : ; ? ! ( ) % /) from a "run", so any
+// digit/punctuation inside an English sentence splits it into MULTIPLE
+// separate .ltr-isolated spans with bare, un-isolated characters between
+// them. The browser's bidi algorithm then reorders those adjacent isolated
+// islands (and the bare punctuation) per the surrounding dir="rtl"
+// paragraph — scrambling clause order even though no individual span's own
+// text is corrupted. Real production evidence: the PDF for Maham Riaz
+// (+92 309 5871532) renders "A child says: tall broom, short broom, tall
+// axe are 3 tall things. What is the correct tall count?" reordered into
+// something unreadable.
+describe('bd-2679 — English question content inside an Urdu report is not bidi-scrambled', () => {
+  const ENGLISH_SUBJECT_UR_BASE = {
+    topic: 'Tall and Short',
+    teacherName: 'Maham', grade: 'Prep',
+    started: 14, finished: 11, average: 84,
+    students: [
+      { student_name: 'Maham Riaz', student_class: 'Prep', correct_answers: 10, total_questions_answered: 10, mastery_percentage: 100 },
+    ],
+    hardest: [{
+      // The exact real question from the production PDF, word for word.
+      question_text: 'A child says: tall broom, short broom, tall axe are 3 tall things. What is the correct tall count?',
+      wrong: 5, total: 11,
+      top_wrong_text: '2', correct_text: '3',
+      misconception: 'You counted every object as tall, but the short broom is not tall. The correct answer is 2, because tall broom and tall axe are tall.',
+    }],
+    guidance: 'کل کے لیے: axe, broom, tree, chair, witch, Pinky, Lamboo ایک ایک کر کے دکھائیں۔',
+    unfinished: [],
+    generatedAt: '14 Aug 2026',
+    language: 'ur',
+  };
+
+  test('the full English question renders as ONE contiguous LTR span, not fragmented at digits/punctuation', () => {
+    const html = renderHtml(ENGLISH_SUBJECT_UR_BASE);
+    // Escaped form: esc() turns nothing here (no &<>"' in the source), so
+    // the raw sentence should appear verbatim inside a single .ltr span.
+    expect(html).toMatch(
+      /<span class="ltr">A child says: tall broom, short broom, tall axe are 3 tall things\. What is the correct tall count\?<\/span>/
+    );
+  });
+
+  test('the wrong/correct answer pills (bare digits) still render, isolated', () => {
+    const html = renderHtml(ENGLISH_SUBJECT_UR_BASE);
+    expect(html).toMatch(/class="wrongpill"><span class="ltr">2<\/span>/);
+    expect(html).toMatch(/class="rightpill"><span class="ltr">3<\/span>/);
+  });
+
+  test('the misconception explanation (English, multiple sentences with commas/periods) is not fragmented either', () => {
+    const html = renderHtml(ENGLISH_SUBJECT_UR_BASE);
+    expect(html).toMatch(
+      /<span class="ltr">You counted every object as tall, but the short broom is not tall\. The correct answer is 2, because tall broom and tall axe are tall\.<\/span>/
+    );
+  });
+
+  // Found by rendering the REAL Maham Riaz report and reading the actual
+  // image (not just this test suite) — a THIRD real question from the same
+  // report uses "+" as a separator, which the first pass of this fix missed
+  // (only added digits/,/:/;/?/!/(/)/%// — not +). Without it, this
+  // question reordered its whole clauses around the bare "+" signs the
+  // exact same way the other two questions did around commas/colons.
+  test('a "+"-joined English list question is not fragmented at the plus signs', () => {
+    const html = renderHtml({
+      ...ENGLISH_SUBJECT_UR_BASE,
+      hardest: [{
+        question_text: 'Short witch + short chair + short tree + tall Lamboo: how many are short?',
+        wrong: 4, total: 11, top_wrong_text: '4', correct_text: '3',
+        misconception: 'You counted all the things, but we count only the short ones.',
+      }],
+    });
+    expect(html).toMatch(
+      /<span class="ltr">Short witch \+ short chair \+ short tree \+ tall Lamboo: how many are short\?<\/span>/
+    );
+  });
+
+  // Found by bd-2680's production audit (real SENT ur-language reports):
+  // esc() turns a literal apostrophe into the numeric entity &#39; BEFORE
+  // wrapLatin() runs. wrapLatin's own tag/entity pre-split regex then pulls
+  // &#39; out as its own opaque, unwrappable segment — so an English
+  // contraction/possessive gets torn into two separate .ltr spans with a
+  // bare &#39; between them, mid-WORD, not just mid-clause. Real examples:
+  // "My cat's name is Lado", "don't have", "Jojo's hair". T()/L() are only
+  // ever interpolated into element TEXT CONTENT in this template (never an
+  // HTML attribute value — grepped every call site), so a literal quote
+  // character is markup-safe here; the fix is to stop entity-escaping ' and
+  // " at all, so they flow through as literal characters wrapLatin can
+  // isolate as part of the surrounding Latin run.
+  test('an apostrophe inside an English word does not split it into two spans', () => {
+    const html = renderHtml({
+      ...ENGLISH_SUBJECT_UR_BASE,
+      hardest: [{
+        question_text: "My cat's name is Lado.", wrong: 2, total: 11,
+        top_wrong_text: 'a', correct_text: 'b',
+        misconception: "Invertebrates are animals that don't have a backbone.",
+      }],
+    });
+    expect(html).toMatch(/<span class="ltr">My cat's name is Lado\.<\/span>/);
+    expect(html).toMatch(/<span class="ltr">Invertebrates are animals that don't have a backbone\.<\/span>/);
+  });
+
+  test('a double-quoted English phrase does not split at the quote marks', () => {
+    const html = renderHtml({
+      ...ENGLISH_SUBJECT_UR_BASE,
+      hardest: [{
+        question_text: 'Which word means "big"?', wrong: 3, total: 11,
+        top_wrong_text: 'small', correct_text: 'large', misconception: null,
+      }],
+    });
+    expect(html).toMatch(/<span class="ltr">Which word means "big"\?<\/span>/);
   });
 });

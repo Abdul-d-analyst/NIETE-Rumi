@@ -1,31 +1,25 @@
 'use strict';
 /**
- * Video-quiz class report — bd-2335, redesigned bd-2473, i18n'd bd-2664.
+ * Video-quiz class report — bd-2335, redesigned bd-2473, i18n foundation
+ * ported from the main bot (bd-2664/bd-2679) — NIETE's copy was still the
+ * English-only v1 layout: no Nastaliq font, no RTL, no per-language chrome.
  *
  * The teacher's copy of "how did my class do, and what do I do about it".
  * v2 (bd-2473) adopts the coaching hero-report visual system (navy hero,
- * Fraunces/Lexend, jewel-tone cards, gold accents — see
+ * Fraunces/Lexend, jewel-tone cards, gold accents — see the main bot's
  * shared/services/coaching/report-v2/hero-report.template.js) instead of the
- * v1 flat white layout, so the report family reads as one product. Approved
- * mockup, built against real data (Razia / GPS Jhanda Chichi, Rawalpindi):
- * "06_Logs & Misc/Reports/Active/Video Quizzes - Jul 2026/report-redesign/".
+ * v1 flat white layout, so the report family reads as one product.
  *
- * bd-2664: v2 shipped WITHOUT a Nastaliq font-face — every Urdu quiz (270 of
- * ~440 share codes, the majority) rendered as tofu boxes for the question
- * text, options, and explanations, and the chrome labels ("Worth reteaching",
- * "How each student did", etc.) stayed English regardless of the quiz's own
- * language. `quiz-report.template.js` (the sibling /quiz report this was
- * modeled on) and `hero-report.template.js` (the coaching report this v2
- * copied the VISUAL system from) both already solved this — this file just
- * hadn't inherited the fix. See the `PlayWriteReports` skill for the full
- * pattern (font embedding, RTL layout, chrome-string localisation, mixed-
- * script isolation) generalised across every Playwright-rendered report.
+ * The ordering is still the argument, unchanged from v1: what to reteach
+ * comes FIRST, above the roster. A report that opens with a ranked list of
+ * children invites her to read it as a league table; one that opens with
+ * "these three questions, this wrong answer, here is why" invites her to
+ * change tomorrow's lesson. Scores are underneath, because she does still
+ * need them.
  *
- * language ('en' default; 'ur' fully localised chrome + RTL; 'pa-PK'/'sd-PK'
- * are also Perso-Arabic-script languages with no dedicated font asset in the
- * repo — they render RTL via the Nastaliq font + the Urdu chrome strings as
- * a documented approximation, which is a strict improvement over the
- * previous all-tofu/all-English state, not a claim of linguistic precision).
+ * language ('en' default; 'ur' fully localised chrome + RTL — NIETE is flat
+ * en/ur, root CLAUDE.md language-protocol, unlike the main bot's 5-market
+ * region-keyed offer with pa-PK/sd-PK approximation branches).
  *
  * Function signature is UNCHANGED except for the new optional `language`
  * key — video-quiz-report.service.js's call site adds one field, nothing
@@ -52,34 +46,42 @@ function assets() {
       lexendBold: readBase64('fonts/Lexend-Bold.ttf'),
       fraunces: readBase64('fonts/Fraunces-Regular.ttf'),
       frauncesSemi: readBase64('fonts/Fraunces-SemiBold.ttf'),
-      // bd-2664 — same asset quiz-report.template.js and hero-report.template.js
-      // already embed. Without this @font-face, Urdu/Perso-Arabic text has no
-      // glyphs to fall back to and Chromium renders empty tofu boxes.
+      // Same asset the main bot's hero-report.template.js embeds. Without
+      // this @font-face, Urdu/Perso-Arabic text has no glyphs to fall back
+      // to and Chromium renders empty tofu boxes.
       nastaliq: readBase64('fonts/NotoNastaliqUrdu-Regular.ttf'),
       nastaliqBold: readBase64('fonts/NotoNastaliqUrdu-Bold.ttf'),
-      // NIETE branding (2026-08-04, bd-2488): black-on-transparent N/ن
-      // monogram from the niete-brand skill, for the light-background
-      // footer lockup — replaces PK's Rumi mark for this fork.
+      // NIETE branding (2026-08-04): black-on-transparent N/ن monogram from
+      // the niete-brand skill, for the light-background footer lockup.
       nieteMark: readBase64('assets/niete-mark-black-transparent.png'),
     };
   }
   return _assets;
 }
 
+/**
+ * Deliberately does NOT escape quote characters. Every T()/L() call site in
+ * this file interpolates into element TEXT CONTENT, never an HTML attribute
+ * value (checked every call site) — a literal `'`/`"` is markup-safe there.
+ * Escaping them to &#39;/&quot; used to actively cause a bug on the main bot
+ * (bd-2679): wrapLatin()'s tag/entity pre-split pulls any HTML entity out as
+ * its own opaque, unwrappable segment, so an escaped apostrophe tore an
+ * English contraction/possessive ("cat's", "don't") into two separate
+ * isolated .ltr spans with a bare entity between them, mid-word. Building
+ * this port already in the fixed shape, skipping the intermediate bug.
+ * `<`/`>`/`&` stay escaped — those ARE markup-significant in text content.
+ */
 function esc(s) {
   if (s === null || s === undefined) return '';
   return String(s)
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-/** Perso-Arabic-script (RTL) quiz languages the report currently ships for. */
-const RTL_LANGS = new Set(['ur', 'pa-PK', 'sd-PK']);
+/** RTL (Perso-Arabic-script) quiz languages this report ships for. NIETE is
+ *  flat en/ur — no pa-PK/sd-PK concept here. */
+const RTL_LANGS = new Set(['ur']);
 
-/**
- * Chrome strings per language. 'pa-PK'/'sd-PK' fall back to 'ur' (see file
- * header) — documented approximation, not a claim of Punjabi/Sindhi accuracy.
- */
+/** Chrome strings per language. */
 const CHROME = {
   en: {
     eyebrow: 'Class quiz results',
@@ -116,17 +118,31 @@ const CHROME = {
 /**
  * Wrap Latin-script runs in an explicit LTR span so mixed Urdu+English text
  * doesn't get visually scrambled by the browser's bidi algorithm — same
- * technique as hero-report.template.js's wrapLatin(), including the same
- * fix (bd-2225 there): split on tags AND HTML entities FIRST so a wrap never
- * lands inside a tag or splits an entity like `&amp;` into `&<span>amp</span>;`.
- * No-ops for LTR reports.
+ * technique as the main bot's hero-report.template.js's wrapLatin(),
+ * including the split-on-tags-and-entities-FIRST fix (a naive regex replace
+ * can land inside a tag attribute or split a real entity like `&amp;` into
+ * `&<span>amp</span>;`). No-ops for LTR reports.
+ *
+ * The run-detection class includes ASCII digits and common punctuation/
+ * symbols (`,` `:` `;` `?` `!` `(` `)` `%` `/` `+` `=` `*` `$` `@` `#` `"`) —
+ * built already in this shape rather than the main bot's original narrower
+ * class, which excluded them and fragmented English clauses inside RTL text
+ * into several separate isolated spans with bare, un-isolated characters
+ * between them (bd-2679 on the main bot: isolation only preserves order
+ * WITHIN a span — the browser's bidi algorithm still reorders adjacent
+ * isolated islands per the surrounding dir="rtl" paragraph, scrambling
+ * clause order even though no individual span's own text was corrupted).
+ * This codebase's genuine Urdu punctuation uses distinct Arabic-block
+ * characters (۔ ، ؟), never these ASCII ones, so the wide class doesn't risk
+ * swallowing real Urdu text. Quotes are includable because esc() (above) no
+ * longer entity-escapes them.
  */
 function wrapLatin(html, rtl) {
   if (!rtl) return html;
   return html.split(/(<[^>]+>|&[a-zA-Z]+;|&#\d+;)/).map((seg) => (
     seg.startsWith('<') || (seg.startsWith('&') && seg.endsWith(';'))
   ) ? seg
-    : seg.replace(/[A-Za-z][A-Za-z'’.\-]*(?:[\s\-][A-Za-z'’.\-]+)*/g, (m) => `<span class="ltr">${m}</span>`)).join('');
+    : seg.replace(/[A-Za-z0-9][A-Za-z0-9'’".,:;!?()%/+=*$@#\-]*(?:[\s\-][A-Za-z0-9'’".,:;!?()%/+=*$@#\-]+)*/g, (m) => `<span class="ltr">${m}</span>`)).join('');
 }
 
 /** Progress-bar band, matching the coaching hero-report's domain-bar palette. */
@@ -146,8 +162,6 @@ function renderVideoQuizReportHtml(d) {
   } = d || {};
 
   const RTL = RTL_LANGS.has(language);
-  // pa-PK/sd-PK have no dedicated chrome translation (see file header) — fall
-  // back to Urdu, the closest available Perso-Arabic-script chrome set.
   const C = CHROME[language] || (RTL ? CHROME.ur : CHROME.en);
   // T() = untrusted content (escape THEN isolate Latin runs). L() = trusted,
   // developer-authored chrome HTML that may already contain real tags/entities
@@ -182,6 +196,9 @@ function renderVideoQuizReportHtml(d) {
       </div>`;
   }).join('');
 
+  const brandMarkImg = a.nieteMark
+    ? `<img class="mark" src="data:image/png;base64,${a.nieteMark}" alt="NIETE">` : '';
+
   const notFinished = unfinished.length ? `
     <div class="unfin"><b>${L(C.notFinishedYet)}</b> ${T(unfinished.join(RTL ? '، ' : ', '))}</div>` : '';
 
@@ -205,14 +222,15 @@ function renderVideoQuizReportHtml(d) {
 @font-face{font-family:'NastaliqUrdu';font-weight:700;src:url(data:font/ttf;base64,${a.nastaliqBold}) format('truetype')}
 body{background:#eef1f7;font-family:${bodyFam}}
 .report{width:794px;margin:0 auto;background:#fff;color:#1c2438}
-/* bd-2664 — Latin runs isolated inside RTL text (proper nouns, stray English
-   words) render in their own script + direction, matching hero-report. */
-/* bd-2664: unicode-bidi:isolate alone does NOT force LTR — it only isolates
-   the run from surrounding context, then still resolves direction from the
+/* Latin runs isolated inside RTL text (proper nouns, stray English words)
+   render in their own script + direction, matching hero-report. */
+/* unicode-bidi:isolate alone does NOT force LTR — it only isolates the run
+   from surrounding context, then still resolves direction from the
    INHERITED direction property, which under html dir=rtl is rtl. A
    multi-run string like a date ("13 Aug 2026" — digits/letters are separate
-   bidi runs) then visually reorders (observed: "Aug 2026 13"). direction:ltr
-   forces the isolate's own base direction, independent of the RTL ancestor. */
+   bidi runs) then visually reorders (observed on the main bot: "Aug 2026
+   13"). direction:ltr forces the isolate's own base direction, independent
+   of the RTL ancestor. */
 .ltr{font-family:'Lexend',sans-serif;font-weight:600;unicode-bidi:isolate;direction:ltr}
 
 .hero{position:relative;min-height:230px;overflow:hidden;background:#0c1a4e;padding:30px 42px 26px}
@@ -266,9 +284,7 @@ body{background:#eef1f7;font-family:${bodyFam}}
 
 .foot{display:flex;align-items:center;justify-content:space-between;padding:20px 42px 28px;margin-top:20px;border-top:1px solid #eef0f6;color:#8a93ad;font-size:12px}
 .brand{display:flex;align-items:center;gap:8px;font-weight:700;color:#0c1a4e;font-size:14px;font-family:'Lexend'}
-/* The mark is a 2.6:1 lockup — set width ONLY and let height follow, or the
-   dots and smile get crushed (rumi-brand). Matches hero-report's .brand img. */
-.brand img{width:30px;height:auto;display:block}
+.brand .mark{width:20px;height:20px;object-fit:contain;display:block}
 </style></head><body>
 <div class="report">
 
@@ -300,7 +316,7 @@ body{background:#eef1f7;font-family:${bodyFam}}
   ${guidanceBlock}
 
   <div class="foot">
-    <div class="brand">${a.nieteMark ? `<img src="data:image/png;base64,${a.nieteMark}" alt="NIETE">` : ''}NIETE</div>
+    <div class="brand">${brandMarkImg}NIETE</div>
     <div class="ltr" style="font-family:'Lexend',sans-serif">${esc(generatedAt)}</div>
   </div>
 
