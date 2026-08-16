@@ -637,6 +637,8 @@ app.post('/webhook', async (req, res) => {
           else if (parsed.action === 'later') await ObserveSend.handleSendLater(parsed.sessionId, from, user);
           else if (parsed.action === 'confirm') await ObserveSend.handleSendConfirm(parsed.sessionId, from, user);
           else if (parsed.action === 'cancel') await ObserveSend.handleSendCancel(parsed.sessionId, from, user);
+          // bd-2673 — flip the teacher report's language, then re-preview.
+          else if (parsed.action === 'lang') await ObserveSend.handleSendLangToggle(parsed.sessionId, from, user);
         } else {
           logToFile('⚠️ observe send button without user/parse', { buttonId, hasUser: !!user });
         }
@@ -1840,6 +1842,14 @@ app.post('/webhook', async (req, res) => {
         const ObserveSend = require('./shared/services/observe/observe-send.service');
         if (user) await ObserveSend.handleTeacherManage(user, from, listId);
         else logToFile('⚠️ observe teacher-manage tap without user', { listId });
+      }
+      // bd-2668 "who did you observe?" rows (observe_who_<sessionId>_<idx|other>),
+      // sent after an unbound capture. Distinct prefix, so ordering among the
+      // other observe_ branches does not matter — kept here beside its siblings.
+      else if (listId.startsWith('observe_who_')) {
+        const ObserveWho = require('./shared/services/observe/observe-who.service');
+        if (user) await ObserveWho.handleObservedTeacherPick(user, from, listId);
+        else logToFile('⚠️ observe who-pick tap without user', { listId });
       }
       // Teacher-pick rows (observe_pickt_<idx> | observe_pickt_new).
       // MUST stay ahead of observe_send_ — both are observe list prefixes.
