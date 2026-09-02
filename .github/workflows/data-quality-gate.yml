@@ -27,8 +27,15 @@ jobs:
       pull-requests: write
 
     services:
+      # pgvector/pgvector:pg16 (not plain postgres:16) — NIETE-Rumi's real
+      # schema does `CREATE EXTENSION IF NOT EXISTS "vector"`, which the
+      # plain postgres image doesn't ship. First test run against real
+      # Postgres caught this exact gap (exit 3, "extension vector is not
+      # available") — a genuine finding about the shipped workflow
+      # template needing a project to pick its own Postgres image when it
+      # uses extensions beyond uuid-ossp/pgcrypto.
       postgres_base:
-        image: postgres:16
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: base_db
@@ -39,7 +46,7 @@ jobs:
           --health-timeout 5s
           --health-retries 10
       postgres_head:
-        image: postgres:16
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: head_db
