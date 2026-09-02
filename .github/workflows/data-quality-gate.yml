@@ -1,0 +1,234 @@
+# V1 Data Quality Gate — POC run against NIETE-Rumi's real schema
+# (infrastructure/supabase/00_complete-schema.sql, copied into
+# bot/database/dqg_migrations/001_schema.sql for this test).
+#
+# Adapted from agent-skills-taleemabad's shipped template
+# (.github/workflows/data-quality-gate.yml) with one change: PACK_PATH
+# points at a checkout of the gate's own repo (still on branch
+# data-quality-gate-v1, not yet merged to its main) rather than a vendored
+# copy, matching the documented multi-repo adoption convention exactly.
+#
+# GitHub check name: data-quality-gate
+
+name: Data Quality Gate
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+  merge_group:
+    types: [checks_requested]
+
+jobs:
+  data-quality-gate:
+    name: data-quality-gate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+
+    services:
+      postgres_base:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: base_db
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      postgres_head:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: head_db
+        ports: ["5433:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Checkout NIETE-Rumi (full history so scope detection can diff base..head)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Checkout agent-skills-taleemabad (the gate's own repo, branch data-quality-gate-v1)
+        uses: actions/checkout@v4
+        with:
+          repository: Orenda-Project/agent-skills-taleemabad
+          ref: data-quality-gate-v1
+          path: agent-skills-taleemabad
+
+      - name: Locate the data-quality-gate scripts
+        id: pack
+        run: |
+          PACK_PATH="./agent-skills-taleemabad"
+          if [ ! -f "$PACK_PATH/skills/data-quality-gate/scripts/gate.py" ]; then
+            echo "::error::Can't find gate.py under $PACK_PATH"
+            exit 2
+          fi
+          echo "path=$PACK_PATH/skills/data-quality-gate" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install -r "${{ steps.pack.outputs.path }}/scripts/requirements.txt"
+          sudo apt-get update -y && sudo apt-get install -y postgresql-client
+
+      - name: Determine base/head refs (merge_group vs pull_request)
+        id: refs
+        run: |
+          if [ "${{ github.event_name }}" = "merge_group" ]; then
+            echo "base=${{ github.event.merge_group.base_sha }}" >> "$GITHUB_OUTPUT"
+            echo "head=${{ github.sha }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "base=${{ github.event.pull_request.base.sha }}" >> "$GITHUB_OUTPUT"
+            echo "head=${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Scope detection (cheap, stdlib-only — decides if the heavy pipeline runs at all)
+        id: scope
+        run: |
+          set +e
+          python3 "${{ steps.pack.outputs.path }}/scripts/scope_detect.py" \
+            --config .data-quality-gate/scope.json \
+            --git-diff "${{ steps.refs.outputs.base }}" "${{ steps.refs.outputs.head }}" \
+            > scope.json
+          code=$?
+          cat scope.json
+          applicable=$(python3 -c "import json; print(json.load(open('scope.json'))['applicable'])" 2>/dev/null || echo "ERROR")
+          echo "applicable=$applicable" >> "$GITHUB_OUTPUT"
+          if [ "$code" != "0" ]; then
+            echo "::error::scope_detect.py itself failed (exit $code) — treating as NOT VERIFIED, not a silent pass."
+            echo "applicable=ERROR" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Prepare base-branch worktree (for applying base migrations)
+        if: steps.scope.outputs.applicable == 'True'
+        run: |
+          git worktree add /tmp/base-worktree "${{ steps.refs.outputs.base }}"
+
+      - name: Apply base-branch migrations to postgres_base
+        if: steps.scope.outputs.applicable == 'True'
+        id: migrate_base
+        run: |
+          set +e
+          cd /tmp/base-worktree
+          timeout 300 python3 "${GITHUB_WORKSPACE}/${{ steps.pack.outputs.path }}/scripts/migrate.py" \
+            --dsn "postgresql://postgres:postgres@localhost:5432/base_db" \
+            --migrations-path "$(python3 -c "import json; print(json.load(open('${GITHUB_WORKSPACE}/.data-quality-gate/scope.json')).get('migrations_path','migrations'))")" \
+            --file-glob "$(python3 -c "import json; print(json.load(open('${GITHUB_WORKSPACE}/.data-quality-gate/scope.json')).get('migration_file_glob','*.sql'))")"
+          code=$?
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Apply PR-head migrations to postgres_head
+        if: steps.scope.outputs.applicable == 'True'
+        id: migrate_head
+        run: |
+          set +e
+          timeout 300 python3 "${{ steps.pack.outputs.path }}/scripts/migrate.py" \
+            --dsn "postgresql://postgres:postgres@localhost:5433/head_db" \
+            --migrations-path "$(python3 -c "import json; print(json.load(open('.data-quality-gate/scope.json')).get('migrations_path','migrations'))")" \
+            --file-glob "$(python3 -c "import json; print(json.load(open('.data-quality-gate/scope.json')).get('migration_file_glob','*.sql'))")"
+          code=$?
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Run the gate (schema diff + contract check + evidence check)
+        if: steps.scope.outputs.applicable == 'True'
+        id: gate
+        run: |
+          set +e
+          if [ "${{ steps.migrate_base.outputs.exit_code }}" != "0" ] || [ "${{ steps.migrate_head.outputs.exit_code }}" != "0" ]; then
+            echo '{"result":"ERROR","error":"one or both migration applications failed — failing closed rather than diffing an incomplete snapshot"}' > report.json
+            echo "exit_code=2" >> "$GITHUB_OUTPUT"
+          else
+            python3 "${{ steps.pack.outputs.path }}/scripts/gate.py" \
+              --base-dsn "postgresql://postgres:postgres@localhost:5432/base_db" \
+              --head-dsn "postgresql://postgres:postgres@localhost:5433/head_db" \
+              --baseline-sha "${{ steps.refs.outputs.base }}" \
+              -o report.json
+            echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+          fi
+          cat report.json
+
+      - name: Upload report artifact (kept even on failure)
+        if: always() && steps.scope.outputs.applicable == 'True'
+        uses: actions/upload-artifact@v4
+        with:
+          name: data-quality-gate-report
+          path: report.json
+          retention-days: 30
+
+      - name: Post or update the PR comment
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let body;
+            const applicable = '${{ steps.scope.outputs.applicable }}';
+            if (applicable === 'False') {
+              body = '✅ **Data Quality Gate** — NOT APPLICABLE (no schema-relevant change detected).';
+            } else if (applicable === 'ERROR') {
+              body = '⚠️ **Data Quality Gate** — scope detection itself failed. Treating as NOT VERIFIED, not a silent pass.';
+            } else {
+              let report = {};
+              try { report = JSON.parse(fs.readFileSync('report.json', 'utf8')); } catch (e) {}
+              const result = report.result || 'ERROR';
+              const headerByResult = {
+                'PASS': '✅ **Data Quality Gate** — no blocking violations.',
+                'PASS WITH VERIFIED EVIDENCE': '✅ **Data Quality Gate** — PASS WITH VERIFIED EVIDENCE (developer-submitted evidence matched the real diff; see report).',
+                'FAIL': '❌ **Data Quality Gate** — confirmed blocking violation(s). See report artifact.',
+                'ERROR': '⚠️ **Data Quality Gate** — the gate itself could not run. Treating as blocking rather than merging unverified.',
+              };
+              body = (headerByResult[result] || headerByResult['ERROR']) +
+                `\n\n_Baseline SHA: \`${report.baseline_sha || 'unknown'}\`_` +
+                `\n\n<details><summary>Full report (truncated)</summary>\n\n\`\`\`json\n${JSON.stringify(report, null, 2).slice(0, 6000)}\n\`\`\`\n\n</details>` +
+                `\n\n_Full artifact: see the "data-quality-gate-report" build artifact on this run._`;
+            }
+            const marker = '<!-- data-quality-gate-comment -->';
+            body = marker + '\n' + body;
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number,
+            });
+            const existing = comments.find(c => c.body && c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner: context.repo.owner, repo: context.repo.repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number, body });
+            }
+
+      - name: Gate on the result
+        run: |
+          applicable="${{ steps.scope.outputs.applicable }}"
+          if [ "$applicable" = "False" ]; then
+            echo "No schema-relevant change detected — NOT APPLICABLE, passing."
+            exit 0
+          fi
+          if [ "$applicable" = "ERROR" ]; then
+            echo "::error::Scope detection itself failed — failing closed."
+            exit 1
+          fi
+          code="${{ steps.gate.outputs.exit_code }}"
+          if [ "$code" = "0" ]; then
+            echo "Data Quality Gate passed."
+            exit 0
+          fi
+          echo "::error::Data Quality Gate did not pass (gate.py exit $code) — see the report artifact and PR comment."
+          exit 1
+
+# NOTE: this is a POC test workflow, not the production template. It omits
+# the Slack-notify and audit-log-commit steps (those need
+# TALEEMABAD_DATA_QUALITY_GATE_SLACK_CHANNEL / SLACK_BOT_TOKEN repository
+# secrets this test repo doesn't have configured) to keep the run focused
+# on proving schema-diff blocking actually works against real Postgres.

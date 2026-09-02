@@ -1,0 +1,20 @@
+{
+  "include": [
+    "**/*.sql",
+    "**/migrations/**",
+    ".data-quality-gate/**"
+  ],
+  "exclude": [
+    ".git/**",
+    "node_modules/**",
+    ".venv/**",
+    "venv/**",
+    "dist/**",
+    "build/**",
+    "__pycache__/**",
+    "*.lock"
+  ],
+  "migrations_path": "bot/database/dqg_migrations",
+  "migration_file_glob": "*.sql",
+  "migration_command": null
+}
