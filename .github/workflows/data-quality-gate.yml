@@ -63,22 +63,27 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Checkout agent-skills-taleemabad (the gate's own repo, branch data-quality-gate-v1)
-        uses: actions/checkout@v4
-        with:
-          repository: Orenda-Project/agent-skills-taleemabad
-          ref: data-quality-gate-v1
-          path: agent-skills-taleemabad
-
-      - name: Locate the data-quality-gate scripts
+      # NOTE: this POC vendors the gate's scripts directly into this repo
+      # (vendored/data-quality-gate/scripts/) instead of checking out
+      # agent-skills-taleemabad as a second repo — that cross-repo checkout
+      # was tried first and failed with "repository not found" because
+      # agent-skills-taleemabad is PRIVATE (confirmed via `gh api
+      # repos/Orenda-Project/agent-skills-taleemabad --jq '.private'` ->
+      # true) and the default GITHUB_TOKEN scoped to a job running inside
+      # NIETE-Rumi has no cross-repo/cross-org read access to it, regardless
+      # of the operator's own personal GitHub auth. A real org adoption
+      # would need a PAT/deploy-key secret wired into actions/checkout's
+      # `token:` input for this to work as originally designed — out of
+      # scope for this one-off proof-of-concept run.
+      - name: Locate the data-quality-gate scripts (vendored copy for this POC)
         id: pack
         run: |
-          PACK_PATH="./agent-skills-taleemabad"
-          if [ ! -f "$PACK_PATH/skills/data-quality-gate/scripts/gate.py" ]; then
+          PACK_PATH="./vendored/data-quality-gate"
+          if [ ! -f "$PACK_PATH/scripts/gate.py" ]; then
             echo "::error::Can't find gate.py under $PACK_PATH"
             exit 2
           fi
-          echo "path=$PACK_PATH/skills/data-quality-gate" >> "$GITHUB_OUTPUT"
+          echo "path=$PACK_PATH" >> "$GITHUB_OUTPUT"
 
       - name: Set up Python
         uses: actions/setup-python@v5
