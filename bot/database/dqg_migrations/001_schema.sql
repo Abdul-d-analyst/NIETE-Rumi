@@ -3264,17 +3264,28 @@ CREATE INDEX IF NOT EXISTS idx_lp_requests_status ON lesson_plan_requests USING 
 CREATE INDEX IF NOT EXISTS idx_lp_requests_user ON lesson_plan_requests USING btree (user_id);
 CREATE INDEX IF NOT EXISTS idx_lesson_plans_pdf_url ON lesson_plans USING btree (pdf_url) WHERE (pdf_url IS NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_lesson_plans_user_created ON lesson_plans USING btree (user_id, created_at DESC);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_dashboard_stats_unique ON mv_dashboard_stats USING btree ((1));
-CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_dashboard_stats_by_country_pk ON mv_dashboard_stats_by_country USING btree (country_code);
-CREATE INDEX IF NOT EXISTS idx_mv_retention_cohorts_feature ON mv_retention_cohorts USING btree (feature_type);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_retention_cohorts_unique ON mv_retention_cohorts USING btree (cohort_week, feature_type);
-CREATE INDEX IF NOT EXISTS idx_mv_users_activity_country ON mv_users_activity USING btree (country_code) WHERE (is_test_user = false);
-CREATE INDEX IF NOT EXISTS idx_mv_users_activity_created ON mv_users_activity USING btree (created_at DESC);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_users_activity_id ON mv_users_activity USING btree (id);
-CREATE INDEX IF NOT EXISTS idx_mv_users_activity_last_activity ON mv_users_activity USING btree (last_activity DESC NULLS LAST);
-CREATE INDEX IF NOT EXISTS idx_mv_users_activity_phone ON mv_users_activity USING btree (phone_number);
-CREATE INDEX IF NOT EXISTS idx_mv_users_activity_school ON mv_users_activity USING btree (school_name_lower) WHERE ((is_test_user = false) AND (school_name_lower <> ''::text));
-CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_view_refresh_status_pk ON mv_view_refresh_status USING btree (view_name);
+
+-- POC PATCH (test copy only): the 11 indexes below all reference
+-- materialized views (mv_dashboard_stats, mv_dashboard_stats_by_country,
+-- mv_retention_cohorts, mv_users_activity, mv_view_refresh_status) that
+-- this "complete schema" file never CREATEs anywhere — zero
+-- CREATE MATERIALIZED VIEW statements exist in the whole 4500+-line file,
+-- a separate, larger pre-existing gap from the 4-sequence bug fixed above
+-- (likely the same pg_dump process dropped this whole section). Commented
+-- out here so this test copy can apply on an empty database; NOT a change
+-- to the real product file. Reported as its own finding alongside this PR.
+-- CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_dashboard_stats_unique ON mv_dashboard_stats USING btree ((1));
+-- CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_dashboard_stats_by_country_pk ON mv_dashboard_stats_by_country USING btree (country_code);
+-- CREATE INDEX IF NOT EXISTS idx_mv_retention_cohorts_feature ON mv_retention_cohorts USING btree (feature_type);
+-- CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_retention_cohorts_unique ON mv_retention_cohorts USING btree (cohort_week, feature_type);
+-- CREATE INDEX IF NOT EXISTS idx_mv_users_activity_country ON mv_users_activity USING btree (country_code) WHERE (is_test_user = false);
+-- CREATE INDEX IF NOT EXISTS idx_mv_users_activity_created ON mv_users_activity USING btree (created_at DESC);
+-- CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_users_activity_id ON mv_users_activity USING btree (id);
+-- CREATE INDEX IF NOT EXISTS idx_mv_users_activity_last_activity ON mv_users_activity USING btree (last_activity DESC NULLS LAST);
+-- CREATE INDEX IF NOT EXISTS idx_mv_users_activity_phone ON mv_users_activity USING btree (phone_number);
+-- CREATE INDEX IF NOT EXISTS idx_mv_users_activity_school ON mv_users_activity USING btree (school_name_lower) WHERE ((is_test_user = false) AND (school_name_lower <> ''::text));
+-- CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_view_refresh_status_pk ON mv_view_refresh_status USING btree (view_name);
+
 CREATE INDEX IF NOT EXISTS idx_portal_orgs_active ON portal_organizations USING btree (is_active);
 CREATE INDEX IF NOT EXISTS idx_portal_orgs_name ON portal_organizations USING btree (name);
 CREATE INDEX IF NOT EXISTS idx_qa_proposals_created ON qa_analyst_proposals USING btree (created_at DESC);
