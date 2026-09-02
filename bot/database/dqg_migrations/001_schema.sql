@@ -26,6 +26,22 @@
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp" SCHEMA public;
 CREATE EXTENSION IF NOT EXISTS "vector" SCHEMA public;
 
+-- POC PATCH (data-quality-gate test only, NOT in the real
+-- infrastructure/supabase/00_complete-schema.sql): this file references
+-- these four sequences via nextval(...) further down but never CREATEs
+-- them anywhere — a real, pre-existing bug found while testing the gate
+-- against this schema on a genuinely empty database (it errors at
+-- "relation ... does not exist" on a fresh Postgres, contradicting this
+-- file's own "safe to run on an empty database" claim). Likely a
+-- pg_dump --schema-only that dropped the CREATE SEQUENCE statements.
+-- Added here only so this vendored test copy can actually apply; the
+-- real product file is untouched — see the accompanying PR description
+-- for this as a separate, reported finding.
+CREATE SEQUENCE IF NOT EXISTS lcpm_benchmarks_id_seq;
+CREATE SEQUENCE IF NOT EXISTS wcpm_percentiles_id_seq;
+CREATE SEQUENCE IF NOT EXISTS qa_test_runs_run_number_seq;
+CREATE SEQUENCE IF NOT EXISTS migration_test_id_seq;
+
 
 -- =============================================================================
 -- SECTION 2: Tables
