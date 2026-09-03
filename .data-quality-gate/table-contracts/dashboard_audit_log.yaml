@@ -1,0 +1,28 @@
+# Table contract for dashboard_audit_log — deliberately has NO
+# sensitivity entries yet, so a new PII-shaped column added without a
+# declared classification should BLOCK per contract_check.py's
+# new_pii_column_unclassified rule (KPI 5: new fields and naming).
+
+table: dashboard_audit_log
+
+columns:
+  allowed:
+    - id
+    - user_id
+    - action
+    - details
+    - ip_address
+    - user_agent
+    - created_at
+    - organization_id
+    - affected_user_id
+    - query_filters
+    - resource_type
+    - resource_id
+
+keys:
+  primary_key: [id]
+
+sensitivity: {}
+profile: {}
+allowed_tolerances: {}
