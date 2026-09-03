@@ -23,11 +23,35 @@ import re
 
 from config import TableContract
 
-_PII_NAME_PATTERN = re.compile(
-    r"\b(phone|phone_number|cnic|ssn|social_security|dob|date_of_birth|email|"
-    r"address|national_id|passport)\b",
-    re.IGNORECASE,
-)
+# \b treats underscore as a WORD character (same class as letters/digits),
+# so \bphone\b never matches inside phone_number, contact_phone_number, or
+# user_phone — only the bare standalone word "phone". Every realistic
+# snake_case Postgres column name (the actual convention this gate exists
+# to check) would silently slip past a \b-bounded pattern. Found via the
+# fork-test proof run: a real column named contact_phone_number produced
+# no PII finding at all. Splitting on non-alphanumeric characters and
+# matching whole SEGMENTS instead of relying on \b's word-character
+# definition is what actually catches snake_case names. (The sibling
+# data-standards skill's validate_schema.py has this identical \b bug —
+# out of scope to fix here per this gate's own non-duplication mandate;
+# worth reporting there separately.)
+_PII_KEYWORDS = {
+    "phone", "phone_number", "cnic", "ssn", "social_security", "dob",
+    "date_of_birth", "email", "address", "national_id", "passport",
+}
+_SEGMENT_SPLIT_RE = re.compile(r"[^a-zA-Z0-9]+")
+
+
+def _is_pii_shaped_name(column: str) -> bool:
+    segments = [s for s in _SEGMENT_SPLIT_RE.split(column.lower()) if s]
+    if any(seg in _PII_KEYWORDS for seg in segments):
+        return True
+    # multi-word keywords like "phone_number"/"date_of_birth"/"social_security"
+    # also match as a case-insensitive SUBSTRING of the whole column name,
+    # since a real name might not split on the exact same underscores
+    # (e.g. "phonenumber" with no underscore at all).
+    lowered = column.lower()
+    return any(kw.replace("_", "") in lowered.replace("_", "") for kw in _PII_KEYWORDS if "_" in kw)
 
 
 def check_new_column(table: str, column: str, definition: dict, contract: TableContract | None) -> list[dict]:
@@ -35,7 +59,7 @@ def check_new_column(table: str, column: str, definition: dict, contract: TableC
     {kind, blocking, detail}."""
     findings: list[dict] = []
 
-    is_pii_shaped = bool(_PII_NAME_PATTERN.search(column))
+    is_pii_shaped = _is_pii_shaped_name(column)
     has_sensitivity_declared = bool(contract and column in contract.sensitivity)
 
     if is_pii_shaped and not has_sensitivity_declared:
