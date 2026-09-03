@@ -3,9 +3,16 @@
 workflow calls. Ties together: scope detection (scope_detect.py), Postgres
 introspection of two already-migrated throwaway databases (introspect.py),
 the semantic schema diff (schema_diff.py), the new-object contract/naming
-gate (contract_check.py), the data-profile comparison (data_profile.py),
-the developer-evidence exception (evidence.py + config.py), Slack
-notification (notify.py), and the durable audit trail (audit_trail.py).
+gate (contract_check.py), the live data-profile comparison
+(profile_runner.py running real SQL, feeding data_profile.py's pure check
+functions), the developer-evidence exception (evidence.py + config.py),
+Slack notification (notify.py), and the durable audit trail (audit_trail.py).
+
+Data profiling only runs for tables that have a table-contract with a
+non-empty `profile` section (--skip-data-profile disables it entirely,
+for callers that haven't set up contracts yet) — a table with no
+contract stays WARN-only per data-profile.yaml's advisory_rollout, and
+this gate does not guess what to profile for it.
 
 This script assumes the CALLER (the GitHub workflow) has already:
   1. Run scope_detect.py and confirmed applicable=true.
@@ -41,6 +48,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import config as gate_config          # noqa: E402
 import contract_check                 # noqa: E402
 import evidence as evidence_mod        # noqa: E402
+import profile_runner                 # noqa: E402
 import schema_diff                    # noqa: E402
 from introspect import snapshot_schema, IntrospectionError  # noqa: E402
 
@@ -101,6 +109,28 @@ def run_schema_gate(base_dsn: str, head_dsn: str, contracts: dict, *, schema: st
     }
 
 
+def run_data_profile_gate(base_dsn: str, head_dsn: str, contracts: dict,
+                           data_profile_config_path: Path, *, profile_timeout: int = 120) -> dict:
+    """Runs the live data-profile checks (row counts, duplicates, DIM
+    stability, null rates, FK orphans, junk-value rate, and anomaly
+    detection where history is available) — the piece that was
+    previously built and unit-tested in data_profile.py/profile_runner.py
+    but never actually called from here. See profile_runner.py's module
+    docstring for exactly what "skipped" (vs a real finding) means for
+    anomaly checks with no supplied history."""
+    try:
+        global_cfg = gate_config.load_data_profile_config(data_profile_config_path)
+    except gate_config.ConfigError as e:
+        raise GateError(f"malformed .data-quality-gate/data-profile.yaml: {e}") from e
+
+    findings = _time_budget(
+        lambda: profile_runner.run_profile_gate(base_dsn, head_dsn, contracts, global_cfg),
+        profile_timeout, "data-profile gate",
+    )
+    blocking = [f for f in findings if f.get("severity") == "block"]
+    return {"profile_findings": findings, "blocking_profile_findings": blocking}
+
+
 def load_change_evidence_if_present() -> gate_config.ChangeEvidence | None:
     path = DQG_CONFIG_DIR / "change.yaml"
     if not path.exists():
@@ -147,7 +177,11 @@ def main() -> int:
     ap.add_argument("--schema", default="public")
     ap.add_argument("--baseline-sha", required=True, help="the approved base-branch tip SHA — recorded in every report")
     ap.add_argument("--snapshot-timeout-seconds", type=int, default=120)
+    ap.add_argument("--profile-timeout-seconds", type=int, default=120)
     ap.add_argument("--contracts-dir", default=str(DQG_CONFIG_DIR / "table-contracts"))
+    ap.add_argument("--data-profile-config", default=str(DQG_CONFIG_DIR / "data-profile.yaml"))
+    ap.add_argument("--skip-data-profile", action="store_true",
+                     help="run schema-diff only — for callers that haven't set up table contracts yet")
     ap.add_argument("-o", "--output", help="write the JSON report here instead of stdout")
     args = ap.parse_args()
 
@@ -168,6 +202,21 @@ def main() -> int:
         _emit(report, args.output)
         return 2
 
+    profile_findings: list[dict] = []
+    blocking_profile_findings: list[dict] = []
+    if not args.skip_data_profile:
+        try:
+            profile_result = run_data_profile_gate(
+                args.base_dsn, args.head_dsn, contracts, Path(args.data_profile_config),
+                profile_timeout=args.profile_timeout_seconds,
+            )
+        except GateError as e:
+            report = {"result": "ERROR", "baseline_sha": args.baseline_sha, "error": str(e)}
+            _emit(report, args.output)
+            return 2
+        profile_findings = profile_result["profile_findings"]
+        blocking_profile_findings = profile_result["blocking_profile_findings"]
+
     try:
         evidence = load_change_evidence_if_present()
     except gate_config.ConfigError as e:
@@ -176,7 +225,8 @@ def main() -> int:
         _emit(report, args.output)
         return 2
 
-    verdict = build_verdict(schema_result["blocking_findings"], evidence)
+    all_blocking_findings = schema_result["blocking_findings"] + blocking_profile_findings
+    verdict = build_verdict(all_blocking_findings, evidence)
     report = {
         "baseline_sha": args.baseline_sha,
         "result": verdict["result"],
@@ -184,6 +234,7 @@ def main() -> int:
         "evidence_verdict": verdict["evidence_verdict"],
         "diff": schema_result["diff"],
         "contract_findings": schema_result["contract_findings"],
+        "profile_findings": profile_findings,
     }
     _emit(report, args.output)
 
