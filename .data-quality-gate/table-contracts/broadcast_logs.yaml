@@ -1,0 +1,44 @@
+# Real table contract for the fork-test slice — wires up a critical
+# field (admin_ip_address) with a null-rate benchmark and a junk-value
+# pattern check on admin_username, to exercise KPI 3 (critical-field
+# rules) and KPI 4 (junk-value/anomaly detection) against real inserted
+# data, not just synthetic fixtures.
+
+table: broadcast_logs
+
+columns:
+  allowed:
+    - id
+    - admin_user_id
+    - admin_username
+    - admin_ip_address
+    - admin_user_agent
+    - message_content
+    - filters
+    - total_recipients
+    - status
+    - created_at
+
+  criticality:
+    admin_ip_address: critical
+    admin_username: critical
+
+keys:
+  primary_key: [id]
+
+sensitivity: {}
+
+profile:
+  row_count_tolerance_pct: 20.0
+  null_rate:
+    admin_ip_address:
+      benchmark_pct: 0.0
+      tolerance_pct: 5.0
+      block: true
+  junk_patterns:
+    admin_username: ["^test$", "^n/?a$", "^unknown$", "^admin$"]
+  junk_threshold_pct: 10.0
+  junk_block: false
+
+allowed_tolerances:
+  row_count_growth_only: true
