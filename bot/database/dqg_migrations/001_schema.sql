@@ -88,7 +88,7 @@ CREATE TABLE IF NOT EXISTS broadcast_logs (
     id UUID NOT NULL DEFAULT gen_random_uuid(),
     admin_user_id UUID,
     admin_username TEXT NOT NULL,
-    admin_ip_address TEXT,
+    admin_ip_address VARCHAR(15),
     admin_user_agent TEXT,
     message_content TEXT NOT NULL,
     filters JSONB NOT NULL,
@@ -126,12 +126,9 @@ CREATE TABLE IF NOT EXISTS dashboard_audit_log (
     organization_id UUID,
     affected_user_id UUID,
     query_filters JSONB,
-    resource_type VARCHAR(50),
-    resource_id UUID,
     PRIMARY KEY (id)
 );
 CREATE INDEX IF NOT EXISTS idx_audit_log_affected_user ON dashboard_audit_log USING btree (affected_user_id);
 CREATE INDEX IF NOT EXISTS idx_audit_log_created_at ON dashboard_audit_log USING btree (created_at);
 CREATE INDEX IF NOT EXISTS idx_audit_log_org ON dashboard_audit_log USING btree (organization_id);
-CREATE INDEX IF NOT EXISTS idx_audit_log_resource ON dashboard_audit_log USING btree (resource_type, resource_id);
 CREATE INDEX IF NOT EXISTS idx_audit_log_user_id ON dashboard_audit_log USING btree (user_id);
